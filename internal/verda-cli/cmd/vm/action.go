@@ -14,7 +14,8 @@ import (
 // instanceAction defines a supported action with its display label and executor.
 type instanceAction struct {
 	Label        string
-	ConfirmMsg   string   // shown before confirmation prompt; empty = no confirm needed
+	ConfirmMsg   string   // descriptive text shown before confirmation
+	WarningMsg   string   // highlighted in red bold
 	ValidFrom    []string // instance statuses where this action is available; empty = always
 	ExpectStatus string   // poll until this status; empty = no polling
 	Execute      func(ctx context.Context, client *verda.Client, inst *verda.Instance) error
@@ -31,16 +32,16 @@ var allActions = []instanceAction{
 		Label:     "Shutdown",
 		ValidFrom: []string{verda.StatusRunning},
 		ConfirmMsg: "Shutting down the instance temporarily pauses it so technical\n" +
-			"  processes can occur, such as attaching or detaching volumes.\n\n" +
-			"  Shutdown instances continue to charge your account.",
+			"  processes can occur, such as attaching or detaching volumes.",
+		WarningMsg:   "Shutdown instances continue to charge your account.",
 		ExpectStatus: verda.StatusOffline,
 		Execute:      func(ctx context.Context, c *verda.Client, inst *verda.Instance) error { return c.Instances.Shutdown(ctx, inst.ID) },
 	},
 	{
-		Label:     "Force shutdown",
-		ValidFrom: []string{verda.StatusRunning},
-		ConfirmMsg: "Force shutdown immediately stops the instance without graceful\n" +
-			"  shutdown. This may cause data loss.",
+		Label:      "Force shutdown",
+		ValidFrom:  []string{verda.StatusRunning},
+		ConfirmMsg: "Force shutdown immediately stops the instance without graceful shutdown.",
+		WarningMsg: "This may cause data loss.",
 		ExpectStatus: verda.StatusOffline,
 		Execute:      func(ctx context.Context, c *verda.Client, inst *verda.Instance) error { return c.Instances.ForceShutdown(ctx, inst.ID) },
 	},
@@ -163,9 +164,16 @@ func runAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 		return runDeleteFlow(ctx, f, ioStreams, client, inst)
 	}
 
-	// Confirm with context message.
-	if action.ConfirmMsg != "" {
-		_, _ = fmt.Fprintf(ioStreams.ErrOut, "\n  %s\n\n", action.ConfirmMsg)
+	// Confirm with context message and warning.
+	if action.ConfirmMsg != "" || action.WarningMsg != "" {
+		warnStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Bold(true)
+		if action.ConfirmMsg != "" {
+			_, _ = fmt.Fprintf(ioStreams.ErrOut, "\n  %s\n", action.ConfirmMsg)
+		}
+		if action.WarningMsg != "" {
+			_, _ = fmt.Fprintf(ioStreams.ErrOut, "\n  %s\n", warnStyle.Render(action.WarningMsg))
+		}
+		_, _ = fmt.Fprintln(ioStreams.ErrOut)
 		confirmed, err := prompter.Confirm(ctx, fmt.Sprintf("Would you like to continue? (%s on %s)", action.Label, inst.Hostname))
 		if err != nil || !confirmed {
 			_, _ = fmt.Fprintln(ioStreams.ErrOut, "Cancelled.")
