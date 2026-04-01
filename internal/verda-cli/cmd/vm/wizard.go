@@ -122,7 +122,7 @@ func stepContract(getClient clientFunc, opts *createOptions) wizard.Step {
 		ShouldSkip: func(c map[string]any) bool {
 			return c["billing-type"] == "spot"
 		},
-		Loader: func(ctx context.Context, _ tui.Prompter, _ tui.Status, store *wizard.Store) ([]wizard.Choice, error) {
+		Loader: func(ctx context.Context, _ tui.Prompter, status tui.Status, store *wizard.Store) ([]wizard.Choice, error) {
 			choices := []wizard.Choice{
 				{Label: "Pay as you go", Value: "PAY_AS_YOU_GO"},
 			}
@@ -130,7 +130,9 @@ func stepContract(getClient clientFunc, opts *createOptions) wizard.Step {
 			if err != nil {
 				return choices, nil //nolint:nilerr // Non-fatal: just offer pay-as-you-go.
 			}
-			periods, err := client.LongTerm.GetInstancePeriods(ctx)
+			periods, err := withSpinner(ctx, status, "Loading contract options...", func() ([]verda.LongTermPeriod, error) {
+				return client.LongTerm.GetInstancePeriods(ctx)
+			})
 			if err != nil {
 				return choices, nil //nolint:nilerr // Non-fatal: just offer pay-as-you-go.
 			}
@@ -186,7 +188,7 @@ func stepInstanceType(getClient clientFunc, cache *apiCache, opts *createOptions
 		Prompt:      wizard.SelectPrompt,
 		Required:    true,
 		DependsOn:   []string{"kind", "billing-type"},
-		Loader: func(ctx context.Context, _ tui.Prompter, _ tui.Status, store *wizard.Store) ([]wizard.Choice, error) {
+		Loader: func(ctx context.Context, _ tui.Prompter, status tui.Status, store *wizard.Store) ([]wizard.Choice, error) {
 			client, err := getClient()
 			if err != nil {
 				return nil, err
@@ -195,7 +197,9 @@ func stepInstanceType(getClient clientFunc, cache *apiCache, opts *createOptions
 			kind := c["kind"].(string)
 			isSpot := c["billing-type"] == "spot"
 
-			types, err := client.InstanceTypes.Get(ctx, "usd")
+			types, err := withSpinner(ctx, status, "Loading instance types...", func() ([]verda.InstanceTypeInfo, error) {
+				return client.InstanceTypes.Get(ctx, "usd")
+			})
 			if err != nil {
 				return nil, fmt.Errorf("fetching instance types: %w", err)
 			}
@@ -267,6 +271,7 @@ func stepLocation(getClient clientFunc, cache *apiCache, opts *createOptions) wi
 			isSpot := c["billing-type"] == "spot"
 			instType := c["instance-type"].(string)
 
+			// Usually a cache hit — instance-type step already fetched this.
 			avail, locMap, err := cache.fetchAvailability(ctx, getClient, isSpot)
 			if err != nil {
 				return nil, err
@@ -301,12 +306,14 @@ func stepImage(getClient clientFunc, opts *createOptions) wizard.Step {
 		Description: "Operating system image",
 		Prompt:      wizard.SelectPrompt,
 		Required:    true,
-		Loader: func(ctx context.Context, _ tui.Prompter, _ tui.Status, _ *wizard.Store) ([]wizard.Choice, error) {
+		Loader: func(ctx context.Context, _ tui.Prompter, status tui.Status, _ *wizard.Store) ([]wizard.Choice, error) {
 			client, err := getClient()
 			if err != nil {
 				return nil, err
 			}
-			images, err := client.Images.Get(ctx)
+			images, err := withSpinner(ctx, status, "Loading OS images...", func() ([]verda.Image, error) {
+				return client.Images.Get(ctx)
+			})
 			if err != nil {
 				return nil, fmt.Errorf("fetching images: %w", err)
 			}
@@ -406,12 +413,14 @@ func stepSSHKeys(getClient clientFunc, opts *createOptions) wizard.Step {
 		Description: "SSH keys to inject",
 		Prompt:      wizard.MultiSelectPrompt,
 		Required:    false,
-		Loader: func(ctx context.Context, _ tui.Prompter, _ tui.Status, _ *wizard.Store) ([]wizard.Choice, error) {
+		Loader: func(ctx context.Context, _ tui.Prompter, status tui.Status, _ *wizard.Store) ([]wizard.Choice, error) {
 			client, err := getClient()
 			if err != nil {
 				return nil, err
 			}
-			keys, err := client.SSHKeys.GetAllSSHKeys(ctx)
+			keys, err := withSpinner(ctx, status, "Loading SSH keys...", func() ([]verda.SSHKey, error) {
+				return client.SSHKeys.GetAllSSHKeys(ctx)
+			})
 			if err != nil {
 				return nil, fmt.Errorf("fetching SSH keys: %w", err)
 			}
@@ -442,12 +451,14 @@ func stepStartupScript(getClient clientFunc, opts *createOptions) wizard.Step {
 		Description: "Startup script (optional)",
 		Prompt:      wizard.SelectPrompt,
 		Required:    false,
-		Loader: func(ctx context.Context, _ tui.Prompter, _ tui.Status, _ *wizard.Store) ([]wizard.Choice, error) {
+		Loader: func(ctx context.Context, _ tui.Prompter, status tui.Status, _ *wizard.Store) ([]wizard.Choice, error) {
 			client, err := getClient()
 			if err != nil {
 				return nil, err
 			}
-			scripts, err := client.StartupScripts.GetAllStartupScripts(ctx)
+			scripts, err := withSpinner(ctx, status, "Loading startup scripts...", func() ([]verda.StartupScript, error) {
+				return client.StartupScripts.GetAllStartupScripts(ctx)
+			})
 			if err != nil {
 				return nil, fmt.Errorf("fetching startup scripts: %w", err)
 			}
@@ -504,6 +515,26 @@ func stepDescription(opts *createOptions) wizard.Step {
 		IsSet:    func() bool { return opts.Description != "" },
 		Value:    func() any { return opts.Description },
 	}
+}
+
+// --- Spinner helper ---
+
+// withSpinner runs fn while showing a spinner. If status is nil, runs fn directly.
+func withSpinner[T any](ctx context.Context, status tui.Status, msg string, fn func() (T, error)) (T, error) {
+	if status == nil {
+		return fn()
+	}
+	sp, err := status.Spinner(ctx, msg)
+	if err != nil {
+		return fn() // fallback: run without spinner
+	}
+	result, fnErr := fn()
+	if fnErr != nil {
+		sp.Stop("")
+	} else {
+		sp.Stop("")
+	}
+	return result, fnErr
 }
 
 // --- Helpers ---
