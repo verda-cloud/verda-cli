@@ -126,6 +126,12 @@ func NewCmdCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 }
 
 func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *createOptions) error {
+	// Verify credentials are available before doing anything.
+	client, err := f.VerdaClient()
+	if err != nil {
+		return err
+	}
+
 	// If any required field is missing, run the interactive wizard.
 	if opts.InstanceType == "" || opts.Image == "" || opts.Hostname == "" {
 		if err := runWizard(cmd.Context(), f, ioStreams, opts); err != nil {
@@ -136,11 +142,6 @@ func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 	req, err := opts.request()
 	if err != nil {
 		return cmdutil.UsageErrorf(cmd, "%v", err)
-	}
-
-	client, err := f.VerdaClient()
-	if err != nil {
-		return err
 	}
 
 	ctx, cancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
