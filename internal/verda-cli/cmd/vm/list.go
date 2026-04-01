@@ -87,16 +87,36 @@ func runList(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams,
 			return nil
 		}
 
-		// Fetch fresh details.
+		// Fetch fresh details and volumes.
 		inst, err := client.Instances.GetByID(cmd.Context(), instances[idx].ID)
 		if err != nil {
 			_, _ = fmt.Fprintf(ioStreams.ErrOut, "Error: %v\n", err)
 			continue
 		}
-		_, _ = fmt.Fprint(ioStreams.Out, renderInstanceCard(inst))
+		volumes := fetchInstanceVolumes(cmd.Context(), client, inst)
+		_, _ = fmt.Fprint(ioStreams.Out, renderInstanceCard(inst, volumes...))
 
 		// After showing details, loop back to the list.
 	}
+}
+
+// fetchInstanceVolumes fetches volume details for an instance's attached volumes.
+func fetchInstanceVolumes(ctx context.Context, client *verda.Client, inst *verda.Instance) []verda.Volume {
+	var ids []string
+	if inst.OSVolumeID != nil && *inst.OSVolumeID != "" {
+		ids = append(ids, *inst.OSVolumeID)
+	}
+	ids = append(ids, inst.VolumeIDs...)
+
+	var volumes []verda.Volume
+	for _, id := range ids {
+		vol, err := client.Volumes.GetVolume(ctx, id)
+		if err != nil {
+			continue // skip volumes we can't fetch
+		}
+		volumes = append(volumes, *vol)
+	}
+	return volumes
 }
 
 func formatInstanceRow(inst verda.Instance) string {
