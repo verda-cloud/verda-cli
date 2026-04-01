@@ -111,12 +111,9 @@ func renderInstanceCard(inst *verda.Instance, volumes ...verda.Volume) string {
 			if v.IsOSVolume {
 				volStatus = "OS"
 			}
-			_, _ = fmt.Fprintf(&b, "  %s  %s  %dGB %s  %s\n",
-				dim.Render(fmt.Sprintf("%-15s", v.Name)),
-				volStatus,
-				v.Size,
-				v.Type,
-				dim.Render(v.Location))
+			_, _ = fmt.Fprintf(&b, "    %s  %s  %dGB %s  %s\n",
+				v.Name, volStatus, v.Size, v.Type, v.Location)
+			_, _ = fmt.Fprintf(&b, "    %s\n", dim.Render("ID: "+v.ID))
 		}
 	}
 

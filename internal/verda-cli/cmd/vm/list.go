@@ -102,17 +102,27 @@ func runList(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams,
 
 // fetchInstanceVolumes fetches volume details for an instance's attached volumes.
 func fetchInstanceVolumes(ctx context.Context, client *verda.Client, inst *verda.Instance) []verda.Volume {
+	seen := make(map[string]bool)
 	var ids []string
+
+	// OS volume first.
 	if inst.OSVolumeID != nil && *inst.OSVolumeID != "" {
 		ids = append(ids, *inst.OSVolumeID)
+		seen[*inst.OSVolumeID] = true
 	}
-	ids = append(ids, inst.VolumeIDs...)
+	// Then data volumes, deduplicating.
+	for _, id := range inst.VolumeIDs {
+		if !seen[id] {
+			ids = append(ids, id)
+			seen[id] = true
+		}
+	}
 
 	var volumes []verda.Volume
 	for _, id := range ids {
 		vol, err := client.Volumes.GetVolume(ctx, id)
 		if err != nil {
-			continue // skip volumes we can't fetch
+			continue
 		}
 		volumes = append(volumes, *vol)
 	}
