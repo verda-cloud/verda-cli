@@ -18,6 +18,7 @@ type volumeAction struct {
 	Label      string
 	ConfirmMsg string
 	WarningMsg string
+	Prepare    func(ctx context.Context) error // collect user input before spinner
 	Execute    func(ctx context.Context, client *verda.Client, vol *verda.Volume) error
 }
 
@@ -112,6 +113,13 @@ func runVolumeAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IO
 		}
 	}
 
+	// Collect user input before spinner.
+	if action.Prepare != nil {
+		if err := action.Prepare(ctx); err != nil {
+			return err
+		}
+	}
+
 	actionCtx, cancel := context.WithTimeout(ctx, f.Options().Timeout)
 	defer cancel()
 
@@ -146,40 +154,55 @@ func buildVolumeActions(ctx context.Context, prompter tui.Prompter, client *verd
 		})
 	}
 
+	var newName string
 	actions = append(actions, volumeAction{
 		Label: "Rename",
-		Execute: func(ctx context.Context, c *verda.Client, v *verda.Volume) error {
-			newName, err := prompter.TextInput(ctx, "New name", tui.WithDefault(v.Name))
-			if err != nil || strings.TrimSpace(newName) == "" {
-				return nil
+		Prepare: func(ctx context.Context) error {
+			n, err := prompter.TextInput(ctx, "New name", tui.WithDefault(vol.Name))
+			if err != nil || strings.TrimSpace(n) == "" {
+				return fmt.Errorf("cancelled")
 			}
-			return c.Volumes.RenameVolume(ctx, v.ID, verda.VolumeRenameRequest{Name: strings.TrimSpace(newName)})
+			newName = strings.TrimSpace(n)
+			return nil
+		},
+		Execute: func(ctx context.Context, c *verda.Client, v *verda.Volume) error {
+			return c.Volumes.RenameVolume(ctx, v.ID, verda.VolumeRenameRequest{Name: newName})
 		},
 	})
 
+	var newSize int
 	actions = append(actions, volumeAction{
 		Label: "Resize (grow only)",
-		Execute: func(ctx context.Context, c *verda.Client, v *verda.Volume) error {
-			sizeStr, err := prompter.TextInput(ctx, fmt.Sprintf("New size in GiB (current: %d)", v.Size))
+		Prepare: func(ctx context.Context) error {
+			sizeStr, err := prompter.TextInput(ctx, fmt.Sprintf("New size in GiB (current: %d)", vol.Size))
 			if err != nil || strings.TrimSpace(sizeStr) == "" {
-				return nil
+				return fmt.Errorf("cancelled")
 			}
-			newSize, err := strconv.Atoi(strings.TrimSpace(sizeStr))
-			if err != nil || newSize <= v.Size {
-				return fmt.Errorf("new size must be greater than %d", v.Size)
+			s, err := strconv.Atoi(strings.TrimSpace(sizeStr))
+			if err != nil || s <= vol.Size {
+				return fmt.Errorf("new size must be greater than %d", vol.Size)
 			}
+			newSize = s
+			return nil
+		},
+		Execute: func(ctx context.Context, c *verda.Client, v *verda.Volume) error {
 			return c.Volumes.ResizeVolume(ctx, v.ID, verda.VolumeResizeRequest{Size: newSize})
 		},
 	})
 
+	var cloneName string
 	actions = append(actions, volumeAction{
 		Label: "Clone",
-		Execute: func(ctx context.Context, c *verda.Client, v *verda.Volume) error {
-			cloneName, err := prompter.TextInput(ctx, "Clone name", tui.WithDefault(v.Name+"-clone"))
-			if err != nil || strings.TrimSpace(cloneName) == "" {
-				return nil
+		Prepare: func(ctx context.Context) error {
+			n, err := prompter.TextInput(ctx, "Clone name", tui.WithDefault(vol.Name+"-clone"))
+			if err != nil || strings.TrimSpace(n) == "" {
+				return fmt.Errorf("cancelled")
 			}
-			_, cloneErr := c.Volumes.CloneVolume(ctx, v.ID, verda.VolumeCloneRequest{Name: strings.TrimSpace(cloneName)})
+			cloneName = strings.TrimSpace(n)
+			return nil
+		},
+		Execute: func(ctx context.Context, c *verda.Client, v *verda.Volume) error {
+			_, cloneErr := c.Volumes.CloneVolume(ctx, v.ID, verda.VolumeCloneRequest{Name: cloneName})
 			return cloneErr
 		},
 	})
