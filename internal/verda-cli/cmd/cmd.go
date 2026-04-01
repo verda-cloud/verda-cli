@@ -5,9 +5,12 @@ import (
 	"github.com/spf13/viper"
 	"github.com/verda-cloud/verdagostack/pkg/log"
 	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/auth"
+	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/sshkey"
+	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/startupscript"
 	cmdutil "github/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/version"
 	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/vm"
+	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/volume"
 	clioptions "github/verda-cloud/verda-cli/internal/verda-cli/options"
 )
 
@@ -59,6 +62,14 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) *cobra.Command {
 			Message: "VM Commands:",
 			Commands: []*cobra.Command{
 				vm.NewCmdVM(f, ioStreams),
+			},
+		},
+		{
+			Message: "Resource Commands:",
+			Commands: []*cobra.Command{
+				sshkey.NewCmdSSHKey(f, ioStreams),
+				startupscript.NewCmdStartupScript(f, ioStreams),
+				volume.NewCmdVolume(f, ioStreams),
 			},
 		},
 		{
