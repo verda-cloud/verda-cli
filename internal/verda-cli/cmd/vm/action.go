@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
 
@@ -52,9 +53,8 @@ var allActions = []instanceAction{
 		Execute:      func(ctx context.Context, c *verda.Client, inst *verda.Instance) error { return c.Instances.Hibernate(ctx, inst.ID) },
 	},
 	{
-		Label:      "Delete instance",
-		ConfirmMsg: "This will permanently delete the instance and all associated data.\n\n  This action cannot be undone.",
-		Execute:    func(ctx context.Context, c *verda.Client, inst *verda.Instance) error { return c.Instances.Delete(ctx, []string{inst.ID}, nil, false) },
+		Label:   "Delete instance",
+		Execute: nil, // handled specially in runAction via runDeleteFlow
 	},
 }
 
@@ -158,6 +158,11 @@ func runAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 
 	action := validActions[actionIdx]
 
+	// Special handling for delete — needs volume selection sub-flow.
+	if action.Execute == nil {
+		return runDeleteFlow(ctx, f, ioStreams, client, inst)
+	}
+
 	// Confirm with context message.
 	if action.ConfirmMsg != "" {
 		_, _ = fmt.Fprintf(ioStreams.ErrOut, "\n  %s\n\n", action.ConfirmMsg)
@@ -226,4 +231,80 @@ func selectInstance(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IO
 	}
 
 	return instances[idx].ID, nil
+}
+
+// runDeleteFlow handles the delete action with volume selection.
+func runDeleteFlow(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client *verda.Client, inst *verda.Instance) error {
+	prompter := f.Prompter()
+	warnStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Bold(true)  // red
+	noteStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("3"))             // yellow
+	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+
+	_, _ = fmt.Fprintf(ioStreams.ErrOut, "\n  %s %s\n\n",
+		warnStyle.Render("Deleting compute"),
+		inst.Hostname)
+
+	// Fetch attached volumes.
+	volumes := fetchInstanceVolumes(ctx, client, inst)
+
+	var volumeIDs []string
+	if len(volumes) > 0 {
+		_, _ = fmt.Fprintf(ioStreams.ErrOut, "  Choose storage to delete\n")
+		_, _ = fmt.Fprintf(ioStreams.ErrOut, "  %s\n\n", dimStyle.Render("Deleted storage can be restored within 96 hours"))
+
+		labels := make([]string, len(volumes))
+		for i, v := range volumes {
+			volType := "Block"
+			if v.IsOSVolume {
+				volType = "OS"
+			}
+			labels[i] = fmt.Sprintf("%s  %s  %dGB %s", v.Name, volType, v.Size, v.Type)
+		}
+
+		indices, err := prompter.MultiSelect(ctx, "Select volumes to delete (optional)", labels)
+		if err != nil {
+			return nil //nolint:nilerr
+		}
+		for _, idx := range indices {
+			volumeIDs = append(volumeIDs, volumes[idx].ID)
+		}
+	}
+
+	// Warning about undeleted volumes.
+	if len(volumes) > 0 && len(volumeIDs) < len(volumes) {
+		_, _ = fmt.Fprintf(ioStreams.ErrOut, "\n  %s\n\n",
+			noteStyle.Render("Storage not marked for deletion will continue to charge your account\n  and can be attached to other compute."))
+	}
+
+	// Final confirmation.
+	_, _ = fmt.Fprintf(ioStreams.ErrOut, "  %s\n\n",
+		warnStyle.Render("This action cannot be undone."))
+
+	confirmed, err := prompter.Confirm(ctx, fmt.Sprintf("Delete %s?", inst.Hostname))
+	if err != nil || !confirmed {
+		_, _ = fmt.Fprintln(ioStreams.ErrOut, "Cancelled.")
+		return nil
+	}
+
+	// Execute delete with spinner.
+	deleteCtx, cancel := context.WithTimeout(ctx, f.Options().Timeout)
+	defer cancel()
+
+	var sp interface{ Stop(string) }
+	if status := f.Status(); status != nil {
+		sp, _ = status.Spinner(deleteCtx, fmt.Sprintf("Deleting %s...", inst.Hostname))
+	}
+	err = client.Instances.Delete(deleteCtx, []string{inst.ID}, volumeIDs, false)
+	if sp != nil {
+		sp.Stop("")
+	}
+	if err != nil {
+		return err
+	}
+
+	_, _ = fmt.Fprintf(ioStreams.Out, "Deleted: %s (%s)\n", inst.Hostname, inst.ID)
+	if len(volumeIDs) > 0 {
+		_, _ = fmt.Fprintf(ioStreams.Out, "Deleted %d volume(s)\n", len(volumeIDs))
+	}
+	return nil
 }
