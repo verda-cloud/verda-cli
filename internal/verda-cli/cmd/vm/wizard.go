@@ -12,26 +12,32 @@ import (
 	"github.com/verda-cloud/verdagostack/pkg/tui/wizard"
 )
 
+// clientFunc lazily resolves a Verda API client. This allows the wizard
+// to start without credentials — steps that don't need API (billing-type,
+// kind, text inputs) run first, and the client is only resolved when an
+// API-dependent loader fires.
+type clientFunc func() (*verda.Client, error)
+
 // buildCreateFlow builds the interactive wizard flow for vm create.
 // It mirrors the web UI step order:
 //
 //	billing-type → contract → kind → instance-type → location →
 //	image → os-volume-size → storage-size → ssh-keys →
 //	startup-script → hostname → description
-func buildCreateFlow(client *verda.Client, opts *createOptions) *wizard.Flow {
+func buildCreateFlow(getClient clientFunc, opts *createOptions) *wizard.Flow {
 	return &wizard.Flow{
 		Name: "vm-create",
 		Steps: []wizard.Step{
 			stepBillingType(opts),
-			stepContract(client, opts),
+			stepContract(getClient, opts),
 			stepKind(opts),
-			stepInstanceType(client, opts),
-			stepLocation(client, opts),
-			stepImage(client, opts),
+			stepInstanceType(getClient, opts),
+			stepLocation(getClient, opts),
+			stepImage(getClient, opts),
 			stepOSVolumeSize(opts),
 			stepStorageSize(opts),
-			stepSSHKeys(client, opts),
-			stepStartupScript(client, opts),
+			stepSSHKeys(getClient, opts),
+			stepStartupScript(getClient, opts),
 			stepHostname(opts),
 			stepDescription(opts),
 		},
@@ -68,7 +74,7 @@ func stepBillingType(opts *createOptions) wizard.Step {
 
 // --- Step 2: Contract ---
 
-func stepContract(client *verda.Client, opts *createOptions) wizard.Step {
+func stepContract(getClient clientFunc, opts *createOptions) wizard.Step {
 	return wizard.Step{
 		Name:        "contract",
 		Description: "Contract period",
@@ -81,6 +87,10 @@ func stepContract(client *verda.Client, opts *createOptions) wizard.Step {
 		Loader: func(ctx context.Context, _ tui.Prompter, _ map[string]any) ([]wizard.Choice, error) {
 			choices := []wizard.Choice{
 				{Label: "Pay as you go", Value: "PAY_AS_YOU_GO"},
+			}
+			client, err := getClient()
+			if err != nil {
+				return choices, nil //nolint:nilerr // Non-fatal: just offer pay-as-you-go.
 			}
 			periods, err := client.LongTerm.GetInstancePeriods(ctx)
 			if err != nil {
@@ -131,7 +141,7 @@ func stepKind(opts *createOptions) wizard.Step {
 
 // --- Step 4: Instance Type ---
 
-func stepInstanceType(client *verda.Client, opts *createOptions) wizard.Step {
+func stepInstanceType(getClient clientFunc, opts *createOptions) wizard.Step {
 	return wizard.Step{
 		Name:        "instance-type",
 		Description: "Instance type",
@@ -139,6 +149,10 @@ func stepInstanceType(client *verda.Client, opts *createOptions) wizard.Step {
 		Required:    true,
 		DependsOn:   []string{"kind", "billing-type"},
 		Loader: func(ctx context.Context, _ tui.Prompter, c map[string]any) ([]wizard.Choice, error) {
+			client, err := getClient()
+			if err != nil {
+				return nil, err
+			}
 			types, err := client.InstanceTypes.Get(ctx, "usd")
 			if err != nil {
 				return nil, fmt.Errorf("fetching instance types: %w", err)
@@ -177,7 +191,7 @@ func stepInstanceType(client *verda.Client, opts *createOptions) wizard.Step {
 
 // --- Step 5: Location ---
 
-func stepLocation(client *verda.Client, opts *createOptions) wizard.Step {
+func stepLocation(getClient clientFunc, opts *createOptions) wizard.Step {
 	return wizard.Step{
 		Name:        "location",
 		Description: "Datacenter location",
@@ -185,6 +199,10 @@ func stepLocation(client *verda.Client, opts *createOptions) wizard.Step {
 		Required:    true,
 		DependsOn:   []string{"instance-type", "billing-type"},
 		Loader: func(ctx context.Context, _ tui.Prompter, c map[string]any) ([]wizard.Choice, error) {
+			client, err := getClient()
+			if err != nil {
+				return nil, err
+			}
 			isSpot := c["billing-type"] == "spot"
 			instType := c["instance-type"].(string)
 
@@ -225,13 +243,17 @@ func stepLocation(client *verda.Client, opts *createOptions) wizard.Step {
 
 // --- Step 6: OS Image ---
 
-func stepImage(client *verda.Client, opts *createOptions) wizard.Step {
+func stepImage(getClient clientFunc, opts *createOptions) wizard.Step {
 	return wizard.Step{
 		Name:        "image",
 		Description: "Operating system image",
 		Prompt:      wizard.SelectPrompt,
 		Required:    true,
 		Loader: func(ctx context.Context, _ tui.Prompter, _ map[string]any) ([]wizard.Choice, error) {
+			client, err := getClient()
+			if err != nil {
+				return nil, err
+			}
 			images, err := client.Images.Get(ctx)
 			if err != nil {
 				return nil, fmt.Errorf("fetching images: %w", err)
@@ -326,13 +348,17 @@ func stepStorageSize(opts *createOptions) wizard.Step {
 
 // --- Step 9: SSH Keys ---
 
-func stepSSHKeys(client *verda.Client, opts *createOptions) wizard.Step {
+func stepSSHKeys(getClient clientFunc, opts *createOptions) wizard.Step {
 	return wizard.Step{
 		Name:        "ssh-keys",
 		Description: "SSH keys to inject",
 		Prompt:      wizard.MultiSelectPrompt,
 		Required:    false,
 		Loader: func(ctx context.Context, _ tui.Prompter, _ map[string]any) ([]wizard.Choice, error) {
+			client, err := getClient()
+			if err != nil {
+				return nil, err
+			}
 			keys, err := client.SSHKeys.GetAllSSHKeys(ctx)
 			if err != nil {
 				return nil, fmt.Errorf("fetching SSH keys: %w", err)
@@ -358,13 +384,17 @@ func stepSSHKeys(client *verda.Client, opts *createOptions) wizard.Step {
 
 // --- Step 10: Startup Script ---
 
-func stepStartupScript(client *verda.Client, opts *createOptions) wizard.Step {
+func stepStartupScript(getClient clientFunc, opts *createOptions) wizard.Step {
 	return wizard.Step{
 		Name:        "startup-script",
 		Description: "Startup script (optional)",
 		Prompt:      wizard.SelectPrompt,
 		Required:    false,
 		Loader: func(ctx context.Context, _ tui.Prompter, _ map[string]any) ([]wizard.Choice, error) {
+			client, err := getClient()
+			if err != nil {
+				return nil, err
+			}
 			scripts, err := client.StartupScripts.GetAllStartupScripts(ctx)
 			if err != nil {
 				return nil, fmt.Errorf("fetching startup scripts: %w", err)

@@ -157,12 +157,7 @@ func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 }
 
 func runWizard(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *createOptions) error {
-	client, err := f.VerdaClient()
-	if err != nil {
-		return err
-	}
-
-	flow := buildCreateFlow(client, opts)
+	flow := buildCreateFlow(f.VerdaClient, opts)
 	engine := wizard.NewEngine(f.Prompter(), wizard.WithOutput(ioStreams.ErrOut))
 
 	_, _ = fmt.Fprintln(ioStreams.ErrOut, "=== Create VM Instance ===")

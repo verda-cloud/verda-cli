@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
 	tuitest "github.com/verda-cloud/verdagostack/pkg/tui/testing"
 	"github.com/verda-cloud/verdagostack/pkg/tui/wizard"
 )
@@ -32,7 +33,9 @@ func TestBuildCreateFlowHappyPath(t *testing.T) {
 	mock.AddTextInput("my-gpu") // hostname
 	mock.AddTextInput("")       // description (use default = hostname)
 
-	flow := buildCreateFlow(nil, opts) // nil client OK — API steps skipped via IsSet
+	// noClient panics if called — API steps should be skipped via IsSet.
+	noClient := func() (*verda.Client, error) { panic("unexpected client call") }
+	flow := buildCreateFlow(noClient, opts)
 	engine := wizard.NewEngine(mock)
 
 	if err := engine.Run(context.Background(), flow); err != nil {
@@ -78,7 +81,8 @@ func TestBuildCreateFlowSpotSkipsContract(t *testing.T) {
 	mock.AddTextInput("spot-vm") // hostname
 	mock.AddTextInput("")        // description
 
-	flow := buildCreateFlow(nil, opts)
+	noClient := func() (*verda.Client, error) { panic("unexpected client call") }
+	flow := buildCreateFlow(noClient, opts)
 	engine := wizard.NewEngine(mock)
 
 	if err := engine.Run(context.Background(), flow); err != nil {
