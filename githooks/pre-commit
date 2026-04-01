@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# Pre-commit hook — fast checks on staged Go files.
+#
+# Install (once per clone):
+#   make hooks.install
+#   # or: git config core.hooksPath githooks
+#
+# Requires bash. Optional: golangci-lint on PATH for extra checks.
+set -euo pipefail
+
+STAGED_GO=$(git diff --cached --name-only --diff-filter=ACM -- '*.go' || true)
+if [ -z "$STAGED_GO" ]; then
+	exit 0
+fi
+
+printf "pre-commit: checking staged Go files ...\n"
+
+printf "  go build ./...\n"
+go build ./...
+
+printf "  go vet ./...\n"
+go vet ./...
+
+if command -v golangci-lint &>/dev/null; then
+	printf "  golangci-lint (staged files)\n"
+	echo "$STAGED_GO" | xargs golangci-lint run --new-from-rev=HEAD
+fi
+
+PKGS=$(echo "$STAGED_GO" | xargs -I{} dirname {} | sort -u | sed 's|^|./|')
+if [ -n "$PKGS" ]; then
+	printf "  go test -short (affected packages)\n"
+	echo "$PKGS" | xargs go test -short -count=1
+fi
+
+printf "pre-commit: ok.\n"
