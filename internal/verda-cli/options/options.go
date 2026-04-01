@@ -26,6 +26,7 @@ type Options struct {
 	Config  string
 	Server  string
 	Timeout time.Duration
+	Debug   bool
 
 	Log         *log.Options
 	AuthOptions *AuthOptions
@@ -60,6 +61,7 @@ func (o *Options) AddFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&o.Config, FlagConfig, o.Config, "Path to a verda config file (YAML)")
 	fs.StringVar(&o.Server, "base-url", o.Server, "API base URL")
 	fs.DurationVar(&o.Timeout, "timeout", o.Timeout, "Default HTTP request timeout")
+	fs.BoolVar(&o.Debug, "debug", false, "Enable debug output")
 	o.AuthOptions.AddFlags(fs)
 	o.Log.AddFlags(fs)
 

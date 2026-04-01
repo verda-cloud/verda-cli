@@ -31,6 +31,8 @@ type Factory interface {
 	Prompter() tui.Prompter
 	// Status returns the status/output display interface.
 	Status() tui.Status
+	// Debug returns true if --debug is enabled.
+	Debug() bool
 }
 
 type factoryImpl struct {
@@ -56,6 +58,7 @@ func (f *factoryImpl) HTTPClient() *http.Client     { return f.client }
 func (f *factoryImpl) Options() *clioptions.Options { return f.opts }
 func (f *factoryImpl) Prompter() tui.Prompter       { return f.prompter }
 func (f *factoryImpl) Status() tui.Status           { return f.status }
+func (f *factoryImpl) Debug() bool                  { return f.opts.Debug }
 
 // VerdaClient creates or reuses the shared Verda SDK client.
 func (f *factoryImpl) VerdaClient() (*verda.Client, error) {
