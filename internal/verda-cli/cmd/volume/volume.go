@@ -13,14 +13,14 @@ func NewCmdVolume(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 		Aliases: []string{"vol"},
 		Short:   "Manage volumes",
 		Long: cmdutil.LongDesc(`
-			List and delete Verda block storage volumes.
+			List and manage Verda block storage volumes.
 		`),
 		Run: cmdutil.DefaultSubCommandRun(ioStreams.Out),
 	}
 
 	cmd.AddCommand(
 		NewCmdList(f, ioStreams),
-		NewCmdDelete(f, ioStreams),
+		NewCmdAction(f, ioStreams),
 	)
 	return cmd
 }
