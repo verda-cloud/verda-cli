@@ -11,7 +11,10 @@ import (
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
 )
 
-const pollInterval = 5 * time.Second
+const (
+	pollInterval = 5 * time.Second
+	pollTimeout  = 5 * time.Minute
+)
 
 var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
@@ -149,7 +152,11 @@ func pollInstanceStatus(ctx context.Context, w io.Writer, client *verda.Client, 
 	if len(expectStatus) > 0 {
 		target = expectStatus[0]
 	}
-	accentStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("5")) // purple like Claude
+
+	ctx, cancel := context.WithTimeout(ctx, pollTimeout)
+	defer cancel()
+
+	accentStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("5"))
 	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 
 	var lastInst *verda.Instance
@@ -195,8 +202,9 @@ func pollInstanceStatus(ctx context.Context, w io.Writer, client *verda.Client, 
 
 		select {
 		case <-ctx.Done():
-			_, _ = fmt.Fprintln(w)
-			return ctx.Err()
+			_, _ = fmt.Fprintf(w, "\r\033[2K")
+			_, _ = fmt.Fprintf(w, "\nTimed out waiting for status change (last: %s). Use `verda vm list` to check.\n", lastInst.Status)
+			return nil
 		case <-ticker.C:
 			frame++
 		case <-pollTicker.C:
