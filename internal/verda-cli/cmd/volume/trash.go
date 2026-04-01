@@ -3,6 +3,7 @@ package volume
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
@@ -42,7 +43,7 @@ func runTrash(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams
 	if status := f.Status(); status != nil {
 		sp, _ = status.Spinner(ctx, "Loading trash...")
 	}
-	volumes, err := client.Volumes.ListVolumesByStatus(ctx, "deleted")
+	volumes, err := client.Volumes.GetVolumesInTrash(ctx)
 	if sp != nil {
 		sp.Stop("")
 	}
@@ -57,6 +58,7 @@ func runTrash(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams
 
 	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 	bold := lipgloss.NewStyle().Bold(true)
+	warnStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
 
 	_, _ = fmt.Fprintf(ioStreams.Out, "  %d volume(s) in trash\n\n", len(volumes))
 
@@ -65,7 +67,13 @@ func runTrash(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams
 		if v.IsOSVolume {
 			volType = "OS"
 		}
-		_, _ = fmt.Fprintf(ioStreams.Out, "  %s  %s\n", bold.Render(v.Name), dim.Render(volType))
+
+		permStatus := ""
+		if v.IsPermanentlyDeleted {
+			permStatus = warnStyle.Render("  (permanently deleted)")
+		}
+
+		_, _ = fmt.Fprintf(ioStreams.Out, "  %s  %s%s\n", bold.Render(v.Name), dim.Render(volType), permStatus)
 		_, _ = fmt.Fprintf(ioStreams.Out, "    %s  %s\n", dim.Render("ID:      "), v.ID)
 		_, _ = fmt.Fprintf(ioStreams.Out, "    %s  %dGB %s\n", dim.Render("Size:    "), v.Size, v.Type)
 		_, _ = fmt.Fprintf(ioStreams.Out, "    %s  %s\n", dim.Render("Location:"), v.Location)
@@ -73,8 +81,25 @@ func runTrash(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams
 		if v.MonthlyPrice > 0 {
 			_, _ = fmt.Fprintf(ioStreams.Out, "    %s  $%.2f/mo (%s)\n", dim.Render("Price:   "), v.MonthlyPrice, v.Currency)
 		}
-		_, _ = fmt.Fprintf(ioStreams.Out, "    %s  %s\n\n", dim.Render("Created: "), v.CreatedAt.Format("2 Jan 2006, 15:04"))
+		_, _ = fmt.Fprintf(ioStreams.Out, "    %s  %s\n", dim.Render("Deleted: "), v.DeletedAt.Format("2 Jan 2006, 15:04"))
+
+		if !v.IsPermanentlyDeleted && !v.DeletedAt.IsZero() {
+			expiresAt := v.DeletedAt.Add(96 * time.Hour)
+			remaining := time.Until(expiresAt)
+			if remaining > 0 {
+				_, _ = fmt.Fprintf(ioStreams.Out, "    %s  %s\n", dim.Render("Expires: "), fmt.Sprintf("%s (%s remaining)", expiresAt.Format("2 Jan 2006, 15:04"), formatDuration(remaining)))
+			}
+		}
+		_, _ = fmt.Fprintln(ioStreams.Out)
 	}
 
 	return nil
+}
+
+func formatDuration(d time.Duration) string {
+	h := int(d.Hours())
+	if h >= 24 {
+		return fmt.Sprintf("%dd %dh", h/24, h%24)
+	}
+	return fmt.Sprintf("%dh", h)
 }

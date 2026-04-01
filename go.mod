@@ -7,7 +7,7 @@ require (
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
 	github.com/spf13/viper v1.21.0
-	github.com/verda-cloud/verdacloud-sdk-go v1.4.0
+	github.com/verda-cloud/verdacloud-sdk-go v1.4.1
 	github.com/verda-cloud/verdagostack v1.0.0
 	go.yaml.in/yaml/v3 v3.0.4
 	gopkg.in/ini.v1 v1.67.1
