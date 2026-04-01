@@ -949,9 +949,11 @@ func renderDeploymentSummary(opts *createOptions, cache *apiCache) {
 
 	// OS volume pricing (NVMe).
 	var osVolPrice float64
+	var osVolUnitPrice float64
 	if opts.OSVolumeSize > 0 {
 		if vt, ok := cache.volumeTypes[verda.VolumeTypeNVMe]; ok {
-			osVolPrice = volumeHourlyPrice(vt.Price.MonthlyPerGB, opts.OSVolumeSize)
+			osVolUnitPrice = vt.Price.MonthlyPerGB
+			osVolPrice = volumeHourlyPrice(osVolUnitPrice, opts.OSVolumeSize)
 			storageHourly += osVolPrice
 		}
 	}
@@ -960,6 +962,7 @@ func renderDeploymentSummary(opts *createOptions, cache *apiCache) {
 	type volDetail struct {
 		name, volType string
 		size          int
+		unitPrice     float64 // per GB per month
 		hourly        float64
 	}
 	var volDetails []volDetail
@@ -970,12 +973,13 @@ func renderDeploymentSummary(opts *createOptions, cache *apiCache) {
 		}
 		name, sizeStr, vType := parts[0], parts[1], parts[2]
 		size, _ := strconv.Atoi(sizeStr)
-		var hourly float64
+		var hourly, unitP float64
 		if vt, ok := cache.volumeTypes[vType]; ok {
-			hourly = volumeHourlyPrice(vt.Price.MonthlyPerGB, size)
+			unitP = vt.Price.MonthlyPerGB
+			hourly = volumeHourlyPrice(unitP, size)
 			storageHourly += hourly
 		}
-		volDetails = append(volDetails, volDetail{name, vType, size, hourly})
+		volDetails = append(volDetails, volDetail{name, vType, size, unitP, hourly})
 	}
 
 	// Print summary.
@@ -996,14 +1000,16 @@ func renderDeploymentSummary(opts *createOptions, cache *apiCache) {
 	// OS.
 	_, _ = fmt.Fprintf(os.Stderr, "  %s\n", accent.Render("Operating System"))
 	osLine := fmt.Sprintf("%s  %dGB NVMe", opts.Image, opts.OSVolumeSize)
-	_, _ = fmt.Fprintf(os.Stderr, "    %-40s %s\n\n", osLine, priceStyle.Render(fmt.Sprintf("$%.4f/hr", osVolPrice)))
+	osPrice := fmt.Sprintf("($%.2f/GB/mo)  $%.4f/hr", osVolUnitPrice, osVolPrice)
+	_, _ = fmt.Fprintf(os.Stderr, "    %-40s %s\n\n", osLine, priceStyle.Render(osPrice))
 
 	// Storage volumes.
 	if len(volDetails) > 0 {
 		_, _ = fmt.Fprintf(os.Stderr, "  %s\n", accent.Render("Storage"))
 		for _, v := range volDetails {
 			line := fmt.Sprintf("%s  %dGB %s", v.name, v.size, v.volType)
-			_, _ = fmt.Fprintf(os.Stderr, "    %-40s %s\n", line, priceStyle.Render(fmt.Sprintf("$%.4f/hr", v.hourly)))
+			vPrice := fmt.Sprintf("($%.2f/GB/mo)  $%.4f/hr", v.unitPrice, v.hourly)
+			_, _ = fmt.Fprintf(os.Stderr, "    %-40s %s\n", line, priceStyle.Render(vPrice))
 		}
 		_, _ = fmt.Fprintln(os.Stderr)
 	}
