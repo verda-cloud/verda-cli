@@ -618,7 +618,7 @@ func stepDescription(opts *createOptions) wizard.Step {
 
 func buildStartupScriptChoices(scripts []verda.StartupScript) []wizard.Choice {
 	choices := []wizard.Choice{
-		{Label: "None", Value: ""},
+		{Label: "None (skip)", Value: ""},
 		{Label: "+ Add new startup script", Value: addNewScriptValue},
 	}
 	for _, s := range scripts {
