@@ -40,9 +40,9 @@ func NewCmdLogin(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command 
 
 			Credentials are stored per profile:
 			  [default]
-			  base_url   = https://api.verda.com/v1
-			  client_id  = your-client-id
-			  client_secret = your-client-secret
+			  verda_base_url      = https://api.verda.com/v1
+			  verda_client_id     = your-client-id
+			  verda_client_secret = your-client-secret
 		`),
 		Example: cmdutil.Examples(`
 			# Interactive wizard (prompts for all fields)
@@ -108,9 +108,9 @@ func NewCmdLogin(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command 
 				}
 			}
 
-			section.Key("base_url").SetValue(opts.BaseURL)
-			section.Key("client_id").SetValue(opts.ClientID)
-			section.Key("client_secret").SetValue(opts.ClientSecret)
+			section.Key("verda_base_url").SetValue(opts.BaseURL)
+			section.Key("verda_client_id").SetValue(opts.ClientID)
+			section.Key("verda_client_secret").SetValue(opts.ClientSecret)
 
 			if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 				return err

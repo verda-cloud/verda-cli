@@ -11,13 +11,13 @@ func TestLoadSharedCredentials(t *testing.T) {
 
 	path := writeCredentialsFile(t, `
 [default]
-client_id = default-id
-client_secret = default-secret
+verda_client_id = default-id
+verda_client_secret = default-secret
 
 [dev]
-client_id = dev-id
-client_secret = dev-secret
-token = dev-token
+verda_client_id = dev-id
+verda_client_secret = dev-secret
+verda_token = dev-token
 `)
 
 	creds, err := loadSharedCredentials(path, "dev")
@@ -35,9 +35,9 @@ func TestOptionsCompleteLoadsSharedCredentials(t *testing.T) {
 
 	path := writeCredentialsFile(t, `
 [default]
-client_id = default-id
-client_secret = default-secret
-token = default-token
+verda_client_id = default-id
+verda_client_secret = default-secret
+verda_token = default-token
 `)
 
 	opts := &Options{
@@ -67,8 +67,8 @@ func TestOptionsCompleteKeepsExplicitValues(t *testing.T) {
 
 	path := writeCredentialsFile(t, `
 [default]
-client_id = shared-id
-client_secret = shared-secret
+verda_client_id = shared-id
+verda_client_secret = shared-secret
 `)
 
 	opts := &Options{

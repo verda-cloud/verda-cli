@@ -46,18 +46,16 @@ func loadSharedCredentials(path string, profile string) (*SharedCredentials, err
 	}
 
 	creds := &SharedCredentials{
-		BaseURL:      strings.TrimSpace(section.Key("base_url").String()),
-		ClientID:     strings.TrimSpace(section.Key("client_id").String()),
-		ClientSecret: strings.TrimSpace(section.Key("client_secret").String()),
+		BaseURL:      strings.TrimSpace(section.Key("verda_base_url").String()),
+		ClientID:     strings.TrimSpace(section.Key("verda_client_id").String()),
+		ClientSecret: strings.TrimSpace(section.Key("verda_client_secret").String()),
 	}
 
 	switch {
-	case section.HasKey("token"):
-		creds.BearerToken = strings.TrimSpace(section.Key("token").String())
-	case section.HasKey("bearer_token"):
-		creds.BearerToken = strings.TrimSpace(section.Key("bearer_token").String())
-	case section.HasKey("auth_token"):
-		creds.BearerToken = strings.TrimSpace(section.Key("auth_token").String())
+	case section.HasKey("verda_token"):
+		creds.BearerToken = strings.TrimSpace(section.Key("verda_token").String())
+	case section.HasKey("verda_bearer_token"):
+		creds.BearerToken = strings.TrimSpace(section.Key("verda_bearer_token").String())
 	}
 
 	return creds, nil
