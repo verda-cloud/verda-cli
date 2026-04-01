@@ -103,19 +103,23 @@ func renderInstanceCard(inst *verda.Instance, volumes ...verda.Volume) string {
 		_, _ = fmt.Fprintf(&b, "  %s  %s\n", dim.Render(fmt.Sprintf("%-15s", l.label)), l.value)
 	}
 
-	// Storage section as table.
+	// Storage section.
 	if len(volumes) > 0 {
 		_, _ = fmt.Fprintf(&b, "\n  %s\n", bold.Render("Storage"))
-		// Header
-		_, _ = fmt.Fprintf(&b, "  %s\n",
-			dim.Render(fmt.Sprintf("%-25s %-12s %8s  %-6s  %-8s  %s", "Name", "Status", "Size", "Type", "Location", "ID")))
-		for _, v := range volumes {
+		for i, v := range volumes {
 			volStatus := "Attached"
 			if v.IsOSVolume {
 				volStatus = "Main OS"
 			}
-			_, _ = fmt.Fprintf(&b, "  %-25s %-12s %5dGB  %-6s  %-8s  %s\n",
-				v.Name, volStatus, v.Size, v.Type, v.Location, dim.Render(v.ID))
+			_, _ = fmt.Fprintf(&b, "    %s  %s\n", dim.Render("Name:    "), v.Name)
+			_, _ = fmt.Fprintf(&b, "    %s  %s\n", dim.Render("ID:      "), v.ID)
+			_, _ = fmt.Fprintf(&b, "    %s  %s\n", dim.Render("Status:  "), volStatus)
+			_, _ = fmt.Fprintf(&b, "    %s  %dGB\n", dim.Render("Size:    "), v.Size)
+			_, _ = fmt.Fprintf(&b, "    %s  %s\n", dim.Render("Type:    "), v.Type)
+			_, _ = fmt.Fprintf(&b, "    %s  %s\n", dim.Render("Location:"), v.Location)
+			if i < len(volumes)-1 {
+				_, _ = fmt.Fprintln(&b)
+			}
 		}
 	}
 
