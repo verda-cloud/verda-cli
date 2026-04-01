@@ -141,10 +141,14 @@ func formatElapsed(d time.Duration) string {
 	return fmt.Sprintf("%dm %ds", s/60, s%60)
 }
 
-// pollInstanceStatus polls the instance until terminal, showing an animated
-// single-line status like: ✻ Provisioning instance... 15s
-// Then renders the full instance card when done.
-func pollInstanceStatus(ctx context.Context, w io.Writer, client *verda.Client, instanceID string) error {
+// pollInstanceStatus polls the instance showing an animated status line.
+// If expectStatus is non-empty, polls until that specific status is reached.
+// If empty, polls until any terminal status (running, offline, error, etc.).
+func pollInstanceStatus(ctx context.Context, w io.Writer, client *verda.Client, instanceID string, expectStatus ...string) error {
+	var target string
+	if len(expectStatus) > 0 {
+		target = expectStatus[0]
+	}
 	accentStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("5")) // purple like Claude
 	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 
@@ -165,9 +169,15 @@ func pollInstanceStatus(ctx context.Context, w io.Writer, client *verda.Client, 
 	}
 	lastInst = inst
 
+	isDone := func(status string) bool {
+		if target != "" {
+			return status == target || status == verda.StatusError || status == verda.StatusNotFound
+		}
+		return terminalStatuses[status]
+	}
+
 	for {
-		if terminalStatuses[lastInst.Status] {
-			// Clear the spinner line and show the final card.
+		if isDone(lastInst.Status) {
 			_, _ = fmt.Fprintf(w, "\r\033[2K")
 			_, _ = fmt.Fprint(w, renderInstanceCard(lastInst))
 			return nil
