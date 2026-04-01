@@ -59,7 +59,7 @@ func statusColor(status string) lipgloss.Color {
 }
 
 // renderInstanceCard renders the final styled instance summary.
-// volumes is optional — if provided, they are displayed in the card.
+// volumes is optional — if provided, they are displayed as a table.
 func renderInstanceCard(inst *verda.Instance, volumes ...verda.Volume) string {
 	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 	bold := lipgloss.NewStyle().Bold(true)
@@ -103,17 +103,19 @@ func renderInstanceCard(inst *verda.Instance, volumes ...verda.Volume) string {
 		_, _ = fmt.Fprintf(&b, "  %s  %s\n", dim.Render(fmt.Sprintf("%-15s", l.label)), l.value)
 	}
 
-	// Storage section.
+	// Storage section as table.
 	if len(volumes) > 0 {
 		_, _ = fmt.Fprintf(&b, "\n  %s\n", bold.Render("Storage"))
+		// Header
+		_, _ = fmt.Fprintf(&b, "  %s\n",
+			dim.Render(fmt.Sprintf("%-25s %-12s %8s  %-6s  %-8s  %s", "Name", "Status", "Size", "Type", "Location", "ID")))
 		for _, v := range volumes {
-			volStatus := "attached"
+			volStatus := "Attached"
 			if v.IsOSVolume {
-				volStatus = "OS"
+				volStatus = "Main OS"
 			}
-			_, _ = fmt.Fprintf(&b, "    %s  %s  %dGB %s  %s\n",
-				v.Name, volStatus, v.Size, v.Type, v.Location)
-			_, _ = fmt.Fprintf(&b, "    %s\n", dim.Render("ID: "+v.ID))
+			_, _ = fmt.Fprintf(&b, "  %-25s %-12s %5dGB  %-6s  %-8s  %s\n",
+				v.Name, volStatus, v.Size, v.Type, v.Location, dim.Render(v.ID))
 		}
 	}
 
