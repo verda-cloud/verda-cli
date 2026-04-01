@@ -81,7 +81,7 @@ func buildCreateFlow(getClient clientFunc, opts *createOptions) *wizard.Flow {
 			stepLocation(getClient, cache, opts),
 			stepImage(getClient, opts),
 			stepOSVolumeSize(opts),
-			stepStorage(getClient, opts),
+			stepStorage(getClient, cache, opts),
 			stepSSHKeys(getClient, opts),
 			stepStartupScript(getClient, opts),
 			stepHostname(opts),
@@ -395,7 +395,7 @@ func stepOSVolumeSize(opts *createOptions) wizard.Step {
 
 const addNewVolumeValue = "__add_new_volume__"
 
-func stepStorage(getClient clientFunc, opts *createOptions) wizard.Step {
+func stepStorage(getClient clientFunc, cache *apiCache, opts *createOptions) wizard.Step {
 	return wizard.Step{
 		Name:        "storage",
 		Description: "Storage (optional)",
@@ -405,6 +405,16 @@ func stepStorage(getClient clientFunc, opts *createOptions) wizard.Step {
 			client, err := getClient()
 			if err != nil {
 				return nil, err
+			}
+
+			// Fetch volume type pricing for display.
+			if cache.volumeTypes == nil {
+				if vTypes, vtErr := client.VolumeTypes.GetAllVolumeTypes(ctx); vtErr == nil {
+					cache.volumeTypes = make(map[string]verda.VolumeType, len(vTypes))
+					for _, vt := range vTypes {
+						cache.volumeTypes[vt.Type] = vt
+					}
+				}
 			}
 
 			// Reset volumes for fresh wizard pass.
@@ -432,7 +442,7 @@ func stepStorage(getClient clientFunc, opts *createOptions) wizard.Step {
 					return nil, nil
 
 				case addNewVolumeValue:
-					vol, err := promptAddVolume(ctx, prompter, store)
+					vol, err := promptAddVolume(ctx, prompter, store, cache)
 					if err != nil {
 						return nil, err
 					}
@@ -503,11 +513,21 @@ func buildStorageChoices(volumes []verda.VolumeCreateRequest, existingIDs []stri
 	return choices
 }
 
-func promptAddVolume(ctx context.Context, prompter tui.Prompter, store *wizard.Store) (*verda.VolumeCreateRequest, error) {
-	// Volume type
+func promptAddVolume(ctx context.Context, prompter tui.Prompter, store *wizard.Store, cache *apiCache) (*verda.VolumeCreateRequest, error) {
+	// Volume type with prices.
+	nvmeLabel := "NVMe (fast SSD)"
+	hddLabel := "HDD (large capacity)"
+	if cache != nil && cache.volumeTypes != nil {
+		if vt, ok := cache.volumeTypes[verda.VolumeTypeNVMe]; ok && vt.Price.MonthlyPerGB > 0 {
+			nvmeLabel = fmt.Sprintf("NVMe (fast SSD)  $%.2f/GB/mo", vt.Price.MonthlyPerGB)
+		}
+		if vt, ok := cache.volumeTypes[verda.VolumeTypeHDD]; ok && vt.Price.MonthlyPerGB > 0 {
+			hddLabel = fmt.Sprintf("HDD (large capacity)  $%.2f/GB/mo", vt.Price.MonthlyPerGB)
+		}
+	}
 	typeIdx, err := prompter.Select(ctx, "Volume type (↑/↓ move, Enter select, Esc back)", []string{
-		"NVMe (fast SSD)",
-		"HDD (large capacity)",
+		nvmeLabel,
+		hddLabel,
 		"← Back",
 	})
 	if err != nil {
