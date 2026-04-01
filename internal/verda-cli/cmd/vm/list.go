@@ -3,9 +3,7 @@ package vm
 import (
 	"context"
 	"fmt"
-	"strings"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
 
@@ -71,10 +69,8 @@ func runList(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams,
 		return nil
 	}
 
-	// Render table.
-	renderInstanceListTable(ioStreams.Out, instances)
+	_, _ = fmt.Fprintf(ioStreams.ErrOut, "  %d instance(s) found\n\n", len(instances))
 
-	// Interactive: let user select an instance to view details.
 	prompter := f.Prompter()
 	labels := make([]string, len(instances))
 	for i, inst := range instances {
@@ -104,59 +100,17 @@ func runList(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams,
 }
 
 func formatInstanceRow(inst verda.Instance) string {
-	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-	statusStyle := lipgloss.NewStyle().Foreground(statusColor(inst.Status))
-
-	ip := "-"
+	ip := ""
 	if inst.IP != nil && *inst.IP != "" {
-		ip = *inst.IP
+		ip = "  " + *inst.IP
 	}
 
-	return fmt.Sprintf("%-20s %s  %-18s  %-16s  %-8s  %s",
+	return fmt.Sprintf("%-20s  ● %-13s  %-18s  %s%s",
 		inst.Hostname,
-		statusStyle.Render(fmt.Sprintf("● %-14s", inst.Status)),
+		inst.Status,
 		inst.InstanceType,
-		truncate(inst.OSName, 16),
-		ip,
-		dim.Render(inst.Location))
+		inst.Location,
+		ip)
 }
 
-func truncate(s string, max int) string {
-	if len(s) <= max {
-		return s
-	}
-	return s[:max-1] + "…"
-}
 
-func renderInstanceListTable(w interface{ Write([]byte) (int, error) }, instances []verda.Instance) {
-	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-	bold := lipgloss.NewStyle().Bold(true)
-
-	// Header
-	header := fmt.Sprintf("  %-20s %-16s %-18s %-16s %-16s %-8s %s",
-		"Name", "Status", "Type", "OS", "IP", "Location", "Contract")
-	_, _ = fmt.Fprintln(w, bold.Render(header))
-	_, _ = fmt.Fprintln(w, dim.Render(strings.Repeat("─", 120)))
-
-	for _, inst := range instances {
-		statusStyle := lipgloss.NewStyle().Foreground(statusColor(inst.Status))
-		ip := "-"
-		if inst.IP != nil && *inst.IP != "" {
-			ip = *inst.IP
-		}
-		contract := inst.Contract
-		if inst.IsSpot {
-			contract = "Spot"
-		}
-		row := fmt.Sprintf("  %-20s %s  %-18s %-16s %-16s %-8s %s",
-			truncate(inst.Hostname, 20),
-			statusStyle.Render(fmt.Sprintf("● %-13s", inst.Status)),
-			inst.InstanceType,
-			truncate(inst.OSName, 16),
-			ip,
-			inst.Location,
-			dim.Render(contract))
-		_, _ = fmt.Fprintln(w, row)
-	}
-	_, _ = fmt.Fprintln(w)
-}
