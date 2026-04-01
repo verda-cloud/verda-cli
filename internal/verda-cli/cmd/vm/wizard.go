@@ -410,6 +410,8 @@ func stepStorageSize(opts *createOptions) wizard.Step {
 
 // --- Step 9: SSH Keys ---
 
+const addNewSSHKeyValue = "__add_new__"
+
 func stepSSHKeys(getClient clientFunc, opts *createOptions) wizard.Step {
 	return wizard.Step{
 		Name:        "ssh-keys",
@@ -428,24 +430,54 @@ func stepSSHKeys(getClient clientFunc, opts *createOptions) wizard.Step {
 				return nil, fmt.Errorf("fetching SSH keys: %w", err)
 			}
 
-			// Offer to add new SSH keys.
-			keys, err = offerAddSSHKey(ctx, prompter, client, keys)
-			if err != nil {
-				return nil, err
-			}
+			choices := buildSSHKeyChoices(keys)
 
-			choices := make([]wizard.Choice, len(keys))
-			for i, k := range keys {
-				choices[i] = wizard.Choice{
-					Label:       k.Name,
-					Value:       k.ID,
-					Description: k.Fingerprint,
+			// Loop: if user selects "Add new", run sub-flow and re-prompt.
+			for {
+				labels := make([]string, len(choices))
+				for i, c := range choices {
+					labels[i] = c.Label
+				}
+				indices, err := prompter.MultiSelect(ctx, "SSH keys to inject", labels)
+				if err != nil {
+					return nil, err
+				}
+
+				addNew := false
+				for _, idx := range indices {
+					if choices[idx].Value == addNewSSHKeyValue {
+						addNew = true
+						break
+					}
+				}
+
+				if !addNew {
+					// Set the selected keys directly and return empty so the
+					// engine auto-skips (we already prompted inside the Loader).
+					var ids []string
+					for _, idx := range indices {
+						if choices[idx].Value != addNewSSHKeyValue {
+							ids = append(ids, choices[idx].Value)
+						}
+					}
+					opts.SSHKeyIDs = ids
+					return nil, nil // empty → engine auto-skips optional step
+				}
+
+				newKey, err := promptAddSSHKey(ctx, prompter, client)
+				if err != nil {
+					return nil, err
+				}
+				if newKey != nil {
+					keys = append(keys, *newKey)
+					choices = buildSSHKeyChoices(keys)
 				}
 			}
-			return choices, nil
 		},
 		Setter: func(v any) {
-			opts.SSHKeyIDs = v.([]string)
+			if v != nil {
+				opts.SSHKeyIDs = v.([]string)
+			}
 		},
 		Resetter: func() { opts.SSHKeyIDs = nil },
 		IsSet:    func() bool { return len(opts.SSHKeyIDs) > 0 },
@@ -453,7 +485,42 @@ func stepSSHKeys(getClient clientFunc, opts *createOptions) wizard.Step {
 	}
 }
 
+func buildSSHKeyChoices(keys []verda.SSHKey) []wizard.Choice {
+	choices := []wizard.Choice{
+		{Label: "+ Add new SSH key", Value: addNewSSHKeyValue},
+	}
+	for _, k := range keys {
+		choices = append(choices, wizard.Choice{
+			Label:       k.Name,
+			Value:       k.ID,
+			Description: k.Fingerprint,
+		})
+	}
+	return choices
+}
+
+func promptAddSSHKey(ctx context.Context, prompter tui.Prompter, client *verda.Client) (*verda.SSHKey, error) {
+	name, err := prompter.TextInput(ctx, "SSH key name")
+	if err != nil || strings.TrimSpace(name) == "" {
+		return nil, nil //nolint:nilerr
+	}
+	pubKey, err := prompter.TextInput(ctx, "Public key (paste)")
+	if err != nil || strings.TrimSpace(pubKey) == "" {
+		return nil, nil //nolint:nilerr
+	}
+	created, err := client.SSHKeys.AddSSHKey(ctx, &verda.CreateSSHKeyRequest{
+		Name:      strings.TrimSpace(name),
+		PublicKey:  strings.TrimSpace(pubKey),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("creating SSH key: %w", err)
+	}
+	return created, nil
+}
+
 // --- Step 10: Startup Script ---
+
+const addNewScriptValue = "__add_new_script__"
 
 func stepStartupScript(getClient clientFunc, opts *createOptions) wizard.Step {
 	return wizard.Step{
@@ -473,21 +540,34 @@ func stepStartupScript(getClient clientFunc, opts *createOptions) wizard.Step {
 				return nil, fmt.Errorf("fetching startup scripts: %w", err)
 			}
 
-			scripts, err = offerAddStartupScript(ctx, prompter, client, scripts)
-			if err != nil {
-				return nil, err
-			}
+			choices := buildStartupScriptChoices(scripts)
 
-			choices := []wizard.Choice{
-				{Label: "None", Value: ""},
+			// Loop: if user selects "Add new", run sub-flow and re-prompt.
+			for {
+				labels := make([]string, len(choices))
+				for i, c := range choices {
+					labels[i] = c.Label
+				}
+				idx, err := prompter.Select(ctx, "Startup script (optional)", labels)
+				if err != nil {
+					return nil, err
+				}
+
+				if choices[idx].Value != addNewScriptValue {
+					// Set the value directly and return empty so the engine auto-skips.
+					opts.StartupScriptID = choices[idx].Value
+					return nil, nil
+				}
+
+				newScript, err := promptAddStartupScript(ctx, prompter, client)
+				if err != nil {
+					return nil, err
+				}
+				if newScript != nil {
+					scripts = append(scripts, *newScript)
+					choices = buildStartupScriptChoices(scripts)
+				}
 			}
-			for _, s := range scripts {
-				choices = append(choices, wizard.Choice{
-					Label: s.Name,
-					Value: s.ID,
-				})
-			}
-			return choices, nil
 		},
 		Setter:   func(v any) { opts.StartupScriptID = v.(string) },
 		Resetter: func() { opts.StartupScriptID = "" },
@@ -533,108 +613,39 @@ func stepDescription(opts *createOptions) wizard.Step {
 	}
 }
 
-// --- SSH key sub-flow ---
+// --- Startup script helpers ---
 
-// offerAddSSHKey prompts the user to add new SSH keys if none exist or if they
-// want to add more. Returns the updated key list.
-func offerAddSSHKey(ctx context.Context, prompter tui.Prompter, client *verda.Client, keys []verda.SSHKey) ([]verda.SSHKey, error) {
-	for {
-		var prompt string
-		var defaultVal bool
-		if len(keys) == 0 {
-			prompt = "No SSH keys found. Add one?"
-			defaultVal = true
-		} else {
-			prompt = "Add a new SSH key?"
-			defaultVal = false
-		}
-
-		add, err := prompter.Confirm(ctx, prompt, tui.WithConfirmDefault(defaultVal))
-		if err != nil {
-			return keys, nil //nolint:nilerr // User cancelled, return what we have.
-		}
-		if !add {
-			return keys, nil
-		}
-
-		name, err := prompter.TextInput(ctx, "SSH key name")
-		if err != nil {
-			return keys, nil //nolint:nilerr
-		}
-		if strings.TrimSpace(name) == "" {
-			return keys, nil
-		}
-
-		pubKey, err := prompter.TextInput(ctx, "Public key (paste)")
-		if err != nil {
-			return keys, nil //nolint:nilerr
-		}
-		if strings.TrimSpace(pubKey) == "" {
-			return keys, nil
-		}
-
-		created, err := client.SSHKeys.AddSSHKey(ctx, &verda.CreateSSHKeyRequest{
-			Name:      strings.TrimSpace(name),
-			PublicKey: strings.TrimSpace(pubKey),
-		})
-		if err != nil {
-			return nil, fmt.Errorf("creating SSH key: %w", err)
-		}
-
-		keys = append(keys, *created)
+func buildStartupScriptChoices(scripts []verda.StartupScript) []wizard.Choice {
+	choices := []wizard.Choice{
+		{Label: "None", Value: ""},
+		{Label: "+ Add new startup script", Value: addNewScriptValue},
 	}
+	for _, s := range scripts {
+		choices = append(choices, wizard.Choice{
+			Label: s.Name,
+			Value: s.ID,
+		})
+	}
+	return choices
 }
 
-// --- Startup script sub-flow ---
-
-// offerAddStartupScript prompts the user to add a new startup script if none
-// exist or if they want to add one. Returns the updated script list.
-func offerAddStartupScript(ctx context.Context, prompter tui.Prompter, client *verda.Client, scripts []verda.StartupScript) ([]verda.StartupScript, error) {
-	for {
-		var prompt string
-		var defaultVal bool
-		if len(scripts) == 0 {
-			prompt = "No startup scripts found. Add one?"
-			defaultVal = false
-		} else {
-			prompt = "Add a new startup script?"
-			defaultVal = false
-		}
-
-		add, err := prompter.Confirm(ctx, prompt, tui.WithConfirmDefault(defaultVal))
-		if err != nil {
-			return scripts, nil //nolint:nilerr
-		}
-		if !add {
-			return scripts, nil
-		}
-
-		name, err := prompter.TextInput(ctx, "Script name")
-		if err != nil {
-			return scripts, nil //nolint:nilerr
-		}
-		if strings.TrimSpace(name) == "" {
-			return scripts, nil
-		}
-
-		script, err := prompter.Editor(ctx, "Script content (Ctrl+D to finish)")
-		if err != nil {
-			return scripts, nil //nolint:nilerr
-		}
-		if strings.TrimSpace(script) == "" {
-			return scripts, nil
-		}
-
-		created, err := client.StartupScripts.AddStartupScript(ctx, &verda.CreateStartupScriptRequest{
-			Name:   strings.TrimSpace(name),
-			Script: script,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("creating startup script: %w", err)
-		}
-
-		scripts = append(scripts, *created)
+func promptAddStartupScript(ctx context.Context, prompter tui.Prompter, client *verda.Client) (*verda.StartupScript, error) {
+	name, err := prompter.TextInput(ctx, "Script name")
+	if err != nil || strings.TrimSpace(name) == "" {
+		return nil, nil //nolint:nilerr
 	}
+	script, err := prompter.Editor(ctx, "Script content (Ctrl+D to finish)")
+	if err != nil || strings.TrimSpace(script) == "" {
+		return nil, nil //nolint:nilerr
+	}
+	created, err := client.StartupScripts.AddStartupScript(ctx, &verda.CreateStartupScriptRequest{
+		Name:   strings.TrimSpace(name),
+		Script: script,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("creating startup script: %w", err)
+	}
+	return created, nil
 }
 
 // --- Spinner helper ---
