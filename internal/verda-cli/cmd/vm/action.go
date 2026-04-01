@@ -12,27 +12,63 @@ import (
 
 // instanceAction defines a supported action with its display label and executor.
 type instanceAction struct {
-	Label   string
-	Danger  bool // requires explicit confirmation
-	Execute func(ctx context.Context, client *verda.Client, inst *verda.Instance) error
+	Label      string
+	ConfirmMsg string   // shown before confirmation prompt; empty = no confirm needed
+	ValidFrom  []string // instance statuses where this action is available; empty = always
+	Execute    func(ctx context.Context, client *verda.Client, inst *verda.Instance) error
 }
 
-var actions = []instanceAction{
-	{Label: "Start", Execute: func(ctx context.Context, c *verda.Client, inst *verda.Instance) error {
-		return c.Instances.Start(ctx, inst.ID)
-	}},
-	{Label: "Shutdown", Execute: func(ctx context.Context, c *verda.Client, inst *verda.Instance) error {
-		return c.Instances.Shutdown(ctx, inst.ID)
-	}},
-	{Label: "Force shutdown", Execute: func(ctx context.Context, c *verda.Client, inst *verda.Instance) error {
-		return c.Instances.ForceShutdown(ctx, inst.ID)
-	}},
-	{Label: "Hibernate", Execute: func(ctx context.Context, c *verda.Client, inst *verda.Instance) error {
-		return c.Instances.Hibernate(ctx, inst.ID)
-	}},
-	{Label: "Delete instance", Danger: true, Execute: func(ctx context.Context, c *verda.Client, inst *verda.Instance) error {
-		return c.Instances.Delete(ctx, []string{inst.ID}, nil, false)
-	}},
+var allActions = []instanceAction{
+	{
+		Label:     "Start",
+		ValidFrom: []string{verda.StatusOffline},
+		Execute:   func(ctx context.Context, c *verda.Client, inst *verda.Instance) error { return c.Instances.Start(ctx, inst.ID) },
+	},
+	{
+		Label:     "Shutdown",
+		ValidFrom: []string{verda.StatusRunning},
+		ConfirmMsg: "Shutting down the instance temporarily pauses it so technical\n" +
+			"  processes can occur, such as attaching or detaching volumes.\n\n" +
+			"  Shutdown instances continue to charge your account.",
+		Execute: func(ctx context.Context, c *verda.Client, inst *verda.Instance) error { return c.Instances.Shutdown(ctx, inst.ID) },
+	},
+	{
+		Label:     "Force shutdown",
+		ValidFrom: []string{verda.StatusRunning},
+		ConfirmMsg: "Force shutdown immediately stops the instance without graceful\n" +
+			"  shutdown. This may cause data loss.",
+		Execute: func(ctx context.Context, c *verda.Client, inst *verda.Instance) error { return c.Instances.ForceShutdown(ctx, inst.ID) },
+	},
+	{
+		Label:     "Hibernate",
+		ValidFrom: []string{verda.StatusRunning},
+		ConfirmMsg: "Hibernating the instance saves its state and stops billing.\n" +
+			"  You can resume it later.",
+		Execute: func(ctx context.Context, c *verda.Client, inst *verda.Instance) error { return c.Instances.Hibernate(ctx, inst.ID) },
+	},
+	{
+		Label:      "Delete instance",
+		ConfirmMsg: "This will permanently delete the instance and all associated data.\n\n  This action cannot be undone.",
+		Execute:    func(ctx context.Context, c *verda.Client, inst *verda.Instance) error { return c.Instances.Delete(ctx, []string{inst.ID}, nil, false) },
+	},
+}
+
+// availableActions returns actions valid for the given instance status.
+func availableActions(status string) []instanceAction {
+	var result []instanceAction
+	for _, a := range allActions {
+		if len(a.ValidFrom) == 0 {
+			result = append(result, a)
+			continue
+		}
+		for _, s := range a.ValidFrom {
+			if s == status {
+				result = append(result, a)
+				break
+			}
+		}
+	}
+	return result
 }
 
 // NewCmdAction creates the vm action cobra command.
@@ -94,9 +130,15 @@ func runAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 	// Show instance summary.
 	_, _ = fmt.Fprint(ioStreams.Out, renderInstanceCard(inst))
 
-	// Select action.
-	actionLabels := make([]string, len(actions))
-	for i, a := range actions {
+	// Filter actions by current status.
+	validActions := availableActions(inst.Status)
+	if len(validActions) == 0 {
+		_, _ = fmt.Fprintf(ioStreams.ErrOut, "No actions available for status %q.\n", inst.Status)
+		return nil
+	}
+
+	actionLabels := make([]string, len(validActions))
+	for i, a := range validActions {
 		actionLabels[i] = a.Label
 	}
 	actionLabels = append(actionLabels, "Cancel")
@@ -105,17 +147,16 @@ func runAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 	if err != nil {
 		return nil //nolint:nilerr
 	}
-	if actionIdx == len(actions) { // Cancel
+	if actionIdx == len(validActions) { // Cancel
 		return nil
 	}
 
-	action := actions[actionIdx]
+	action := validActions[actionIdx]
 
-	// Confirm dangerous actions.
-	if action.Danger {
-		_, _ = fmt.Fprintf(ioStreams.ErrOut, "\n  WARNING: %s on %s (%s)\n\n",
-			action.Label, inst.Hostname, inst.ID)
-		confirmed, err := prompter.Confirm(ctx, "Are you sure?")
+	// Confirm with context message.
+	if action.ConfirmMsg != "" {
+		_, _ = fmt.Fprintf(ioStreams.ErrOut, "\n  %s\n\n", action.ConfirmMsg)
+		confirmed, err := prompter.Confirm(ctx, fmt.Sprintf("Would you like to continue? (%s on %s)", action.Label, inst.Hostname))
 		if err != nil || !confirmed {
 			_, _ = fmt.Fprintln(ioStreams.ErrOut, "Cancelled.")
 			return nil
