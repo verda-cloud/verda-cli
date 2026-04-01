@@ -15,6 +15,7 @@ import (
 const FlagConfig = "config"
 
 const (
+	defaultBaseURL            = "https://api.verda.com/v1"
 	defaultCredentialsProfile = "default"
 	defaultCredentialsPath    = ".verda/credentials"
 )
@@ -47,7 +48,7 @@ func NewOptions() *Options {
 	logOpts.EnableColor = true
 
 	return &Options{
-		Server:      "https://api.verda.com/v1",
+		Server:      defaultBaseURL,
 		Timeout:     30 * time.Second,
 		Log:         logOpts,
 		AuthOptions: &AuthOptions{},
@@ -57,7 +58,7 @@ func NewOptions() *Options {
 // AddFlags binds the shared flags to the given flag set.
 func (o *Options) AddFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&o.Config, FlagConfig, o.Config, "Path to a verda config file (YAML)")
-	fs.StringVar(&o.Server, "server", o.Server, "API base URL")
+	fs.StringVar(&o.Server, "base-url", o.Server, "API base URL")
 	fs.DurationVar(&o.Timeout, "timeout", o.Timeout, "Default HTTP request timeout")
 	o.AuthOptions.AddFlags(fs)
 	o.Log.AddFlags(fs)
@@ -78,7 +79,7 @@ func (o *Options) Complete() {
 		o.Config = viper.GetString(FlagConfig)
 	}
 	if o.Server == "" {
-		o.Server = viper.GetString("server")
+		o.Server = viper.GetString("base-url")
 	}
 	if o.Timeout == 0 {
 		o.Timeout = viper.GetDuration("timeout")
@@ -125,7 +126,7 @@ func (o *Options) Complete() {
 		shared, err := loadSharedCredentials(a.CredentialsFile, a.Profile)
 		switch {
 		case err == nil:
-			if o.Server == "https://api.verda.com/v1" && shared.BaseURL != "" {
+			if o.Server == defaultBaseURL && shared.BaseURL != "" {
 				o.Server = shared.BaseURL
 			}
 			if a.ClientID == "" {
@@ -149,7 +150,7 @@ func (o *Options) Validate() error {
 		return o.AuthOptions.resolveErr
 	}
 	if o.Server == "" {
-		return fmt.Errorf("--server must not be empty")
+		return fmt.Errorf("--base-url must not be empty")
 	}
 	if o.Timeout <= 0 {
 		return fmt.Errorf("--timeout must be positive")
