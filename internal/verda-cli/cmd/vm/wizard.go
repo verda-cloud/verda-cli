@@ -244,11 +244,10 @@ func stepInstanceType(getClient clientFunc, cache *apiCache, opts *createOptions
 				if len(locs) == 0 {
 					continue // skip unavailable instance types
 				}
-				unitPrice := t.PricePerHour
+				totalPrice := float64(t.PricePerHour)
 				if isSpot {
-					unitPrice = t.SpotPrice
+					totalPrice = float64(t.SpotPrice)
 				}
-				totalPrice := float64(unitPrice) * float64(instanceUnits(t))
 				locNames := make([]string, len(locs))
 				for j, code := range locs {
 					if loc, ok := locMap[code]; ok {
@@ -258,13 +257,14 @@ func stepInstanceType(getClient clientFunc, cache *apiCache, opts *createOptions
 					}
 				}
 				units := instanceUnits(t)
-				unitLabel := "GPU"
-				if t.GPU.NumberOfGPUs == 0 {
-					unitLabel = "vCPU"
-				}
 				var priceStr string
 				if units > 1 {
-					priceStr = fmt.Sprintf("$%.3f/%s/hr × %d = $%.3f/hr", float64(unitPrice), unitLabel, units, totalPrice)
+					unitLabel := "GPU"
+					if t.GPU.NumberOfGPUs == 0 {
+						unitLabel = "vCPU"
+					}
+					perUnit := totalPrice / float64(units)
+					priceStr = fmt.Sprintf("$%.3f/%s/hr  $%.3f/hr", perUnit, unitLabel, totalPrice)
 				} else {
 					priceStr = fmt.Sprintf("$%.3f/hr", totalPrice)
 				}
@@ -965,16 +965,14 @@ func renderDeploymentSummary(opts *createOptions, cache *apiCache) {
 
 	// Instance pricing.
 	instLabel := opts.InstanceType
-	var instUnitPrice float64
 	var instUnits int
 	var instUnitLabel string
 	if info, ok := cache.instanceTypes[opts.InstanceType]; ok {
-		instUnitPrice = float64(info.PricePerHour)
+		computeHourly = float64(info.PricePerHour)
 		if opts.IsSpot {
-			instUnitPrice = float64(info.SpotPrice)
+			computeHourly = float64(info.SpotPrice)
 		}
 		instUnits = instanceUnits(&info)
-		computeHourly = instUnitPrice * float64(instUnits)
 		if info.GPU.NumberOfGPUs > 0 {
 			instLabel = fmt.Sprintf("%s — %s", info.InstanceType, info.GPU.Description)
 			instUnitLabel = "GPU"
@@ -1033,7 +1031,8 @@ func renderDeploymentSummary(opts *createOptions, cache *apiCache) {
 	_, _ = fmt.Fprintf(os.Stderr, "  %s\n", accent.Render("Instance"))
 	var computePriceStr string
 	if instUnits > 1 {
-		computePriceStr = fmt.Sprintf("$%.4f/%s/hr × %d = $%.4f/hr", instUnitPrice, instUnitLabel, instUnits, computeHourly)
+		perUnit := computeHourly / float64(instUnits)
+		computePriceStr = fmt.Sprintf("$%.4f/%s/hr  $%.4f/hr", perUnit, instUnitLabel, computeHourly)
 	} else {
 		computePriceStr = fmt.Sprintf("$%.4f/hr", computeHourly)
 	}
