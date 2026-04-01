@@ -404,7 +404,7 @@ func stepStorage(getClient clientFunc, opts *createOptions) wizard.Step {
 				for i, c := range choices {
 					labels[i] = c.Label
 				}
-				idx, err := prompter.Select(ctx, "Storage (optional)", labels)
+				idx, err := prompter.Select(ctx, "Storage (↑/↓ move, Enter select, Esc back)", labels)
 				if err != nil {
 					return nil, err
 				}
@@ -491,12 +491,16 @@ func buildStorageChoices(volumes []verda.VolumeCreateRequest, existingIDs []stri
 
 func promptAddVolume(ctx context.Context, prompter tui.Prompter, store *wizard.Store) (*verda.VolumeCreateRequest, error) {
 	// Volume type
-	typeIdx, err := prompter.Select(ctx, "Volume type", []string{
+	typeIdx, err := prompter.Select(ctx, "Volume type (↑/↓ move, Enter select, Esc back)", []string{
 		"NVMe (fast SSD)",
 		"HDD (large capacity)",
+		"← Back",
 	})
 	if err != nil {
 		return nil, nil //nolint:nilerr
+	}
+	if typeIdx == 2 { // "← Back"
+		return nil, nil
 	}
 	volType := verda.VolumeTypeNVMe
 	if typeIdx == 1 {
@@ -557,10 +561,14 @@ func promptAttachExisting(ctx context.Context, prompter tui.Prompter, status tui
 	for i, v := range detached {
 		labels[i] = fmt.Sprintf("%s (%dGB %s, %s)", v.Name, v.Size, v.Type, v.Location)
 	}
+	labels = append(labels, "← Back")
 
-	idx, err := prompter.Select(ctx, "Select volume to attach", labels)
+	idx, err := prompter.Select(ctx, "Select volume to attach (↑/↓ move, Enter select, Esc back)", labels)
 	if err != nil {
 		return "", nil //nolint:nilerr
+	}
+	if idx == len(detached) { // "← Back"
+		return "", nil
 	}
 	return detached[idx].ID, nil
 }
