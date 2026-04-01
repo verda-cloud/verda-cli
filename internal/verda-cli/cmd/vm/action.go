@@ -41,7 +41,6 @@ func NewCmdAction(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 
 	cmd := &cobra.Command{
 		Use:     "action",
-		Aliases: []string{"delete", "rm", "start", "stop", "shutdown"},
 		Short:   "Perform actions on a VM instance",
 		Long: cmdutil.LongDesc(`
 			Select a VM instance and perform an action: start, shutdown,
