@@ -452,8 +452,8 @@ func stepStorage(getClient clientFunc, opts *createOptions) wizard.Step {
 				}
 			}
 		},
-		Setter:   func(v any) {},
-		Resetter: func() { opts.VolumeSpecs = nil; opts.ExistingVolumes = nil; opts.StorageSize = 0 },
+		Setter:   func(v any) {},  // Set directly in Loader.
+		Resetter: func() {},       // Don't clear — Loader manages the value.
 		IsSet:    func() bool { return opts.StorageSize > 0 || len(opts.VolumeSpecs) > 0 || len(opts.ExistingVolumes) > 0 },
 		Value:    func() any { return "" },
 	}
@@ -618,16 +618,23 @@ func stepSSHKeys(getClient clientFunc, opts *createOptions) wizard.Step {
 				}
 
 				if !addNew {
-					// Set the selected keys directly and return empty so the
-					// engine auto-skips (we already prompted inside the Loader).
-					var ids []string
+					// Return the selected keys as choices. The engine will
+					// show a "no prompt" since these are the final selections,
+					// but we need the engine to call Setter with the values.
+					var selected []wizard.Choice
 					for _, idx := range indices {
 						if choices[idx].Value != addNewSSHKeyValue {
-							ids = append(ids, choices[idx].Value)
+							selected = append(selected, choices[idx])
 						}
 					}
-					opts.SSHKeyIDs = ids
-					return nil, nil // empty → engine auto-skips optional step
+					// Set directly — the engine auto-skips optional steps
+					// with empty choices and calls Resetter, so we must
+					// bypass by returning a sentinel.
+					opts.SSHKeyIDs = make([]string, len(selected))
+					for i, c := range selected {
+						opts.SSHKeyIDs[i] = c.Value
+					}
+					return nil, nil
 				}
 
 				newKey, err := promptAddSSHKey(ctx, prompter, client)
@@ -640,12 +647,8 @@ func stepSSHKeys(getClient clientFunc, opts *createOptions) wizard.Step {
 				}
 			}
 		},
-		Setter: func(v any) {
-			if v != nil {
-				opts.SSHKeyIDs = v.([]string)
-			}
-		},
-		Resetter: func() { opts.SSHKeyIDs = nil },
+		Setter:   func(v any) {},                        // Set directly in Loader.
+		Resetter: func() {},                               // Don't clear — Loader manages the value.
 		IsSet:    func() bool { return len(opts.SSHKeyIDs) > 0 },
 		Value:    func() any { return opts.SSHKeyIDs },
 	}
@@ -736,8 +739,8 @@ func stepStartupScript(getClient clientFunc, opts *createOptions) wizard.Step {
 				}
 			}
 		},
-		Setter:   func(v any) { opts.StartupScriptID = v.(string) },
-		Resetter: func() { opts.StartupScriptID = "" },
+		Setter:   func(v any) {},  // Set directly in Loader.
+		Resetter: func() {},       // Don't clear — Loader manages the value.
 		IsSet:    func() bool { return opts.StartupScriptID != "" },
 		Value:    func() any { return opts.StartupScriptID },
 	}

@@ -2,6 +2,7 @@ package vm
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -45,6 +46,8 @@ type createOptions struct {
 	StorageSize               int
 	StorageType               string
 	StorageOnSpotDiscontinue  string
+
+	Debug bool
 }
 
 // NewCmdCreate creates the vm create cobra command.
@@ -114,6 +117,7 @@ func NewCmdCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 	flags.IntVar(&opts.StorageSize, "storage-size", 0, "Size of the optional additional storage volume in GiB")
 	flags.StringVar(&opts.StorageType, "storage-type", opts.StorageType, "Type of the optional additional storage volume")
 	flags.StringVar(&opts.StorageOnSpotDiscontinue, "storage-on-spot-discontinue", "", "Spot discontinue policy for the optional additional storage volume")
+	flags.BoolVar(&opts.Debug, "debug", false, "Print the API request JSON before sending")
 
 	_ = flags.MarkHidden("type")
 	_ = flags.MarkHidden("image")
@@ -141,6 +145,14 @@ func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 	req, err := opts.request()
 	if err != nil {
 		return cmdutil.UsageErrorf(cmd, "%v", err)
+	}
+
+	if opts.Debug {
+		enc := json.NewEncoder(ioStreams.ErrOut)
+		enc.SetIndent("", "  ")
+		_, _ = fmt.Fprintln(ioStreams.ErrOut, "DEBUG: Request payload:")
+		_ = enc.Encode(req)
+		_, _ = fmt.Fprintln(ioStreams.ErrOut)
 	}
 
 	createCtx, createCancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
