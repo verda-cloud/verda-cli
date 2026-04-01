@@ -62,6 +62,13 @@ func (o *Options) AddFlags(fs *pflag.FlagSet) {
 	fs.DurationVar(&o.Timeout, "timeout", o.Timeout, "Default HTTP request timeout")
 	o.AuthOptions.AddFlags(fs)
 	o.Log.AddFlags(fs)
+
+	// Hide verbose flags from help — they still work, just don't clutter output.
+	hideFlags(fs, "auth.client-id", "auth.client-secret", "auth.token",
+		"auth.profile", "auth.credentials-file",
+		"log.disable-caller", "log.disable-stacktrace", "log.enable-color",
+		"log.format", "log.level", "log.output-paths",
+		"version")
 }
 
 // AddFlags binds authentication flags to the given flag set.
@@ -71,6 +78,14 @@ func (o *AuthOptions) AddFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&o.BearerToken, "auth.token", o.BearerToken, "Bearer token to send with API requests")
 	fs.StringVar(&o.Profile, "auth.profile", o.Profile, "Shared credentials profile to use from ~/.verda/credentials")
 	fs.StringVar(&o.CredentialsFile, "auth.credentials-file", o.CredentialsFile, "Path to a shared credentials file in AWS-style INI format")
+}
+
+func hideFlags(fs *pflag.FlagSet, names ...string) {
+	for _, name := range names {
+		if f := fs.Lookup(name); f != nil {
+			f.Hidden = true
+		}
+	}
 }
 
 // Complete fills in zero-value fields from viper (config file / env).
