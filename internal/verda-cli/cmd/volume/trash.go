@@ -61,12 +61,19 @@ func runTrash(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams
 	_, _ = fmt.Fprintf(ioStreams.Out, "  %d volume(s) in trash\n\n", len(volumes))
 
 	for _, v := range volumes {
-		_, _ = fmt.Fprintf(ioStreams.Out, "  %s\n", bold.Render(v.Name))
+		volType := "Block"
+		if v.IsOSVolume {
+			volType = "OS"
+		}
+		_, _ = fmt.Fprintf(ioStreams.Out, "  %s  %s\n", bold.Render(v.Name), dim.Render(volType))
 		_, _ = fmt.Fprintf(ioStreams.Out, "    %s  %s\n", dim.Render("ID:      "), v.ID)
-		_, _ = fmt.Fprintf(ioStreams.Out, "    %s  %dGB\n", dim.Render("Size:    "), v.Size)
-		_, _ = fmt.Fprintf(ioStreams.Out, "    %s  %s\n", dim.Render("Type:    "), v.Type)
+		_, _ = fmt.Fprintf(ioStreams.Out, "    %s  %dGB %s\n", dim.Render("Size:    "), v.Size, v.Type)
 		_, _ = fmt.Fprintf(ioStreams.Out, "    %s  %s\n", dim.Render("Location:"), v.Location)
-		_, _ = fmt.Fprintf(ioStreams.Out, "    %s  %s\n\n", dim.Render("Deleted: "), v.CreatedAt.Format("2 Jan 2006, 15:04"))
+		_, _ = fmt.Fprintf(ioStreams.Out, "    %s  %s\n", dim.Render("Contract:"), v.Contract)
+		if v.MonthlyPrice > 0 {
+			_, _ = fmt.Fprintf(ioStreams.Out, "    %s  $%.2f/mo (%s)\n", dim.Render("Price:   "), v.MonthlyPrice, v.Currency)
+		}
+		_, _ = fmt.Fprintf(ioStreams.Out, "    %s  %s\n\n", dim.Render("Created: "), v.CreatedAt.Format("2 Jan 2006, 15:04"))
 	}
 
 	return nil
