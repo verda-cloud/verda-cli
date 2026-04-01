@@ -9,6 +9,8 @@ import (
 	"github.com/spf13/cobra"
 	"gopkg.in/ini.v1"
 
+	"github.com/verda-cloud/verdagostack/pkg/tui/wizard"
+
 	cmdutil "github/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
 
@@ -21,7 +23,7 @@ type configureOptions struct {
 }
 
 // NewCmdConfigure creates the auth configure command.
-func NewCmdConfigure(_ cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
+func NewCmdConfigure(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 	opts := &configureOptions{
 		Profile: "default",
 	}
@@ -45,6 +47,18 @@ func NewCmdConfigure(_ cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Comm
 		`),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if strings.TrimSpace(opts.ClientID) == "" || strings.TrimSpace(opts.ClientSecret) == "" {
+				flow := buildConfigureFlow(opts)
+				engine := wizard.NewEngine(f.Prompter(), wizard.WithOutput(ioStreams.ErrOut))
+
+				_, _ = fmt.Fprintln(ioStreams.ErrOut, "=== Configure Auth Profile ===")
+				_, _ = fmt.Fprintln(ioStreams.ErrOut)
+
+				if err := engine.Run(cmd.Context(), flow); err != nil {
+					return err
+				}
+			}
+
 			if strings.TrimSpace(opts.ClientID) == "" {
 				return cmdutil.UsageErrorf(cmd, "--client-id is required")
 			}
