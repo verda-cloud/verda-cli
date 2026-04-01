@@ -18,6 +18,43 @@ import (
 // API-dependent loader fires.
 type clientFunc func() (*verda.Client, error)
 
+// apiCache holds data fetched from the API, shared across wizard steps
+// to avoid redundant calls within a single wizard session.
+type apiCache struct {
+	avail      []verda.LocationAvailability
+	locations  map[string]verda.Location
+	cachedSpot bool // tracks which isSpot value was cached
+	loaded     bool
+}
+
+// fetchAvailability loads availability and location data, caching the result.
+// Cache is invalidated if isSpot changes (user switched billing type).
+func (c *apiCache) fetchAvailability(ctx context.Context, getClient clientFunc, isSpot bool) ([]verda.LocationAvailability, map[string]verda.Location, error) {
+	if c.loaded && c.cachedSpot == isSpot {
+		return c.avail, c.locations, nil
+	}
+	client, err := getClient()
+	if err != nil {
+		return nil, nil, err
+	}
+	avail, err := client.InstanceAvailability.GetAllAvailabilities(ctx, isSpot, "")
+	if err != nil {
+		return nil, nil, fmt.Errorf("fetching availability: %w", err)
+	}
+	locations, err := client.Locations.Get(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("fetching locations: %w", err)
+	}
+	c.locations = make(map[string]verda.Location, len(locations))
+	for _, loc := range locations {
+		c.locations[loc.Code] = loc
+	}
+	c.avail = avail
+	c.cachedSpot = isSpot
+	c.loaded = true
+	return c.avail, c.locations, nil
+}
+
 // buildCreateFlow builds the interactive wizard flow for vm create.
 // It mirrors the web UI step order:
 //
@@ -25,14 +62,15 @@ type clientFunc func() (*verda.Client, error)
 //	image → os-volume-size → storage-size → ssh-keys →
 //	startup-script → hostname → description
 func buildCreateFlow(getClient clientFunc, opts *createOptions) *wizard.Flow {
+	cache := &apiCache{}
 	return &wizard.Flow{
 		Name: "vm-create",
 		Steps: []wizard.Step{
 			stepBillingType(opts),
 			stepContract(getClient, opts),
 			stepKind(opts),
-			stepInstanceType(getClient, opts),
-			stepLocation(getClient, opts),
+			stepInstanceType(getClient, cache, opts),
+			stepLocation(getClient, cache, opts),
 			stepImage(getClient, opts),
 			stepOSVolumeSize(opts),
 			stepStorageSize(opts),
@@ -141,7 +179,7 @@ func stepKind(opts *createOptions) wizard.Step {
 
 // --- Step 4: Instance Type ---
 
-func stepInstanceType(getClient clientFunc, opts *createOptions) wizard.Step {
+func stepInstanceType(getClient clientFunc, cache *apiCache, opts *createOptions) wizard.Step {
 	return wizard.Step{
 		Name:        "instance-type",
 		Description: "Instance type",
@@ -153,13 +191,26 @@ func stepInstanceType(getClient clientFunc, opts *createOptions) wizard.Step {
 			if err != nil {
 				return nil, err
 			}
+			kind := c["kind"].(string)
+			isSpot := c["billing-type"] == "spot"
+
 			types, err := client.InstanceTypes.Get(ctx, "usd")
 			if err != nil {
 				return nil, fmt.Errorf("fetching instance types: %w", err)
 			}
 
-			kind := c["kind"].(string)
-			isSpot := c["billing-type"] == "spot"
+			avail, locMap, err := cache.fetchAvailability(ctx, getClient, isSpot)
+			if err != nil {
+				return nil, err
+			}
+
+			// Build a map: instance type → list of location codes where it's available.
+			availLocs := make(map[string][]string)
+			for _, la := range avail {
+				for _, a := range la.Availabilities {
+					availLocs[a] = append(availLocs[a], la.LocationCode)
+				}
+			}
 
 			var choices []wizard.Choice
 			for i := range types {
@@ -167,13 +218,25 @@ func stepInstanceType(getClient clientFunc, opts *createOptions) wizard.Step {
 				if !matchesKind(t.InstanceType, kind) {
 					continue
 				}
+				locs := availLocs[t.InstanceType]
+				if len(locs) == 0 {
+					continue // skip unavailable instance types
+				}
 				price := t.PricePerHour
 				if isSpot {
 					price = t.SpotPrice
 				}
+				locNames := make([]string, len(locs))
+				for j, code := range locs {
+					if loc, ok := locMap[code]; ok {
+						locNames[j] = loc.Code
+					} else {
+						locNames[j] = code
+					}
+				}
 				label := fmt.Sprintf("%s — %s, %s",
 					t.InstanceType, formatGPU(t), formatMemory(t))
-				desc := fmt.Sprintf("$%.2f/hr", float64(price))
+				desc := fmt.Sprintf("$%.2f/hr  [%s]", float64(price), strings.Join(locNames, ", "))
 				choices = append(choices, wizard.Choice{
 					Label:       label,
 					Value:       t.InstanceType,
@@ -191,7 +254,7 @@ func stepInstanceType(getClient clientFunc, opts *createOptions) wizard.Step {
 
 // --- Step 5: Location ---
 
-func stepLocation(getClient clientFunc, opts *createOptions) wizard.Step {
+func stepLocation(getClient clientFunc, cache *apiCache, opts *createOptions) wizard.Step {
 	return wizard.Step{
 		Name:        "location",
 		Description: "Datacenter location",
@@ -199,25 +262,12 @@ func stepLocation(getClient clientFunc, opts *createOptions) wizard.Step {
 		Required:    true,
 		DependsOn:   []string{"instance-type", "billing-type"},
 		Loader: func(ctx context.Context, _ tui.Prompter, c map[string]any) ([]wizard.Choice, error) {
-			client, err := getClient()
-			if err != nil {
-				return nil, err
-			}
 			isSpot := c["billing-type"] == "spot"
 			instType := c["instance-type"].(string)
 
-			avail, err := client.InstanceAvailability.GetAllAvailabilities(ctx, isSpot, "")
+			avail, locMap, err := cache.fetchAvailability(ctx, getClient, isSpot)
 			if err != nil {
-				return nil, fmt.Errorf("fetching availability: %w", err)
-			}
-
-			locations, err := client.Locations.Get(ctx)
-			if err != nil {
-				return nil, fmt.Errorf("fetching locations: %w", err)
-			}
-			locMap := make(map[string]verda.Location, len(locations))
-			for _, loc := range locations {
-				locMap[loc.Code] = loc
+				return nil, err
 			}
 
 			var choices []wizard.Choice
