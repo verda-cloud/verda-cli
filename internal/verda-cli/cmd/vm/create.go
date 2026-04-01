@@ -2,7 +2,6 @@ package vm
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -144,14 +143,14 @@ func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 		return cmdutil.UsageErrorf(cmd, "%v", err)
 	}
 
-	ctx, cancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
-	defer cancel()
+	createCtx, createCancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
+	defer createCancel()
 
 	var sp interface{ Stop(string) }
 	if status := f.Status(); status != nil {
-		sp, _ = status.Spinner(ctx, "Creating VM instance...")
+		sp, _ = status.Spinner(createCtx, "Creating VM instance...")
 	}
-	instance, err := client.Instances.Create(ctx, req)
+	instance, err := client.Instances.Create(createCtx, req)
 	if sp != nil {
 		sp.Stop("")
 	}
@@ -159,9 +158,8 @@ func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 		return err
 	}
 
-	encoder := json.NewEncoder(ioStreams.Out)
-	encoder.SetIndent("", "  ")
-	return encoder.Encode(instance)
+	// Show live status view, polling until the instance reaches a terminal state.
+	return pollInstanceStatus(cmd.Context(), ioStreams.ErrOut, client, instance.ID)
 }
 
 func runWizard(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *createOptions) error {
