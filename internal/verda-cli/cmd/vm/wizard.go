@@ -3,6 +3,7 @@ package vm
 import (
 	"context"
 	"fmt"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -634,13 +635,42 @@ func promptAddStartupScript(ctx context.Context, prompter tui.Prompter, client *
 	if err != nil || strings.TrimSpace(name) == "" {
 		return nil, nil //nolint:nilerr
 	}
-	script, err := prompter.Editor(ctx, "Script content (Ctrl+D to finish)")
-	if err != nil || strings.TrimSpace(script) == "" {
+
+	// Ask for source: paste or load from file.
+	sourceIdx, err := prompter.Select(ctx, "Script source", []string{
+		"Load from file",
+		"Paste content",
+	})
+	if err != nil {
 		return nil, nil //nolint:nilerr
 	}
+
+	var content string
+	switch sourceIdx {
+	case 0: // Load from file
+		path, err := prompter.TextInput(ctx, "File path")
+		if err != nil || strings.TrimSpace(path) == "" {
+			return nil, nil //nolint:nilerr
+		}
+		data, err := os.ReadFile(strings.TrimSpace(path))
+		if err != nil {
+			return nil, fmt.Errorf("reading script file: %w", err)
+		}
+		content = string(data)
+	case 1: // Paste content
+		content, err = prompter.Editor(ctx, "Script content (Ctrl+D to finish)")
+		if err != nil {
+			return nil, nil //nolint:nilerr
+		}
+	}
+
+	if strings.TrimSpace(content) == "" {
+		return nil, nil
+	}
+
 	created, err := client.StartupScripts.AddStartupScript(ctx, &verda.CreateStartupScriptRequest{
 		Name:   strings.TrimSpace(name),
-		Script: script,
+		Script: content,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating startup script: %w", err)
