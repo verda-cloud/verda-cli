@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
 	"github.com/verda-cloud/verdagostack/pkg/tui"
 	"github.com/verda-cloud/verdagostack/pkg/tui/wizard"
@@ -22,10 +23,12 @@ type clientFunc func() (*verda.Client, error)
 // apiCache holds data fetched from the API, shared across wizard steps
 // to avoid redundant calls within a single wizard session.
 type apiCache struct {
-	avail      []verda.LocationAvailability
-	locations  map[string]verda.Location
-	cachedSpot bool // tracks which isSpot value was cached
-	loaded     bool
+	avail         []verda.LocationAvailability
+	locations     map[string]verda.Location
+	cachedSpot    bool // tracks which isSpot value was cached
+	loaded        bool
+	instanceTypes map[string]verda.InstanceTypeInfo // keyed by instance type name
+	volumeTypes   map[string]verda.VolumeType       // keyed by volume type name
 }
 
 // fetchAvailability loads availability and location data, caching the result.
@@ -82,6 +85,7 @@ func buildCreateFlow(getClient clientFunc, opts *createOptions) *wizard.Flow {
 			stepStartupScript(getClient, opts),
 			stepHostname(opts),
 			stepDescription(opts),
+			stepConfirmDeploy(getClient, cache, opts),
 		},
 	}
 }
@@ -206,6 +210,14 @@ func stepInstanceType(getClient clientFunc, cache *apiCache, opts *createOptions
 			})
 			if err != nil {
 				return nil, fmt.Errorf("fetching instance types: %w", err)
+			}
+
+			// Cache instance types for deployment summary.
+			if cache.instanceTypes == nil {
+				cache.instanceTypes = make(map[string]verda.InstanceTypeInfo, len(types))
+			}
+			for _, t := range types {
+				cache.instanceTypes[t.InstanceType] = t
 			}
 
 			avail, locMap, err := cache.fetchAvailability(ctx, getClient, isSpot)
@@ -868,6 +880,137 @@ func withSpinner[T any](ctx context.Context, status tui.Status, msg string, fn f
 		sp.Stop("")
 	}
 	return result, fnErr
+}
+
+// --- Step 13: Deployment Summary & Confirm ---
+
+func stepConfirmDeploy(getClient clientFunc, cache *apiCache, opts *createOptions) wizard.Step {
+	return wizard.Step{
+		Name:        "confirm-deploy",
+		Description: "Deploy now?",
+		Prompt:      wizard.ConfirmPrompt,
+		Required:    true,
+		Default: func(_ map[string]any) any {
+			// Fetch volume type pricing (best effort).
+			if cache.volumeTypes == nil && len(opts.VolumeSpecs) > 0 {
+				if client, err := getClient(); err == nil {
+					if vTypes, err := client.VolumeTypes.GetAllVolumeTypes(context.Background()); err == nil {
+						cache.volumeTypes = make(map[string]verda.VolumeType, len(vTypes))
+						for _, vt := range vTypes {
+							cache.volumeTypes[vt.Type] = vt
+						}
+					}
+				}
+			}
+			renderDeploymentSummary(opts, cache)
+			return true
+		},
+		Setter: func(v any) {
+			if confirmed, ok := v.(bool); ok && !confirmed {
+				opts.Hostname = ""
+			}
+		},
+		Resetter: func() {},
+		IsSet:    func() bool { return false },
+		Value:    func() any { return true },
+	}
+}
+
+func renderDeploymentSummary(opts *createOptions, cache *apiCache) {
+	bold := lipgloss.NewStyle().Bold(true)
+	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	accent := lipgloss.NewStyle().Foreground(lipgloss.Color("14"))
+
+	var computeHourly float64
+	var storageHourly float64
+
+	// Instance pricing.
+	instLabel := opts.InstanceType
+	if info, ok := cache.instanceTypes[opts.InstanceType]; ok {
+		if opts.IsSpot {
+			computeHourly = float64(info.SpotPrice)
+		} else {
+			computeHourly = float64(info.PricePerHour)
+		}
+		instLabel = fmt.Sprintf("%s — %s", info.InstanceType, info.GPU.Description)
+		if info.GPU.NumberOfGPUs == 0 {
+			instLabel = fmt.Sprintf("%s — %d CPU, %dGB RAM", info.InstanceType, info.CPU.NumberOfCores, info.Memory.SizeInGigabytes)
+		}
+	}
+
+	// Volume pricing.
+	var volDetails []string
+	for _, spec := range opts.VolumeSpecs {
+		parts := strings.SplitN(spec, ":", 3)
+		if len(parts) < 3 {
+			continue
+		}
+		name, sizeStr, volType := parts[0], parts[1], parts[2]
+		size, _ := strconv.Atoi(sizeStr)
+		if vt, ok := cache.volumeTypes[volType]; ok {
+			hourly := vt.Price.MonthlyPerGB / 730.0 * float64(size)
+			storageHourly += hourly
+			volDetails = append(volDetails, fmt.Sprintf("    %s  %dGB %s  $%.3f/hr", name, size, volType, hourly))
+		} else {
+			volDetails = append(volDetails, fmt.Sprintf("    %s  %dGB %s", name, size, volType))
+		}
+	}
+
+	// OS volume pricing (uses NVMe by default).
+	if opts.OSVolumeSize > 0 {
+		if vt, ok := cache.volumeTypes[verda.VolumeTypeNVMe]; ok {
+			hourly := vt.Price.MonthlyPerGB / 730.0 * float64(opts.OSVolumeSize)
+			storageHourly += hourly
+		}
+	}
+
+	// Print summary.
+	fmt.Fprintf(os.Stderr, "\n  %s\n", bold.Render("Deployment Summary"))
+
+	billing := "On-Demand"
+	if opts.IsSpot {
+		billing = "Spot Instance"
+	}
+	fmt.Fprintf(os.Stderr, "  %s\n", dim.Render(billing))
+	fmt.Fprintf(os.Stderr, "  %s\n\n", dim.Render(strings.Repeat("─", 45)))
+
+	// Instance.
+	fmt.Fprintf(os.Stderr, "  %s\n", accent.Render("Instance"))
+	fmt.Fprintf(os.Stderr, "    %s\n", instLabel)
+	fmt.Fprintf(os.Stderr, "    %s\n\n", dim.Render(opts.LocationCode))
+
+	// OS.
+	fmt.Fprintf(os.Stderr, "  %s\n", accent.Render("Operating System"))
+	fmt.Fprintf(os.Stderr, "    %s", opts.Image)
+	if opts.OSVolumeSize > 0 {
+		fmt.Fprintf(os.Stderr, "  %dGB", opts.OSVolumeSize)
+	}
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintln(os.Stderr)
+
+	// Storage.
+	if len(volDetails) > 0 {
+		fmt.Fprintf(os.Stderr, "  %s\n", accent.Render("Storage"))
+		for _, d := range volDetails {
+			fmt.Fprintln(os.Stderr, d)
+		}
+		fmt.Fprintln(os.Stderr)
+	}
+
+	// SSH keys.
+	if len(opts.SSHKeyIDs) > 0 {
+		fmt.Fprintf(os.Stderr, "  %s  %d key(s)\n\n", accent.Render("SSH Keys"), len(opts.SSHKeyIDs))
+	}
+
+	// Cost breakdown.
+	fmt.Fprintf(os.Stderr, "  %s\n", dim.Render(strings.Repeat("─", 45)))
+	fmt.Fprintf(os.Stderr, "  %-30s %s\n", "Compute total", fmt.Sprintf("$%.3f/hr", computeHourly))
+	if storageHourly > 0 {
+		fmt.Fprintf(os.Stderr, "  %-30s %s\n", "Storage total", fmt.Sprintf("$%.3f/hr", storageHourly))
+	}
+	total := computeHourly + storageHourly
+	fmt.Fprintf(os.Stderr, "  %s  %s\n", bold.Render(fmt.Sprintf("%-30s", "Total")), bold.Render(fmt.Sprintf("$%.3f/hr", total)))
+	fmt.Fprintf(os.Stderr, "  %s\n\n", dim.Render(strings.Repeat("─", 45)))
 }
 
 // --- Helpers ---

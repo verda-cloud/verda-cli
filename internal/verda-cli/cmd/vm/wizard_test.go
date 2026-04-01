@@ -2,6 +2,7 @@ package vm
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
@@ -32,10 +33,11 @@ func TestBuildCreateFlowHappyPath(t *testing.T) {
 	mock.AddTextInput("100")    // os-volume-size
 	mock.AddTextInput("my-gpu") // hostname
 	mock.AddTextInput("")       // description (use default = hostname)
+	mock.AddConfirm(true)       // confirm deploy
 
-	// noClient panics if called — API steps should be skipped via IsSet.
-	noClient := func() (*verda.Client, error) { panic("unexpected client call") }
-	flow := buildCreateFlow(noClient, opts)
+	// errClient returns error — API steps skipped via IsSet, confirm step handles error gracefully.
+	errClient := func() (*verda.Client, error) { return nil, fmt.Errorf("no client in test") }
+	flow := buildCreateFlow(errClient, opts)
 	engine := wizard.NewEngine(mock, nil)
 
 	if err := engine.Run(context.Background(), flow); err != nil {
@@ -77,9 +79,10 @@ func TestBuildCreateFlowSpotSkipsContract(t *testing.T) {
 	mock.AddTextInput("50")      // os-volume-size
 	mock.AddTextInput("spot-vm") // hostname
 	mock.AddTextInput("")        // description
+	mock.AddConfirm(true)        // confirm deploy
 
-	noClient := func() (*verda.Client, error) { panic("unexpected client call") }
-	flow := buildCreateFlow(noClient, opts)
+	errClient := func() (*verda.Client, error) { return nil, fmt.Errorf("no client in test") }
+	flow := buildCreateFlow(errClient, opts)
 	engine := wizard.NewEngine(mock, nil)
 
 	if err := engine.Run(context.Background(), flow); err != nil {
