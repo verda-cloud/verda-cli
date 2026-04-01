@@ -256,9 +256,9 @@ func stepInstanceType(getClient clientFunc, cache *apiCache, opts *createOptions
 						locNames[j] = code
 					}
 				}
-				label := fmt.Sprintf("%s — %s, %s",
-					t.InstanceType, formatGPU(t), formatMemory(t))
-				desc := fmt.Sprintf("$%.2f/hr  [%s]", float64(price), strings.Join(locNames, ", "))
+				label := fmt.Sprintf("%s — %s, %s  $%.2f/hr",
+					t.InstanceType, formatGPU(t), formatMemory(t), float64(price))
+				desc := fmt.Sprintf("[%s]", strings.Join(locNames, ", "))
 				choices = append(choices, wizard.Choice{
 					Label:       label,
 					Value:       t.InstanceType,
