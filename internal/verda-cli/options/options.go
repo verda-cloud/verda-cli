@@ -125,6 +125,9 @@ func (o *Options) Complete() {
 		shared, err := loadSharedCredentials(a.CredentialsFile, a.Profile)
 		switch {
 		case err == nil:
+			if o.Server == "https://api.verda.com/v1" && shared.BaseURL != "" {
+				o.Server = shared.BaseURL
+			}
 			if a.ClientID == "" {
 				a.ClientID = shared.ClientID
 			}

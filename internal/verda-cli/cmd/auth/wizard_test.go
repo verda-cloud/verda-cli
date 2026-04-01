@@ -8,20 +8,21 @@ import (
 	"github.com/verda-cloud/verdagostack/pkg/tui/wizard"
 )
 
-func TestBuildConfigureFlowHappyPath(t *testing.T) {
+func TestBuildLoginFlowHappyPath(t *testing.T) {
 	t.Parallel()
 
-	opts := &configureOptions{
+	opts := &loginOptions{
 		Profile: "default",
+		BaseURL: defaultBaseURL,
 	}
 
 	mock := tuitest.New()
-	mock.AddTextInput("staging")  // profile
-	mock.AddTextInput("my-id")    // client-id
-	mock.AddPassword("my-secret") // client-secret
-	mock.AddTextInput("")         // token (skip)
+	mock.AddTextInput("staging")                        // profile
+	mock.AddTextInput("https://staging-api.verda.com")  // base-url
+	mock.AddTextInput("my-id")                          // client-id
+	mock.AddPassword("my-secret")                       // client-secret
 
-	flow := buildConfigureFlow(opts)
+	flow := buildLoginFlow(opts)
 	engine := wizard.NewEngine(mock)
 
 	if err := engine.Run(context.Background(), flow); err != nil {
@@ -31,31 +32,31 @@ func TestBuildConfigureFlowHappyPath(t *testing.T) {
 	if opts.Profile != "staging" {
 		t.Errorf("expected profile=staging, got %q", opts.Profile)
 	}
+	if opts.BaseURL != "https://staging-api.verda.com" {
+		t.Errorf("expected base-url=https://staging-api.verda.com, got %q", opts.BaseURL)
+	}
 	if opts.ClientID != "my-id" {
 		t.Errorf("expected client-id=my-id, got %q", opts.ClientID)
 	}
 	if opts.ClientSecret != "my-secret" {
 		t.Errorf("expected client-secret=my-secret, got %q", opts.ClientSecret)
 	}
-	if opts.BearerToken != "" {
-		t.Errorf("expected empty token, got %q", opts.BearerToken)
-	}
 }
 
-func TestBuildConfigureFlowWithPresetFlags(t *testing.T) {
+func TestBuildLoginFlowWithPresetFlags(t *testing.T) {
 	t.Parallel()
 
-	opts := &configureOptions{
+	opts := &loginOptions{
 		Profile:  "prod",
+		BaseURL:  "https://custom-api.verda.com/v1",
 		ClientID: "preset-id",
 	}
 
-	// Only client-secret and token need prompting.
+	// Only client-secret needs prompting (profile, base-url, client-id are preset via IsSet).
 	mock := tuitest.New()
-	mock.AddPassword("the-secret") // client-secret
-	mock.AddTextInput("tok-123")   // token
+	mock.AddPassword("the-secret")
 
-	flow := buildConfigureFlow(opts)
+	flow := buildLoginFlow(opts)
 	engine := wizard.NewEngine(mock)
 
 	if err := engine.Run(context.Background(), flow); err != nil {
@@ -65,13 +66,13 @@ func TestBuildConfigureFlowWithPresetFlags(t *testing.T) {
 	if opts.Profile != "prod" {
 		t.Errorf("expected profile=prod (preset), got %q", opts.Profile)
 	}
+	if opts.BaseURL != "https://custom-api.verda.com/v1" {
+		t.Errorf("expected base-url preserved, got %q", opts.BaseURL)
+	}
 	if opts.ClientID != "preset-id" {
 		t.Errorf("expected client-id=preset-id (preset), got %q", opts.ClientID)
 	}
 	if opts.ClientSecret != "the-secret" {
 		t.Errorf("expected client-secret=the-secret, got %q", opts.ClientSecret)
-	}
-	if opts.BearerToken != "tok-123" {
-		t.Errorf("expected token=tok-123, got %q", opts.BearerToken)
 	}
 }

@@ -14,44 +14,65 @@ import (
 	cmdutil "github/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
 
-type configureOptions struct {
+type loginOptions struct {
 	Profile         string
 	CredentialsFile string
+	BaseURL         string
 	ClientID        string
 	ClientSecret    string
-	BearerToken     string
 }
 
-// NewCmdConfigure creates the auth configure command.
-func NewCmdConfigure(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
-	opts := &configureOptions{
+// NewCmdLogin creates the auth login command.
+func NewCmdLogin(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
+	opts := &loginOptions{
 		Profile: "default",
+		BaseURL: "https://api.verda.com/v1",
 	}
 
 	cmd := &cobra.Command{
-		Use:   "configure",
-		Short: "Write shared credentials for a profile",
+		Use:   "login",
+		Short: "Save API credentials for a profile",
 		Long: cmdutil.LongDesc(`
-			Write credentials to ~/.verda/credentials using an AWS-style INI format.
+			Save credentials to a shared credentials file in AWS-style INI format.
+
+			Default file: ~/.verda/credentials
+			Override with --credentials-file or VERDA_SHARED_CREDENTIALS_FILE.
+
+			Credentials are stored per profile:
+			  [default]
+			  base_url   = https://api.verda.com/v1
+			  client_id  = your-client-id
+			  client_secret = your-client-secret
 		`),
 		Example: cmdutil.Examples(`
-			verda auth configure \
-			  --profile default \
+			# Interactive wizard (prompts for all fields)
+			verda auth login
+
+			# Non-interactive with flags
+			verda auth login \
 			  --client-id your-client-id \
 			  --client-secret your-client-secret
 
-			verda auth configure \
+			# Staging profile with custom API endpoint
+			verda auth login \
 			  --profile staging \
-			  --client-id your-staging-client-id \
-			  --client-secret your-staging-client-secret
+			  --base-url https://staging-api.verda.com/v1 \
+			  --client-id staging-id \
+			  --client-secret staging-secret
+
+			# Custom credentials file
+			verda auth login \
+			  --credentials-file /path/to/credentials \
+			  --client-id your-id \
+			  --client-secret your-secret
 		`),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if strings.TrimSpace(opts.ClientID) == "" || strings.TrimSpace(opts.ClientSecret) == "" {
-				flow := buildConfigureFlow(opts)
+				flow := buildLoginFlow(opts)
 				engine := wizard.NewEngine(f.Prompter(), wizard.WithOutput(ioStreams.ErrOut))
 
-				_, _ = fmt.Fprintln(ioStreams.ErrOut, "=== Configure Auth Profile ===")
+				_, _ = fmt.Fprintln(ioStreams.ErrOut, "=== Verda Auth Login ===")
 				_, _ = fmt.Fprintln(ioStreams.ErrOut)
 
 				if err := engine.Run(cmd.Context(), flow); err != nil {
@@ -87,13 +108,9 @@ func NewCmdConfigure(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Comm
 				}
 			}
 
+			section.Key("base_url").SetValue(opts.BaseURL)
 			section.Key("client_id").SetValue(opts.ClientID)
 			section.Key("client_secret").SetValue(opts.ClientSecret)
-			if opts.BearerToken != "" {
-				section.Key("token").SetValue(opts.BearerToken)
-			} else if section.HasKey("token") {
-				section.DeleteKey("token")
-			}
 
 			if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 				return err
@@ -105,7 +122,7 @@ func NewCmdConfigure(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Comm
 				return err
 			}
 
-			fmt.Fprintf(ioStreams.Out, "Saved profile %q to %s\n", opts.Profile, path)
+			_, _ = fmt.Fprintf(ioStreams.Out, "Saved profile %q to %s\n", opts.Profile, path)
 			return nil
 		},
 	}
@@ -113,9 +130,9 @@ func NewCmdConfigure(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Comm
 	flags := cmd.Flags()
 	flags.StringVar(&opts.Profile, "profile", opts.Profile, "Credentials profile name")
 	flags.StringVar(&opts.CredentialsFile, "credentials-file", "", "Path to the shared credentials file")
+	flags.StringVar(&opts.BaseURL, "base-url", opts.BaseURL, "Verda API base URL")
 	flags.StringVar(&opts.ClientID, "client-id", "", "Verda API client ID")
 	flags.StringVar(&opts.ClientSecret, "client-secret", "", "Verda API client secret")
-	flags.StringVar(&opts.BearerToken, "token", "", "Optional bearer token to store with the profile")
 
 	return cmd
 }

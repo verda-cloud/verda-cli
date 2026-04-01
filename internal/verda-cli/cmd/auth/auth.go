@@ -18,7 +18,7 @@ func NewCmdAuth(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 	}
 
 	cmd.AddCommand(
-		NewCmdConfigure(f, ioStreams),
+		NewCmdLogin(f, ioStreams),
 		NewCmdUse(f, ioStreams),
 		NewCmdShow(f, ioStreams),
 	)

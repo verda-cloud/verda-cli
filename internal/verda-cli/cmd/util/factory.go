@@ -66,7 +66,7 @@ func (f *factoryImpl) VerdaClient() (*verda.Client, error) {
 	auth := f.opts.AuthOptions
 	if auth.ClientID == "" || auth.ClientSecret == "" {
 		return nil, fmt.Errorf("no credentials configured\n\n" +
-			"Run \"verda auth configure\" to set up your credentials, or provide them via:\n" +
+			"Run \"verda auth login\" to set up your credentials, or provide them via:\n" +
 			"  --auth.client-id / VERDA_CLIENT_ID\n" +
 			"  --auth.client-secret / VERDA_CLIENT_SECRET")
 	}

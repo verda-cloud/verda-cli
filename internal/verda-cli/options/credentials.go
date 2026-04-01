@@ -10,6 +10,7 @@ import (
 )
 
 type SharedCredentials struct {
+	BaseURL      string
 	ClientID     string
 	ClientSecret string
 	BearerToken  string
@@ -45,6 +46,7 @@ func loadSharedCredentials(path string, profile string) (*SharedCredentials, err
 	}
 
 	creds := &SharedCredentials{
+		BaseURL:      strings.TrimSpace(section.Key("base_url").String()),
 		ClientID:     strings.TrimSpace(section.Key("client_id").String()),
 		ClientSecret: strings.TrimSpace(section.Key("client_secret").String()),
 	}

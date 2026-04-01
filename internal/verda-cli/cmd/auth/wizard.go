@@ -7,22 +7,24 @@ import (
 	"github.com/verda-cloud/verdagostack/pkg/tui/wizard"
 )
 
-// buildConfigureFlow builds the interactive wizard flow for auth configure.
+const defaultBaseURL = "https://api.verda.com/v1"
+
+// buildLoginFlow builds the interactive wizard flow for auth login.
 //
-//	profile → client-id → client-secret → token (optional)
-func buildConfigureFlow(opts *configureOptions) *wizard.Flow {
+//	profile → base-url → client-id → client-secret
+func buildLoginFlow(opts *loginOptions) *wizard.Flow {
 	return &wizard.Flow{
-		Name: "auth-configure",
+		Name: "auth-login",
 		Steps: []wizard.Step{
-			stepProfile(opts),
-			stepClientID(opts),
-			stepClientSecret(opts),
-			stepBearerToken(opts),
+			loginStepProfile(opts),
+			loginStepBaseURL(opts),
+			loginStepClientID(opts),
+			loginStepClientSecret(opts),
 		},
 	}
 }
 
-func stepProfile(opts *configureOptions) wizard.Step {
+func loginStepProfile(opts *loginOptions) wizard.Step {
 	return wizard.Step{
 		Name:        "profile",
 		Description: "Profile name",
@@ -30,8 +32,7 @@ func stepProfile(opts *configureOptions) wizard.Step {
 		Required:    true,
 		Default:     func(_ map[string]any) any { return "default" },
 		Validate: func(v any) error {
-			s := strings.TrimSpace(v.(string))
-			if s == "" {
+			if strings.TrimSpace(v.(string)) == "" {
 				return fmt.Errorf("profile name cannot be empty")
 			}
 			return nil
@@ -43,7 +44,31 @@ func stepProfile(opts *configureOptions) wizard.Step {
 	}
 }
 
-func stepClientID(opts *configureOptions) wizard.Step {
+func loginStepBaseURL(opts *loginOptions) wizard.Step {
+	return wizard.Step{
+		Name:        "base-url",
+		Description: "API base URL",
+		Prompt:      wizard.TextInputPrompt,
+		Required:    true,
+		Default:     func(_ map[string]any) any { return defaultBaseURL },
+		Validate: func(v any) error {
+			s := strings.TrimSpace(v.(string))
+			if s == "" {
+				return fmt.Errorf("base URL cannot be empty")
+			}
+			if !strings.HasPrefix(s, "http://") && !strings.HasPrefix(s, "https://") {
+				return fmt.Errorf("base URL must start with http:// or https://")
+			}
+			return nil
+		},
+		Setter:   func(v any) { opts.BaseURL = strings.TrimSpace(v.(string)) },
+		Resetter: func() { opts.BaseURL = defaultBaseURL },
+		IsSet:    func() bool { return opts.BaseURL != "" && opts.BaseURL != defaultBaseURL },
+		Value:    func() any { return opts.BaseURL },
+	}
+}
+
+func loginStepClientID(opts *loginOptions) wizard.Step {
 	return wizard.Step{
 		Name:        "client-id",
 		Description: "Verda API client ID",
@@ -62,7 +87,7 @@ func stepClientID(opts *configureOptions) wizard.Step {
 	}
 }
 
-func stepClientSecret(opts *configureOptions) wizard.Step {
+func loginStepClientSecret(opts *loginOptions) wizard.Step {
 	return wizard.Step{
 		Name:        "client-secret",
 		Description: "Verda API client secret",
@@ -72,18 +97,5 @@ func stepClientSecret(opts *configureOptions) wizard.Step {
 		Resetter:    func() { opts.ClientSecret = "" },
 		IsSet:       func() bool { return opts.ClientSecret != "" },
 		Value:       func() any { return opts.ClientSecret },
-	}
-}
-
-func stepBearerToken(opts *configureOptions) wizard.Step {
-	return wizard.Step{
-		Name:        "token",
-		Description: "Bearer token (optional, press Enter to skip)",
-		Prompt:      wizard.TextInputPrompt,
-		Required:    false,
-		Setter:      func(v any) { opts.BearerToken = strings.TrimSpace(v.(string)) },
-		Resetter:    func() { opts.BearerToken = "" },
-		IsSet:       func() bool { return opts.BearerToken != "" },
-		Value:       func() any { return opts.BearerToken },
 	}
 }
