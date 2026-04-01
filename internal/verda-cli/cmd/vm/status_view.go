@@ -13,10 +13,8 @@ import (
 
 const pollInterval = 5 * time.Second
 
-// Spinner frames for the waiting animation.
 var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
-// terminalStatuses are statuses where we stop polling.
 var terminalStatuses = map[string]bool{
 	verda.StatusRunning:      true,
 	verda.StatusOffline:      true,
@@ -24,6 +22,24 @@ var terminalStatuses = map[string]bool{
 	verda.StatusDiscontinued: true,
 	verda.StatusNotFound:     true,
 	verda.StatusNoCapacity:   true,
+}
+
+// statusMessage returns a human-friendly message for the instance status.
+func statusMessage(status string) string {
+	switch status {
+	case verda.StatusNew:
+		return "Creating instance..."
+	case verda.StatusOrdered:
+		return "Instance ordered..."
+	case verda.StatusProvisioning:
+		return "Provisioning instance..."
+	case verda.StatusValidating:
+		return "Validating instance..."
+	case verda.StatusPending:
+		return "Waiting for capacity..."
+	default:
+		return "Waiting..."
+	}
 }
 
 // statusColor returns a lipgloss color for the instance status.
@@ -42,33 +58,17 @@ func statusColor(status string) lipgloss.Color {
 	}
 }
 
-// renderInstanceView renders a styled instance summary.
-// When waiting is true, the header shows an animated spinner and elapsed time.
-func renderInstanceView(inst *verda.Instance, spinnerFrame string, elapsed time.Duration, waiting bool) string {
+// renderInstanceCard renders the final styled instance summary.
+func renderInstanceCard(inst *verda.Instance) string {
 	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 	bold := lipgloss.NewStyle().Bold(true)
 	statusStyle := lipgloss.NewStyle().Foreground(statusColor(inst.Status))
 
-	// Header: hostname  instance-type  ● status ⠋ 15s
-	var header string
-	if waiting {
-		header = fmt.Sprintf("%s  %s  %s %s %s",
-			bold.Render(inst.Hostname),
-			dim.Render(inst.InstanceType),
-			statusStyle.Render("● "+inst.Status),
-			statusStyle.Render(spinnerFrame),
-			dim.Render(formatElapsed(elapsed)))
-	} else {
-		header = fmt.Sprintf("%s  %s  %s",
-			bold.Render(inst.Hostname),
-			dim.Render(inst.InstanceType),
-			statusStyle.Render("● "+inst.Status))
-	}
+	header := fmt.Sprintf("%s  %s  %s",
+		bold.Render(inst.Hostname),
+		dim.Render(inst.InstanceType),
+		statusStyle.Render("● "+inst.Status))
 
-	var b strings.Builder
-	_, _ = fmt.Fprintf(&b, "\n%s\n\n", header)
-
-	// Fields
 	lines := []struct{ label, value string }{
 		{"Instance ID", inst.ID},
 		{"Location", inst.Location},
@@ -96,16 +96,14 @@ func renderInstanceView(inst *verda.Instance, spinnerFrame string, elapsed time.
 		lines = append(lines, struct{ label, value string }{"IP Address", *inst.IP})
 	}
 
-	labelStyle := dim
+	var b strings.Builder
+	_, _ = fmt.Fprintf(&b, "\n%s\n\n", header)
 	for _, l := range lines {
-		_, _ = fmt.Fprintf(&b, "  %s  %s\n", labelStyle.Render(fmt.Sprintf("%-15s", l.label)), l.value)
+		_, _ = fmt.Fprintf(&b, "  %s  %s\n", dim.Render(fmt.Sprintf("%-15s", l.label)), l.value)
 	}
 
-	// SSH hint
 	if inst.Status == verda.StatusRunning && inst.IP != nil && *inst.IP != "" {
-		sshStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("14")).
-			Bold(true)
+		sshStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("14")).Bold(true)
 		_, _ = fmt.Fprintf(&b, "\n  %s\n", sshStyle.Render(fmt.Sprintf("ssh root@%s", *inst.IP)))
 	}
 
@@ -119,28 +117,23 @@ func formatElapsed(d time.Duration) string {
 	if s < 60 {
 		return fmt.Sprintf("%ds", s)
 	}
-	return fmt.Sprintf("%dm%ds", s/60, s%60)
+	return fmt.Sprintf("%dm %ds", s/60, s%60)
 }
 
-// pollInstanceStatus polls the instance status until it reaches a terminal state.
-// Shows an animated spinner and elapsed timer while waiting.
+// pollInstanceStatus polls the instance until terminal, showing an animated
+// single-line status like: ✻ Provisioning instance... 15s
+// Then renders the full instance card when done.
 func pollInstanceStatus(ctx context.Context, w io.Writer, client *verda.Client, instanceID string) error {
-	clearLines := func(n int) {
-		for range n {
-			_, _ = fmt.Fprintf(w, "\033[A\033[2K")
-		}
-	}
+	accentStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("5")) // purple like Claude
+	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 
-	var lastLineCount int
 	var lastInst *verda.Instance
 	startTime := time.Now()
 	frame := 0
 
-	// Ticker for spinner animation (100ms).
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 
-	// Ticker for API polling.
 	pollTicker := time.NewTicker(pollInterval)
 	defer pollTicker.Stop()
 
@@ -152,23 +145,26 @@ func pollInstanceStatus(ctx context.Context, w io.Writer, client *verda.Client, 
 	lastInst = inst
 
 	for {
-		// Render current state.
-		waiting := !terminalStatuses[lastInst.Status]
-		output := renderInstanceView(lastInst, spinnerFrames[frame%len(spinnerFrames)], time.Since(startTime), waiting)
-		lineCount := strings.Count(output, "\n")
-
-		if lastLineCount > 0 {
-			clearLines(lastLineCount)
-		}
-		_, _ = fmt.Fprint(w, output)
-		lastLineCount = lineCount
-
-		if !waiting {
+		if terminalStatuses[lastInst.Status] {
+			// Clear the spinner line and show the final card.
+			_, _ = fmt.Fprintf(w, "\r\033[2K")
+			_, _ = fmt.Fprint(w, renderInstanceCard(lastInst))
 			return nil
 		}
 
+		// Render animated single-line status.
+		spinner := spinnerFrames[frame%len(spinnerFrames)]
+		elapsed := formatElapsed(time.Since(startTime))
+		msg := statusMessage(lastInst.Status)
+		line := fmt.Sprintf("\r\033[2K%s %s %s",
+			accentStyle.Render(spinner),
+			msg,
+			dimStyle.Render(elapsed))
+		_, _ = fmt.Fprint(w, line)
+
 		select {
 		case <-ctx.Done():
+			_, _ = fmt.Fprintln(w)
 			return ctx.Err()
 		case <-ticker.C:
 			frame++
@@ -176,6 +172,7 @@ func pollInstanceStatus(ctx context.Context, w io.Writer, client *verda.Client, 
 			frame++
 			inst, err := client.Instances.GetByID(ctx, instanceID)
 			if err != nil {
+				_, _ = fmt.Fprintln(w)
 				return fmt.Errorf("polling instance status: %w", err)
 			}
 			lastInst = inst
