@@ -23,7 +23,7 @@ func TestBuildLoginFlowHappyPath(t *testing.T) {
 	mock.AddPassword("my-secret")                       // client-secret
 
 	flow := buildLoginFlow(opts)
-	engine := wizard.NewEngine(mock)
+	engine := wizard.NewEngine(mock, nil)
 
 	if err := engine.Run(context.Background(), flow); err != nil {
 		t.Fatalf("wizard Run failed: %v", err)
@@ -57,7 +57,7 @@ func TestBuildLoginFlowWithPresetFlags(t *testing.T) {
 	mock.AddPassword("the-secret")
 
 	flow := buildLoginFlow(opts)
-	engine := wizard.NewEngine(mock)
+	engine := wizard.NewEngine(mock, nil)
 
 	if err := engine.Run(context.Background(), flow); err != nil {
 		t.Fatalf("wizard Run failed: %v", err)

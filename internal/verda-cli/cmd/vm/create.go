@@ -159,12 +159,7 @@ func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 
 func runWizard(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *createOptions) error {
 	flow := buildCreateFlow(f.VerdaClient, opts)
-	engine := wizard.NewEngine(f.Prompter(), wizard.WithOutput(ioStreams.ErrOut))
-
-	_, _ = fmt.Fprintln(ioStreams.ErrOut, "=== Create VM Instance ===")
-	_, _ = fmt.Fprintln(ioStreams.ErrOut, "Navigate: ↑/↓ to move, Enter to select, Esc to go back")
-	_, _ = fmt.Fprintln(ioStreams.ErrOut)
-
+	engine := wizard.NewEngine(f.Prompter(), f.Status(), wizard.WithOutput(ioStreams.ErrOut))
 	return engine.Run(ctx, flow)
 }
 

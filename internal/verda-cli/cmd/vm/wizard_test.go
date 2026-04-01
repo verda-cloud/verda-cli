@@ -36,7 +36,7 @@ func TestBuildCreateFlowHappyPath(t *testing.T) {
 	// noClient panics if called — API steps should be skipped via IsSet.
 	noClient := func() (*verda.Client, error) { panic("unexpected client call") }
 	flow := buildCreateFlow(noClient, opts)
-	engine := wizard.NewEngine(mock)
+	engine := wizard.NewEngine(mock, nil)
 
 	if err := engine.Run(context.Background(), flow); err != nil {
 		t.Fatalf("wizard Run failed: %v", err)
@@ -83,7 +83,7 @@ func TestBuildCreateFlowSpotSkipsContract(t *testing.T) {
 
 	noClient := func() (*verda.Client, error) { panic("unexpected client call") }
 	flow := buildCreateFlow(noClient, opts)
-	engine := wizard.NewEngine(mock)
+	engine := wizard.NewEngine(mock, nil)
 
 	if err := engine.Run(context.Background(), flow); err != nil {
 		t.Fatalf("wizard Run failed: %v", err)

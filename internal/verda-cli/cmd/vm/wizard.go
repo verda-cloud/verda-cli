@@ -122,7 +122,7 @@ func stepContract(getClient clientFunc, opts *createOptions) wizard.Step {
 		ShouldSkip: func(c map[string]any) bool {
 			return c["billing-type"] == "spot"
 		},
-		Loader: func(ctx context.Context, _ tui.Prompter, _ map[string]any) ([]wizard.Choice, error) {
+		Loader: func(ctx context.Context, _ tui.Prompter, _ tui.Status, store *wizard.Store) ([]wizard.Choice, error) {
 			choices := []wizard.Choice{
 				{Label: "Pay as you go", Value: "PAY_AS_YOU_GO"},
 			}
@@ -186,11 +186,12 @@ func stepInstanceType(getClient clientFunc, cache *apiCache, opts *createOptions
 		Prompt:      wizard.SelectPrompt,
 		Required:    true,
 		DependsOn:   []string{"kind", "billing-type"},
-		Loader: func(ctx context.Context, _ tui.Prompter, c map[string]any) ([]wizard.Choice, error) {
+		Loader: func(ctx context.Context, _ tui.Prompter, _ tui.Status, store *wizard.Store) ([]wizard.Choice, error) {
 			client, err := getClient()
 			if err != nil {
 				return nil, err
 			}
+			c := store.Collected()
 			kind := c["kind"].(string)
 			isSpot := c["billing-type"] == "spot"
 
@@ -261,7 +262,8 @@ func stepLocation(getClient clientFunc, cache *apiCache, opts *createOptions) wi
 		Prompt:      wizard.SelectPrompt,
 		Required:    true,
 		DependsOn:   []string{"instance-type", "billing-type"},
-		Loader: func(ctx context.Context, _ tui.Prompter, c map[string]any) ([]wizard.Choice, error) {
+		Loader: func(ctx context.Context, _ tui.Prompter, _ tui.Status, store *wizard.Store) ([]wizard.Choice, error) {
+			c := store.Collected()
 			isSpot := c["billing-type"] == "spot"
 			instType := c["instance-type"].(string)
 
@@ -299,7 +301,7 @@ func stepImage(getClient clientFunc, opts *createOptions) wizard.Step {
 		Description: "Operating system image",
 		Prompt:      wizard.SelectPrompt,
 		Required:    true,
-		Loader: func(ctx context.Context, _ tui.Prompter, _ map[string]any) ([]wizard.Choice, error) {
+		Loader: func(ctx context.Context, _ tui.Prompter, _ tui.Status, _ *wizard.Store) ([]wizard.Choice, error) {
 			client, err := getClient()
 			if err != nil {
 				return nil, err
@@ -404,7 +406,7 @@ func stepSSHKeys(getClient clientFunc, opts *createOptions) wizard.Step {
 		Description: "SSH keys to inject",
 		Prompt:      wizard.MultiSelectPrompt,
 		Required:    false,
-		Loader: func(ctx context.Context, _ tui.Prompter, _ map[string]any) ([]wizard.Choice, error) {
+		Loader: func(ctx context.Context, _ tui.Prompter, _ tui.Status, _ *wizard.Store) ([]wizard.Choice, error) {
 			client, err := getClient()
 			if err != nil {
 				return nil, err
@@ -440,7 +442,7 @@ func stepStartupScript(getClient clientFunc, opts *createOptions) wizard.Step {
 		Description: "Startup script (optional)",
 		Prompt:      wizard.SelectPrompt,
 		Required:    false,
-		Loader: func(ctx context.Context, _ tui.Prompter, _ map[string]any) ([]wizard.Choice, error) {
+		Loader: func(ctx context.Context, _ tui.Prompter, _ tui.Status, _ *wizard.Store) ([]wizard.Choice, error) {
 			client, err := getClient()
 			if err != nil {
 				return nil, err
