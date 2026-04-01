@@ -18,11 +18,13 @@ func NewCmdShow(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 		`),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			auth := f.Options().AuthOptions
-			fmt.Fprintf(ioStreams.Out, "profile: %s\n", auth.Profile)
-			fmt.Fprintf(ioStreams.Out, "credentials_file: %s\n", auth.CredentialsFile)
-			fmt.Fprintf(ioStreams.Out, "client_id_loaded: %t\n", auth.ClientID != "")
-			fmt.Fprintf(ioStreams.Out, "client_secret_loaded: %t\n", auth.ClientSecret != "")
+			opts := f.Options()
+			auth := opts.AuthOptions
+			_, _ = fmt.Fprintf(ioStreams.Out, "profile:              %s\n", auth.Profile)
+			_, _ = fmt.Fprintf(ioStreams.Out, "credentials_file:     %s\n", auth.CredentialsFile)
+			_, _ = fmt.Fprintf(ioStreams.Out, "base_url:             %s\n", opts.Server)
+			_, _ = fmt.Fprintf(ioStreams.Out, "client_id_loaded:     %t\n", auth.ClientID != "")
+			_, _ = fmt.Fprintf(ioStreams.Out, "client_secret_loaded: %t\n", auth.ClientSecret != "")
 			return nil
 		},
 	}
