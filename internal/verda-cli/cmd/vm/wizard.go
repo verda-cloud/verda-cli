@@ -416,7 +416,7 @@ func stepSSHKeys(getClient clientFunc, opts *createOptions) wizard.Step {
 		Description: "SSH keys to inject",
 		Prompt:      wizard.MultiSelectPrompt,
 		Required:    false,
-		Loader: func(ctx context.Context, _ tui.Prompter, status tui.Status, _ *wizard.Store) ([]wizard.Choice, error) {
+		Loader: func(ctx context.Context, prompter tui.Prompter, status tui.Status, _ *wizard.Store) ([]wizard.Choice, error) {
 			client, err := getClient()
 			if err != nil {
 				return nil, err
@@ -427,6 +427,13 @@ func stepSSHKeys(getClient clientFunc, opts *createOptions) wizard.Step {
 			if err != nil {
 				return nil, fmt.Errorf("fetching SSH keys: %w", err)
 			}
+
+			// Offer to add new SSH keys.
+			keys, err = offerAddSSHKey(ctx, prompter, client, keys)
+			if err != nil {
+				return nil, err
+			}
+
 			choices := make([]wizard.Choice, len(keys))
 			for i, k := range keys {
 				choices[i] = wizard.Choice{
@@ -517,6 +524,58 @@ func stepDescription(opts *createOptions) wizard.Step {
 		Resetter: func() { opts.Description = "" },
 		IsSet:    func() bool { return opts.Description != "" },
 		Value:    func() any { return opts.Description },
+	}
+}
+
+// --- SSH key sub-flow ---
+
+// offerAddSSHKey prompts the user to add new SSH keys if none exist or if they
+// want to add more. Returns the updated key list.
+func offerAddSSHKey(ctx context.Context, prompter tui.Prompter, client *verda.Client, keys []verda.SSHKey) ([]verda.SSHKey, error) {
+	for {
+		var prompt string
+		var defaultVal bool
+		if len(keys) == 0 {
+			prompt = "No SSH keys found. Add one?"
+			defaultVal = true
+		} else {
+			prompt = "Add a new SSH key?"
+			defaultVal = false
+		}
+
+		add, err := prompter.Confirm(ctx, prompt, tui.WithConfirmDefault(defaultVal))
+		if err != nil {
+			return keys, nil //nolint:nilerr // User cancelled, return what we have.
+		}
+		if !add {
+			return keys, nil
+		}
+
+		name, err := prompter.TextInput(ctx, "SSH key name")
+		if err != nil {
+			return keys, nil //nolint:nilerr
+		}
+		if strings.TrimSpace(name) == "" {
+			return keys, nil
+		}
+
+		pubKey, err := prompter.TextInput(ctx, "Public key (paste)")
+		if err != nil {
+			return keys, nil //nolint:nilerr
+		}
+		if strings.TrimSpace(pubKey) == "" {
+			return keys, nil
+		}
+
+		created, err := client.SSHKeys.AddSSHKey(ctx, &verda.CreateSSHKeyRequest{
+			Name:      strings.TrimSpace(name),
+			PublicKey: strings.TrimSpace(pubKey),
+		})
+		if err != nil {
+			return nil, fmt.Errorf("creating SSH key: %w", err)
+		}
+
+		keys = append(keys, *created)
 	}
 }
 
