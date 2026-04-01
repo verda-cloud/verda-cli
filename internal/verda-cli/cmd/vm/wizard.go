@@ -526,7 +526,8 @@ func promptAddVolume(ctx context.Context, prompter tui.Prompter, store *wizard.S
 	}
 	size, err := strconv.Atoi(strings.TrimSpace(sizeStr))
 	if err != nil || size <= 0 {
-		return nil, fmt.Errorf("size must be a positive integer")
+		_, _ = prompter.Confirm(ctx, "Error: size must be a positive integer. Press Enter to continue.", tui.WithConfirmDefault(true))
+		return nil, nil
 	}
 
 	return &verda.VolumeCreateRequest{
@@ -819,7 +820,8 @@ func promptAddStartupScript(ctx context.Context, prompter tui.Prompter, client *
 		}
 		data, err := os.ReadFile(strings.TrimSpace(path))
 		if err != nil {
-			return nil, fmt.Errorf("reading script file: %w", err)
+			_, _ = prompter.Confirm(ctx, fmt.Sprintf("Error: %v. Press Enter to continue.", err), tui.WithConfirmDefault(true))
+			return nil, nil //nolint:nilerr
 		}
 		content = string(data)
 	case 1: // Paste content
