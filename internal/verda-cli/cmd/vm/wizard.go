@@ -674,11 +674,12 @@ func promptAddSSHKey(ctx context.Context, prompter tui.Prompter, client *verda.C
 		return nil, nil //nolint:nilerr
 	}
 	created, err := client.SSHKeys.AddSSHKey(ctx, &verda.CreateSSHKeyRequest{
-		Name:      strings.TrimSpace(name),
-		PublicKey:  strings.TrimSpace(pubKey),
+		Name:     strings.TrimSpace(name),
+		PublicKey: strings.TrimSpace(pubKey),
 	})
 	if err != nil {
-		return nil, fmt.Errorf("creating SSH key: %w", err)
+		_, _ = prompter.Confirm(ctx, fmt.Sprintf("Error: %v. Press Enter to continue.", err), tui.WithConfirmDefault(true))
+		return nil, nil //nolint:nilerr
 	}
 	return created, nil
 }
@@ -837,7 +838,9 @@ func promptAddStartupScript(ctx context.Context, prompter tui.Prompter, client *
 		Script: content,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("creating startup script: %w", err)
+		// Show error and return to menu instead of crashing.
+		_, _ = prompter.Confirm(ctx, fmt.Sprintf("Error: %v. Press Enter to continue.", err), tui.WithConfirmDefault(true))
+		return nil, nil //nolint:nilerr
 	}
 	return created, nil
 }
