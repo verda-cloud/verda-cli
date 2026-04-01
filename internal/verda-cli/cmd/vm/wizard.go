@@ -257,8 +257,19 @@ func stepInstanceType(getClient clientFunc, cache *apiCache, opts *createOptions
 						locNames[j] = code
 					}
 				}
-				label := fmt.Sprintf("%s — %s, %s  $%.3f/hr",
-					t.InstanceType, formatGPU(t), formatMemory(t), totalPrice)
+				units := instanceUnits(t)
+				unitLabel := "GPU"
+				if t.GPU.NumberOfGPUs == 0 {
+					unitLabel = "vCPU"
+				}
+				var priceStr string
+				if units > 1 {
+					priceStr = fmt.Sprintf("$%.3f/%s/hr × %d = $%.3f/hr", float64(unitPrice), unitLabel, units, totalPrice)
+				} else {
+					priceStr = fmt.Sprintf("$%.3f/hr", totalPrice)
+				}
+				label := fmt.Sprintf("%s — %s, %s  %s",
+					t.InstanceType, formatGPU(t), formatMemory(t), priceStr)
 				desc := fmt.Sprintf("[%s]", strings.Join(locNames, ", "))
 				choices = append(choices, wizard.Choice{
 					Label:       label,
@@ -954,16 +965,22 @@ func renderDeploymentSummary(opts *createOptions, cache *apiCache) {
 
 	// Instance pricing.
 	instLabel := opts.InstanceType
+	var instUnitPrice float64
+	var instUnits int
+	var instUnitLabel string
 	if info, ok := cache.instanceTypes[opts.InstanceType]; ok {
-		unitPrice := float64(info.PricePerHour)
+		instUnitPrice = float64(info.PricePerHour)
 		if opts.IsSpot {
-			unitPrice = float64(info.SpotPrice)
+			instUnitPrice = float64(info.SpotPrice)
 		}
-		computeHourly = unitPrice * float64(instanceUnits(&info))
+		instUnits = instanceUnits(&info)
+		computeHourly = instUnitPrice * float64(instUnits)
 		if info.GPU.NumberOfGPUs > 0 {
 			instLabel = fmt.Sprintf("%s — %s", info.InstanceType, info.GPU.Description)
+			instUnitLabel = "GPU"
 		} else {
 			instLabel = fmt.Sprintf("%s — %d CPU, %dGB RAM", info.InstanceType, info.CPU.NumberOfCores, info.Memory.SizeInGigabytes)
+			instUnitLabel = "vCPU"
 		}
 	}
 
@@ -1014,7 +1031,13 @@ func renderDeploymentSummary(opts *createOptions, cache *apiCache) {
 
 	// Instance.
 	_, _ = fmt.Fprintf(os.Stderr, "  %s\n", accent.Render("Instance"))
-	_, _ = fmt.Fprintf(os.Stderr, "    %-40s %s\n", instLabel, priceStyle.Render(fmt.Sprintf("$%.4f/hr", computeHourly)))
+	var computePriceStr string
+	if instUnits > 1 {
+		computePriceStr = fmt.Sprintf("$%.4f/%s/hr × %d = $%.4f/hr", instUnitPrice, instUnitLabel, instUnits, computeHourly)
+	} else {
+		computePriceStr = fmt.Sprintf("$%.4f/hr", computeHourly)
+	}
+	_, _ = fmt.Fprintf(os.Stderr, "    %-40s %s\n", instLabel, priceStyle.Render(computePriceStr))
 	_, _ = fmt.Fprintf(os.Stderr, "    %s\n\n", dim.Render(opts.LocationCode))
 
 	// OS.
