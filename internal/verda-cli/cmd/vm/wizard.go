@@ -996,22 +996,14 @@ func renderDeploymentSummary(opts *createOptions, cache *apiCache) {
 	// OS.
 	_, _ = fmt.Fprintf(os.Stderr, "  %s\n", accent.Render("Operating System"))
 	osLine := fmt.Sprintf("%s  %dGB NVMe", opts.Image, opts.OSVolumeSize)
-	if osVolPrice > 0 {
-		_, _ = fmt.Fprintf(os.Stderr, "    %-40s %s\n\n", osLine, priceStyle.Render(fmt.Sprintf("$%.4f/hr", osVolPrice)))
-	} else {
-		_, _ = fmt.Fprintf(os.Stderr, "    %s\n\n", osLine)
-	}
+	_, _ = fmt.Fprintf(os.Stderr, "    %-40s %s\n\n", osLine, priceStyle.Render(fmt.Sprintf("$%.4f/hr", osVolPrice)))
 
 	// Storage volumes.
 	if len(volDetails) > 0 {
 		_, _ = fmt.Fprintf(os.Stderr, "  %s\n", accent.Render("Storage"))
 		for _, v := range volDetails {
 			line := fmt.Sprintf("%s  %dGB %s", v.name, v.size, v.volType)
-			if v.hourly > 0 {
-				_, _ = fmt.Fprintf(os.Stderr, "    %-40s %s\n", line, priceStyle.Render(fmt.Sprintf("$%.4f/hr", v.hourly)))
-			} else {
-				_, _ = fmt.Fprintf(os.Stderr, "    %s\n", line)
-			}
+			_, _ = fmt.Fprintf(os.Stderr, "    %-40s %s\n", line, priceStyle.Render(fmt.Sprintf("$%.4f/hr", v.hourly)))
 		}
 		_, _ = fmt.Fprintln(os.Stderr)
 	}
@@ -1024,9 +1016,7 @@ func renderDeploymentSummary(opts *createOptions, cache *apiCache) {
 	// Cost breakdown.
 	_, _ = fmt.Fprintf(os.Stderr, "  %s\n", dim.Render(strings.Repeat("─", 50)))
 	_, _ = fmt.Fprintf(os.Stderr, "  %-40s %s\n", "Compute total", fmt.Sprintf("$%.4f/hr", computeHourly))
-	if storageHourly > 0 {
-		_, _ = fmt.Fprintf(os.Stderr, "  %-40s %s\n", "Storage total", fmt.Sprintf("$%.4f/hr", storageHourly))
-	}
+	_, _ = fmt.Fprintf(os.Stderr, "  %-40s %s\n", "Storage total", fmt.Sprintf("$%.4f/hr", storageHourly))
 	total := computeHourly + storageHourly
 	_, _ = fmt.Fprintf(os.Stderr, "  %s  %s\n", bold.Render(fmt.Sprintf("%-40s", "Total")), bold.Render(fmt.Sprintf("$%.4f/hr", total)))
 	_, _ = fmt.Fprintf(os.Stderr, "  %s\n\n", dim.Render(strings.Repeat("─", 50)))
