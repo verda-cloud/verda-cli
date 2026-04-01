@@ -77,7 +77,7 @@ func buildCreateFlow(getClient clientFunc, opts *createOptions) *wizard.Flow {
 			stepLocation(getClient, cache, opts),
 			stepImage(getClient, opts),
 			stepOSVolumeSize(opts),
-			stepStorageSize(opts),
+			stepStorage(getClient, opts),
 			stepSSHKeys(getClient, opts),
 			stepStartupScript(getClient, opts),
 			stepHostname(opts),
@@ -377,36 +377,192 @@ func stepOSVolumeSize(opts *createOptions) wizard.Step {
 	}
 }
 
-// --- Step 8: Storage Size ---
+// --- Step 8: Storage (optional) ---
 
-func stepStorageSize(opts *createOptions) wizard.Step {
+const addNewVolumeValue = "__add_new_volume__"
+
+func stepStorage(getClient clientFunc, opts *createOptions) wizard.Step {
 	return wizard.Step{
-		Name:        "storage-size",
-		Description: "Additional storage size in GiB (0 to skip)",
-		Prompt:      wizard.TextInputPrompt,
+		Name:        "storage",
+		Description: "Storage (optional)",
+		Prompt:      wizard.SelectPrompt,
 		Required:    false,
-		Default:     func(_ map[string]any) any { return "0" },
-		Validate: func(v any) error {
-			s := v.(string)
-			if s == "" {
-				return nil
+		Loader: func(ctx context.Context, prompter tui.Prompter, status tui.Status, store *wizard.Store) ([]wizard.Choice, error) {
+			client, err := getClient()
+			if err != nil {
+				return nil, err
 			}
-			n, err := strconv.Atoi(s)
-			if err != nil || n < 0 {
-				return fmt.Errorf("must be zero or a positive integer")
+
+			// Reset volumes for fresh wizard pass.
+			var volumes []verda.VolumeCreateRequest
+			var existingIDs []string
+
+			choices := buildStorageChoices(volumes, existingIDs)
+
+			for {
+				labels := make([]string, len(choices))
+				for i, c := range choices {
+					labels[i] = c.Label
+				}
+				idx, err := prompter.Select(ctx, "Storage (optional)", labels)
+				if err != nil {
+					return nil, err
+				}
+
+				selected := choices[idx].Value
+				switch selected {
+				case "": // None (skip)
+					opts.VolumeSpecs = nil
+					opts.ExistingVolumes = nil
+					opts.StorageSize = 0
+					return nil, nil
+
+				case addNewVolumeValue:
+					vol, err := promptAddVolume(ctx, prompter, store)
+					if err != nil {
+						return nil, err
+					}
+					if vol != nil {
+						volumes = append(volumes, *vol)
+					}
+					choices = buildStorageChoices(volumes, existingIDs)
+					continue
+
+				case "__attach_existing__":
+					id, err := promptAttachExisting(ctx, prompter, status, client)
+					if err != nil {
+						return nil, err
+					}
+					if id != "" {
+						existingIDs = append(existingIDs, id)
+					}
+					choices = buildStorageChoices(volumes, existingIDs)
+					continue
+
+				default: // "done"
+					// Write the collected volumes to opts.
+					specs := make([]string, len(volumes))
+					for i, v := range volumes {
+						specs[i] = fmt.Sprintf("%s:%d:%s", v.Name, v.Size, v.Type)
+					}
+					opts.VolumeSpecs = specs
+					opts.ExistingVolumes = existingIDs
+					opts.StorageSize = 0 // handled via VolumeSpecs now
+					return nil, nil
+				}
 			}
-			return nil
 		},
-		Setter: func(v any) {
-			if s := v.(string); s != "" {
-				n, _ := strconv.Atoi(s)
-				opts.StorageSize = n
-			}
-		},
-		Resetter: func() { opts.StorageSize = 0 },
-		IsSet:    func() bool { return opts.StorageSize > 0 },
-		Value:    func() any { return strconv.Itoa(opts.StorageSize) },
+		Setter:   func(v any) {},
+		Resetter: func() { opts.VolumeSpecs = nil; opts.ExistingVolumes = nil; opts.StorageSize = 0 },
+		IsSet:    func() bool { return opts.StorageSize > 0 || len(opts.VolumeSpecs) > 0 || len(opts.ExistingVolumes) > 0 },
+		Value:    func() any { return "" },
 	}
+}
+
+func buildStorageChoices(volumes []verda.VolumeCreateRequest, existingIDs []string) []wizard.Choice {
+	choices := []wizard.Choice{
+		{Label: "None (skip)", Value: ""},
+		{Label: "+ Add new block volume", Value: addNewVolumeValue},
+		{Label: "+ Attach existing volume", Value: "__attach_existing__"},
+	}
+
+	// Show already-added volumes.
+	if len(volumes) > 0 || len(existingIDs) > 0 {
+		for _, v := range volumes {
+			choices = append(choices, wizard.Choice{
+				Label: fmt.Sprintf("  New: %s (%dGB %s)", v.Name, v.Size, v.Type),
+				Value: "__info__",
+			})
+		}
+		for _, id := range existingIDs {
+			choices = append(choices, wizard.Choice{
+				Label: fmt.Sprintf("  Existing: %s", id),
+				Value: "__info__",
+			})
+		}
+		choices = append(choices, wizard.Choice{
+			Label: "Done — continue with above storage",
+			Value: "__done__",
+		})
+	}
+
+	return choices
+}
+
+func promptAddVolume(ctx context.Context, prompter tui.Prompter, store *wizard.Store) (*verda.VolumeCreateRequest, error) {
+	// Volume type
+	typeIdx, err := prompter.Select(ctx, "Volume type", []string{
+		"NVMe (fast SSD)",
+		"HDD (large capacity)",
+	})
+	if err != nil {
+		return nil, nil //nolint:nilerr
+	}
+	volType := verda.VolumeTypeNVMe
+	if typeIdx == 1 {
+		volType = verda.VolumeTypeHDD
+	}
+
+	// Name
+	c := store.Collected()
+	hostname, _ := c["hostname"].(string)
+	defaultName := ""
+	if hostname != "" {
+		defaultName = hostname + "-storage"
+	}
+	name, err := prompter.TextInput(ctx, "Volume name", tui.WithDefault(defaultName))
+	if err != nil || strings.TrimSpace(name) == "" {
+		return nil, nil //nolint:nilerr
+	}
+
+	// Size
+	sizeStr, err := prompter.TextInput(ctx, "Size in GiB", tui.WithDefault("100"))
+	if err != nil || strings.TrimSpace(sizeStr) == "" {
+		return nil, nil //nolint:nilerr
+	}
+	size, err := strconv.Atoi(strings.TrimSpace(sizeStr))
+	if err != nil || size <= 0 {
+		return nil, fmt.Errorf("size must be a positive integer")
+	}
+
+	return &verda.VolumeCreateRequest{
+		Name: strings.TrimSpace(name),
+		Size: size,
+		Type: volType,
+	}, nil
+}
+
+func promptAttachExisting(ctx context.Context, prompter tui.Prompter, status tui.Status, client *verda.Client) (string, error) {
+	volumes, err := withSpinner(ctx, status, "Loading volumes...", func() ([]verda.Volume, error) {
+		return client.Volumes.ListVolumes(ctx)
+	})
+	if err != nil {
+		return "", fmt.Errorf("fetching volumes: %w", err)
+	}
+
+	// Filter to detached volumes only.
+	var detached []verda.Volume
+	for _, v := range volumes {
+		if v.InstanceID == nil || *v.InstanceID == "" {
+			detached = append(detached, v)
+		}
+	}
+
+	if len(detached) == 0 {
+		_, _ = prompter.Confirm(ctx, "No detached volumes available. Press Enter to continue.", tui.WithConfirmDefault(true))
+		return "", nil
+	}
+
+	labels := make([]string, len(detached))
+	for i, v := range detached {
+		labels[i] = fmt.Sprintf("%s (%dGB %s, %s)", v.Name, v.Size, v.Type, v.Location)
+	}
+
+	idx, err := prompter.Select(ctx, "Select volume to attach", labels)
+	if err != nil {
+		return "", nil //nolint:nilerr
+	}
+	return detached[idx].ID, nil
 }
 
 // --- Step 9: SSH Keys ---

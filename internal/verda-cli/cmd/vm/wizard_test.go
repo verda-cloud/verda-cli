@@ -21,15 +21,15 @@ func TestBuildCreateFlowHappyPath(t *testing.T) {
 		Image:           "ubuntu-24.04-cuda-12.8-open-docker",
 		SSHKeyIDs:       []string{"key-1"},
 		StartupScriptID: "script-1",
+		VolumeSpecs:     []string{"data:100:NVMe"}, // pre-fill so storage step is skipped
 	}
 
 	// The wizard will prompt for: billing-type, kind, os-volume-size,
-	// storage-size, hostname, description.
+	// hostname, description.
 	mock := tuitest.New()
 	mock.AddSelect(0)           // billing-type: On-Demand
 	mock.AddSelect(0)           // kind: GPU
 	mock.AddTextInput("100")    // os-volume-size
-	mock.AddTextInput("500")    // storage-size
 	mock.AddTextInput("my-gpu") // hostname
 	mock.AddTextInput("")       // description (use default = hostname)
 
@@ -51,9 +51,6 @@ func TestBuildCreateFlowHappyPath(t *testing.T) {
 	if opts.OSVolumeSize != 100 {
 		t.Errorf("expected os-volume-size=100, got %d", opts.OSVolumeSize)
 	}
-	if opts.StorageSize != 500 {
-		t.Errorf("expected storage-size=500, got %d", opts.StorageSize)
-	}
 	if opts.IsSpot {
 		t.Error("expected IsSpot=false for on-demand")
 	}
@@ -71,13 +68,13 @@ func TestBuildCreateFlowSpotSkipsContract(t *testing.T) {
 		Image:           "ubuntu-24.04-cuda-12.8-open-docker",
 		SSHKeyIDs:       []string{"key-1"},
 		StartupScriptID: "script-1",
+		VolumeSpecs:     []string{"data:100:NVMe"}, // pre-fill so storage step is skipped
 	}
 
 	mock := tuitest.New()
 	mock.AddSelect(1)            // billing-type: Spot Instance
 	mock.AddSelect(0)            // kind: GPU
 	mock.AddTextInput("50")      // os-volume-size
-	mock.AddTextInput("0")       // storage-size
 	mock.AddTextInput("spot-vm") // hostname
 	mock.AddTextInput("")        // description
 
