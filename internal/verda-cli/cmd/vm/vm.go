@@ -18,6 +18,9 @@ func NewCmdVM(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 		Run: cmdutil.DefaultSubCommandRun(ioStreams.Out),
 	}
 
-	cmd.AddCommand(NewCmdCreate(f, ioStreams))
+	cmd.AddCommand(
+		NewCmdCreate(f, ioStreams),
+		NewCmdList(f, ioStreams),
+	)
 	return cmd
 }
