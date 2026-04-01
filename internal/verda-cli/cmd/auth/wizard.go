@@ -15,6 +15,9 @@ const defaultBaseURL = "https://api.verda.com/v1"
 func buildLoginFlow(opts *loginOptions) *wizard.Flow {
 	return &wizard.Flow{
 		Name: "auth-login",
+		Layout: []wizard.RegionDef{
+			{ID: "progress", Region: wizard.NewProgressRegion(wizard.WithProgressPercent())},
+		},
 		Steps: []wizard.Step{
 			loginStepProfile(opts),
 			loginStepBaseURL(opts),

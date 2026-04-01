@@ -65,6 +65,9 @@ func buildCreateFlow(getClient clientFunc, opts *createOptions) *wizard.Flow {
 	cache := &apiCache{}
 	return &wizard.Flow{
 		Name: "vm-create",
+		Layout: []wizard.RegionDef{
+			{ID: "progress", Region: wizard.NewProgressRegion(wizard.WithProgressPercent())},
+		},
 		Steps: []wizard.Step{
 			stepBillingType(opts),
 			stepContract(getClient, opts),
