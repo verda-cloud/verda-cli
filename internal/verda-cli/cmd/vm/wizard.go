@@ -3,6 +3,7 @@ package vm
 import (
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"slices"
 	"strconv"
@@ -916,10 +917,16 @@ func stepConfirmDeploy(getClient clientFunc, cache *apiCache, opts *createOption
 	}
 }
 
+// volumeHourlyPrice calculates hourly price: monthlyPerGB * size / 30 / 24, rounded up to 4 decimals.
+func volumeHourlyPrice(monthlyPerGB float64, sizeGB int) float64 {
+	return math.Ceil(monthlyPerGB*float64(sizeGB)/30.0/24.0*10000) / 10000
+}
+
 func renderDeploymentSummary(opts *createOptions, cache *apiCache) {
 	bold := lipgloss.NewStyle().Bold(true)
 	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 	accent := lipgloss.NewStyle().Foreground(lipgloss.Color("14"))
+	priceStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("2")) // green for prices
 
 	var computeHourly float64
 	var storageHourly float64
@@ -932,85 +939,96 @@ func renderDeploymentSummary(opts *createOptions, cache *apiCache) {
 		} else {
 			computeHourly = float64(info.PricePerHour)
 		}
-		instLabel = fmt.Sprintf("%s — %s", info.InstanceType, info.GPU.Description)
-		if info.GPU.NumberOfGPUs == 0 {
+		if info.GPU.NumberOfGPUs > 0 {
+			instLabel = fmt.Sprintf("%s — %s", info.InstanceType, info.GPU.Description)
+		} else {
 			instLabel = fmt.Sprintf("%s — %d CPU, %dGB RAM", info.InstanceType, info.CPU.NumberOfCores, info.Memory.SizeInGigabytes)
 		}
 	}
 
-	// Volume pricing.
-	var volDetails []string
+	// OS volume pricing (NVMe).
+	var osVolPrice float64
+	if opts.OSVolumeSize > 0 {
+		if vt, ok := cache.volumeTypes[verda.VolumeTypeNVMe]; ok {
+			osVolPrice = volumeHourlyPrice(vt.Price.MonthlyPerGB, opts.OSVolumeSize)
+			storageHourly += osVolPrice
+		}
+	}
+
+	// Additional volume pricing.
+	type volDetail struct {
+		name, volType string
+		size          int
+		hourly        float64
+	}
+	var volDetails []volDetail
 	for _, spec := range opts.VolumeSpecs {
 		parts := strings.SplitN(spec, ":", 3)
 		if len(parts) < 3 {
 			continue
 		}
-		name, sizeStr, volType := parts[0], parts[1], parts[2]
+		name, sizeStr, vType := parts[0], parts[1], parts[2]
 		size, _ := strconv.Atoi(sizeStr)
-		if vt, ok := cache.volumeTypes[volType]; ok {
-			hourly := vt.Price.MonthlyPerGB / 730.0 * float64(size)
-			storageHourly += hourly
-			volDetails = append(volDetails, fmt.Sprintf("    %s  %dGB %s  $%.3f/hr", name, size, volType, hourly))
-		} else {
-			volDetails = append(volDetails, fmt.Sprintf("    %s  %dGB %s", name, size, volType))
-		}
-	}
-
-	// OS volume pricing (uses NVMe by default).
-	if opts.OSVolumeSize > 0 {
-		if vt, ok := cache.volumeTypes[verda.VolumeTypeNVMe]; ok {
-			hourly := vt.Price.MonthlyPerGB / 730.0 * float64(opts.OSVolumeSize)
+		var hourly float64
+		if vt, ok := cache.volumeTypes[vType]; ok {
+			hourly = volumeHourlyPrice(vt.Price.MonthlyPerGB, size)
 			storageHourly += hourly
 		}
+		volDetails = append(volDetails, volDetail{name, vType, size, hourly})
 	}
 
 	// Print summary.
-	fmt.Fprintf(os.Stderr, "\n  %s\n", bold.Render("Deployment Summary"))
+	_, _ = fmt.Fprintf(os.Stderr, "\n  %s\n", bold.Render("Deployment Summary"))
 
 	billing := "On-Demand"
 	if opts.IsSpot {
 		billing = "Spot Instance"
 	}
-	fmt.Fprintf(os.Stderr, "  %s\n", dim.Render(billing))
-	fmt.Fprintf(os.Stderr, "  %s\n\n", dim.Render(strings.Repeat("─", 45)))
+	_, _ = fmt.Fprintf(os.Stderr, "  %s\n", dim.Render(billing))
+	_, _ = fmt.Fprintf(os.Stderr, "  %s\n\n", dim.Render(strings.Repeat("─", 50)))
 
 	// Instance.
-	fmt.Fprintf(os.Stderr, "  %s\n", accent.Render("Instance"))
-	fmt.Fprintf(os.Stderr, "    %s\n", instLabel)
-	fmt.Fprintf(os.Stderr, "    %s\n\n", dim.Render(opts.LocationCode))
+	_, _ = fmt.Fprintf(os.Stderr, "  %s\n", accent.Render("Instance"))
+	_, _ = fmt.Fprintf(os.Stderr, "    %-40s %s\n", instLabel, priceStyle.Render(fmt.Sprintf("$%.4f/hr", computeHourly)))
+	_, _ = fmt.Fprintf(os.Stderr, "    %s\n\n", dim.Render(opts.LocationCode))
 
 	// OS.
-	fmt.Fprintf(os.Stderr, "  %s\n", accent.Render("Operating System"))
-	fmt.Fprintf(os.Stderr, "    %s", opts.Image)
-	if opts.OSVolumeSize > 0 {
-		fmt.Fprintf(os.Stderr, "  %dGB", opts.OSVolumeSize)
+	_, _ = fmt.Fprintf(os.Stderr, "  %s\n", accent.Render("Operating System"))
+	osLine := fmt.Sprintf("%s  %dGB NVMe", opts.Image, opts.OSVolumeSize)
+	if osVolPrice > 0 {
+		_, _ = fmt.Fprintf(os.Stderr, "    %-40s %s\n\n", osLine, priceStyle.Render(fmt.Sprintf("$%.4f/hr", osVolPrice)))
+	} else {
+		_, _ = fmt.Fprintf(os.Stderr, "    %s\n\n", osLine)
 	}
-	fmt.Fprintln(os.Stderr)
-	fmt.Fprintln(os.Stderr)
 
-	// Storage.
+	// Storage volumes.
 	if len(volDetails) > 0 {
-		fmt.Fprintf(os.Stderr, "  %s\n", accent.Render("Storage"))
-		for _, d := range volDetails {
-			fmt.Fprintln(os.Stderr, d)
+		_, _ = fmt.Fprintf(os.Stderr, "  %s\n", accent.Render("Storage"))
+		for _, v := range volDetails {
+			line := fmt.Sprintf("%s  %dGB %s", v.name, v.size, v.volType)
+			if v.hourly > 0 {
+				_, _ = fmt.Fprintf(os.Stderr, "    %-40s %s\n", line, priceStyle.Render(fmt.Sprintf("$%.4f/hr", v.hourly)))
+			} else {
+				_, _ = fmt.Fprintf(os.Stderr, "    %s\n", line)
+			}
 		}
-		fmt.Fprintln(os.Stderr)
+		_, _ = fmt.Fprintln(os.Stderr)
 	}
 
 	// SSH keys.
 	if len(opts.SSHKeyIDs) > 0 {
-		fmt.Fprintf(os.Stderr, "  %s  %d key(s)\n\n", accent.Render("SSH Keys"), len(opts.SSHKeyIDs))
+		_, _ = fmt.Fprintf(os.Stderr, "  %s  %d key(s)\n\n", accent.Render("SSH Keys"), len(opts.SSHKeyIDs))
 	}
 
 	// Cost breakdown.
-	fmt.Fprintf(os.Stderr, "  %s\n", dim.Render(strings.Repeat("─", 45)))
-	fmt.Fprintf(os.Stderr, "  %-30s %s\n", "Compute total", fmt.Sprintf("$%.3f/hr", computeHourly))
+	_, _ = fmt.Fprintf(os.Stderr, "  %s\n", dim.Render(strings.Repeat("─", 50)))
+	_, _ = fmt.Fprintf(os.Stderr, "  %-40s %s\n", "Compute total", fmt.Sprintf("$%.4f/hr", computeHourly))
 	if storageHourly > 0 {
-		fmt.Fprintf(os.Stderr, "  %-30s %s\n", "Storage total", fmt.Sprintf("$%.3f/hr", storageHourly))
+		_, _ = fmt.Fprintf(os.Stderr, "  %-40s %s\n", "Storage total", fmt.Sprintf("$%.4f/hr", storageHourly))
 	}
 	total := computeHourly + storageHourly
-	fmt.Fprintf(os.Stderr, "  %s  %s\n", bold.Render(fmt.Sprintf("%-30s", "Total")), bold.Render(fmt.Sprintf("$%.3f/hr", total)))
-	fmt.Fprintf(os.Stderr, "  %s\n\n", dim.Render(strings.Repeat("─", 45)))
+	_, _ = fmt.Fprintf(os.Stderr, "  %s  %s\n", bold.Render(fmt.Sprintf("%-40s", "Total")), bold.Render(fmt.Sprintf("$%.4f/hr", total)))
+	_, _ = fmt.Fprintf(os.Stderr, "  %s\n\n", dim.Render(strings.Repeat("─", 50)))
 }
 
 // --- Helpers ---
