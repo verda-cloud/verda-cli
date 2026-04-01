@@ -244,10 +244,11 @@ func stepInstanceType(getClient clientFunc, cache *apiCache, opts *createOptions
 				if len(locs) == 0 {
 					continue // skip unavailable instance types
 				}
-				price := t.PricePerHour
+				unitPrice := t.PricePerHour
 				if isSpot {
-					price = t.SpotPrice
+					unitPrice = t.SpotPrice
 				}
+				totalPrice := float64(unitPrice) * float64(instanceUnits(t))
 				locNames := make([]string, len(locs))
 				for j, code := range locs {
 					if loc, ok := locMap[code]; ok {
@@ -256,8 +257,8 @@ func stepInstanceType(getClient clientFunc, cache *apiCache, opts *createOptions
 						locNames[j] = code
 					}
 				}
-				label := fmt.Sprintf("%s — %s, %s  $%.2f/hr",
-					t.InstanceType, formatGPU(t), formatMemory(t), float64(price))
+				label := fmt.Sprintf("%s — %s, %s  $%.3f/hr",
+					t.InstanceType, formatGPU(t), formatMemory(t), totalPrice)
 				desc := fmt.Sprintf("[%s]", strings.Join(locNames, ", "))
 				choices = append(choices, wizard.Choice{
 					Label:       label,
@@ -934,11 +935,11 @@ func renderDeploymentSummary(opts *createOptions, cache *apiCache) {
 	// Instance pricing.
 	instLabel := opts.InstanceType
 	if info, ok := cache.instanceTypes[opts.InstanceType]; ok {
+		unitPrice := float64(info.PricePerHour)
 		if opts.IsSpot {
-			computeHourly = float64(info.SpotPrice)
-		} else {
-			computeHourly = float64(info.PricePerHour)
+			unitPrice = float64(info.SpotPrice)
 		}
+		computeHourly = unitPrice * float64(instanceUnits(&info))
 		if info.GPU.NumberOfGPUs > 0 {
 			instLabel = fmt.Sprintf("%s — %s", info.InstanceType, info.GPU.Description)
 		} else {
@@ -1032,6 +1033,14 @@ func renderDeploymentSummary(opts *createOptions, cache *apiCache) {
 }
 
 // --- Helpers ---
+
+// instanceUnits returns the number of billable units (GPUs or vCPUs).
+func instanceUnits(t *verda.InstanceTypeInfo) int {
+	if t.GPU.NumberOfGPUs > 0 {
+		return t.GPU.NumberOfGPUs
+	}
+	return t.CPU.NumberOfCores
+}
 
 func matchesKind(instanceType, kind string) bool {
 	isCPU := strings.HasPrefix(strings.ToUpper(instanceType), "CPU.")
