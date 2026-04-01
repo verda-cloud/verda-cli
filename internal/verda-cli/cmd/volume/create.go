@@ -3,9 +3,11 @@ package volume
 import (
 	"context"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
 	"github.com/verda-cloud/verdagostack/pkg/tui"
@@ -148,16 +150,42 @@ func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 		opts.Location = locations[idx].Code
 	}
 
+	// Summary with pricing.
+	bold := lipgloss.NewStyle().Bold(true)
+	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	priceStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
+
+	var monthlyPerGB float64
+	if vt, ok := vtMap[opts.Type]; ok {
+		monthlyPerGB = vt.Price.MonthlyPerGB
+	}
+	hourly := math.Ceil(monthlyPerGB*float64(opts.Size)/30.0/24.0*10000) / 10000
+	monthly := monthlyPerGB * float64(opts.Size)
+
+	_, _ = fmt.Fprintf(ioStreams.ErrOut, "\n  %s\n", bold.Render("Volume Summary"))
+	_, _ = fmt.Fprintf(ioStreams.ErrOut, "  %s\n\n", dim.Render(strings.Repeat("─", 45)))
+	_, _ = fmt.Fprintf(ioStreams.ErrOut, "  %s  %s\n", dim.Render("Name:    "), opts.Name)
+	_, _ = fmt.Fprintf(ioStreams.ErrOut, "  %s  %dGB\n", dim.Render("Size:    "), opts.Size)
+	_, _ = fmt.Fprintf(ioStreams.ErrOut, "  %s  %s\n", dim.Render("Type:    "), opts.Type)
+	_, _ = fmt.Fprintf(ioStreams.ErrOut, "  %s  %s\n", dim.Render("Location:"), opts.Location)
+	_, _ = fmt.Fprintf(ioStreams.ErrOut, "\n  %s\n", dim.Render(strings.Repeat("─", 45)))
+	_, _ = fmt.Fprintf(ioStreams.ErrOut, "  %-30s %s\n", "Unit price", priceStyle.Render(fmt.Sprintf("$%.2f/GB/mo", monthlyPerGB)))
+	_, _ = fmt.Fprintf(ioStreams.ErrOut, "  %-30s %s\n", "Monthly", priceStyle.Render(fmt.Sprintf("$%.2f/mo", monthly)))
+	_, _ = fmt.Fprintf(ioStreams.ErrOut, "  %s  %s\n", bold.Render(fmt.Sprintf("%-30s", "Hourly")), bold.Render(priceStyle.Render(fmt.Sprintf("$%.4f/hr", hourly))))
+	_, _ = fmt.Fprintf(ioStreams.ErrOut, "  %s\n\n", dim.Render(strings.Repeat("─", 45)))
+
+	confirmed, err := prompter.Confirm(ctx, "Create volume?", tui.WithConfirmDefault(true))
+	if err != nil || !confirmed {
+		_, _ = fmt.Fprintln(ioStreams.ErrOut, "Cancelled.")
+		return nil
+	}
+
 	// Create.
 	req := verda.VolumeCreateRequest{
 		Name:         opts.Name,
 		Size:         opts.Size,
 		Type:         opts.Type,
 		LocationCode: opts.Location,
-	}
-
-	if f.Debug() {
-		_, _ = fmt.Fprintf(ioStreams.ErrOut, "DEBUG: Creating volume: %s %dGB %s at %s\n", req.Name, req.Size, req.Type, req.LocationCode)
 	}
 
 	createCtx, cancel := context.WithTimeout(ctx, f.Options().Timeout)
