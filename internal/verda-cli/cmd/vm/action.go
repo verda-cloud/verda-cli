@@ -12,17 +12,19 @@ import (
 
 // instanceAction defines a supported action with its display label and executor.
 type instanceAction struct {
-	Label      string
-	ConfirmMsg string   // shown before confirmation prompt; empty = no confirm needed
-	ValidFrom  []string // instance statuses where this action is available; empty = always
-	Execute    func(ctx context.Context, client *verda.Client, inst *verda.Instance) error
+	Label        string
+	ConfirmMsg   string   // shown before confirmation prompt; empty = no confirm needed
+	ValidFrom    []string // instance statuses where this action is available; empty = always
+	ExpectStatus string   // poll until this status; empty = no polling
+	Execute      func(ctx context.Context, client *verda.Client, inst *verda.Instance) error
 }
 
 var allActions = []instanceAction{
 	{
-		Label:     "Start",
-		ValidFrom: []string{verda.StatusOffline},
-		Execute:   func(ctx context.Context, c *verda.Client, inst *verda.Instance) error { return c.Instances.Start(ctx, inst.ID) },
+		Label:        "Start",
+		ValidFrom:    []string{verda.StatusOffline},
+		ExpectStatus: verda.StatusRunning,
+		Execute:      func(ctx context.Context, c *verda.Client, inst *verda.Instance) error { return c.Instances.Start(ctx, inst.ID) },
 	},
 	{
 		Label:     "Shutdown",
@@ -30,21 +32,24 @@ var allActions = []instanceAction{
 		ConfirmMsg: "Shutting down the instance temporarily pauses it so technical\n" +
 			"  processes can occur, such as attaching or detaching volumes.\n\n" +
 			"  Shutdown instances continue to charge your account.",
-		Execute: func(ctx context.Context, c *verda.Client, inst *verda.Instance) error { return c.Instances.Shutdown(ctx, inst.ID) },
+		ExpectStatus: verda.StatusOffline,
+		Execute:      func(ctx context.Context, c *verda.Client, inst *verda.Instance) error { return c.Instances.Shutdown(ctx, inst.ID) },
 	},
 	{
 		Label:     "Force shutdown",
 		ValidFrom: []string{verda.StatusRunning},
 		ConfirmMsg: "Force shutdown immediately stops the instance without graceful\n" +
 			"  shutdown. This may cause data loss.",
-		Execute: func(ctx context.Context, c *verda.Client, inst *verda.Instance) error { return c.Instances.ForceShutdown(ctx, inst.ID) },
+		ExpectStatus: verda.StatusOffline,
+		Execute:      func(ctx context.Context, c *verda.Client, inst *verda.Instance) error { return c.Instances.ForceShutdown(ctx, inst.ID) },
 	},
 	{
 		Label:     "Hibernate",
 		ValidFrom: []string{verda.StatusRunning},
 		ConfirmMsg: "Hibernating the instance saves its state and stops billing.\n" +
 			"  You can resume it later.",
-		Execute: func(ctx context.Context, c *verda.Client, inst *verda.Instance) error { return c.Instances.Hibernate(ctx, inst.ID) },
+		ExpectStatus: verda.StatusOffline,
+		Execute:      func(ctx context.Context, c *verda.Client, inst *verda.Instance) error { return c.Instances.Hibernate(ctx, inst.ID) },
 	},
 	{
 		Label:      "Delete instance",
@@ -177,6 +182,11 @@ func runAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 	}
 	if err != nil {
 		return err
+	}
+
+	// Poll until expected status or show immediate result.
+	if action.ExpectStatus != "" {
+		return pollInstanceStatus(ctx, ioStreams.ErrOut, client, inst.ID)
 	}
 
 	_, _ = fmt.Fprintf(ioStreams.Out, "Done: %s on %s (%s)\n", action.Label, inst.Hostname, inst.ID)
