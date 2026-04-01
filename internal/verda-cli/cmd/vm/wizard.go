@@ -461,7 +461,7 @@ func stepStartupScript(getClient clientFunc, opts *createOptions) wizard.Step {
 		Description: "Startup script (optional)",
 		Prompt:      wizard.SelectPrompt,
 		Required:    false,
-		Loader: func(ctx context.Context, _ tui.Prompter, status tui.Status, _ *wizard.Store) ([]wizard.Choice, error) {
+		Loader: func(ctx context.Context, prompter tui.Prompter, status tui.Status, _ *wizard.Store) ([]wizard.Choice, error) {
 			client, err := getClient()
 			if err != nil {
 				return nil, err
@@ -472,6 +472,12 @@ func stepStartupScript(getClient clientFunc, opts *createOptions) wizard.Step {
 			if err != nil {
 				return nil, fmt.Errorf("fetching startup scripts: %w", err)
 			}
+
+			scripts, err = offerAddStartupScript(ctx, prompter, client, scripts)
+			if err != nil {
+				return nil, err
+			}
+
 			choices := []wizard.Choice{
 				{Label: "None", Value: ""},
 			}
@@ -576,6 +582,58 @@ func offerAddSSHKey(ctx context.Context, prompter tui.Prompter, client *verda.Cl
 		}
 
 		keys = append(keys, *created)
+	}
+}
+
+// --- Startup script sub-flow ---
+
+// offerAddStartupScript prompts the user to add a new startup script if none
+// exist or if they want to add one. Returns the updated script list.
+func offerAddStartupScript(ctx context.Context, prompter tui.Prompter, client *verda.Client, scripts []verda.StartupScript) ([]verda.StartupScript, error) {
+	for {
+		var prompt string
+		var defaultVal bool
+		if len(scripts) == 0 {
+			prompt = "No startup scripts found. Add one?"
+			defaultVal = false
+		} else {
+			prompt = "Add a new startup script?"
+			defaultVal = false
+		}
+
+		add, err := prompter.Confirm(ctx, prompt, tui.WithConfirmDefault(defaultVal))
+		if err != nil {
+			return scripts, nil //nolint:nilerr
+		}
+		if !add {
+			return scripts, nil
+		}
+
+		name, err := prompter.TextInput(ctx, "Script name")
+		if err != nil {
+			return scripts, nil //nolint:nilerr
+		}
+		if strings.TrimSpace(name) == "" {
+			return scripts, nil
+		}
+
+		script, err := prompter.Editor(ctx, "Script content (Ctrl+D to finish)")
+		if err != nil {
+			return scripts, nil //nolint:nilerr
+		}
+		if strings.TrimSpace(script) == "" {
+			return scripts, nil
+		}
+
+		created, err := client.StartupScripts.AddStartupScript(ctx, &verda.CreateStartupScriptRequest{
+			Name:   strings.TrimSpace(name),
+			Script: script,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("creating startup script: %w", err)
+		}
+
+		scripts = append(scripts, *created)
 	}
 }
 
