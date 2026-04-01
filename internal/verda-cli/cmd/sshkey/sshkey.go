@@ -10,7 +10,6 @@ import (
 func NewCmdSSHKey(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "ssh-key",
-		Aliases: []string{"key"},
 		Short:   "Manage SSH keys",
 		Long: cmdutil.LongDesc(`
 			Create, list, and delete SSH keys used for VM authentication.
