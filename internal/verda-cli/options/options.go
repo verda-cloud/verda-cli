@@ -2,6 +2,7 @@ package options
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"time"
 
@@ -25,6 +26,7 @@ type Options struct {
 	Server  string
 	Timeout time.Duration
 	Debug   bool
+	Output  string
 
 	Log         *log.Options
 	AuthOptions *AuthOptions
@@ -49,6 +51,7 @@ func NewOptions() *Options {
 	return &Options{
 		Server:      defaultBaseURL,
 		Timeout:     30 * time.Second,
+		Output:      "table",
 		Log:         logOpts,
 		AuthOptions: &AuthOptions{},
 	}
@@ -60,6 +63,7 @@ func (o *Options) AddFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&o.Server, "base-url", o.Server, "API base URL")
 	fs.DurationVar(&o.Timeout, "timeout", o.Timeout, "Default HTTP request timeout")
 	fs.BoolVar(&o.Debug, "debug", false, "Enable debug output")
+	fs.StringVarP(&o.Output, "output", "o", o.Output, "Output format: table, json, yaml")
 	o.AuthOptions.AddFlags(fs)
 	o.Log.AddFlags(fs)
 
@@ -100,6 +104,12 @@ func (o *Options) Complete() {
 	}
 	if o.Timeout == 0 {
 		o.Timeout = viper.GetDuration("timeout")
+	}
+	if o.Output == "" {
+		o.Output = viper.GetString("output")
+	}
+	if o.Output == "" {
+		o.Output = "table"
 	}
 	a := o.AuthOptions
 	if a.ClientID == "" {
@@ -171,6 +181,11 @@ func (o *Options) Validate() error {
 	}
 	if o.Timeout <= 0 {
 		return errors.New("--timeout must be positive")
+	}
+	switch o.Output {
+	case "table", "json", "yaml":
+	default:
+		return fmt.Errorf("--output must be one of: table, json, yaml (got %q)", o.Output)
 	}
 	return nil
 }

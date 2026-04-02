@@ -66,6 +66,11 @@ func runList(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams,
 
 	cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), fmt.Sprintf("API response: %d instance(s):", len(instances)), instances)
 
+	// Structured output: emit JSON/YAML and return.
+	if wrote, err := cmdutil.WriteStructured(ioStreams.Out, f.OutputFormat(), instances); wrote {
+		return err
+	}
+
 	if len(instances) == 0 {
 		_, _ = fmt.Fprintln(ioStreams.Out, "No instances found.")
 		return nil

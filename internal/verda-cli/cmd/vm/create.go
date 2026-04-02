@@ -46,6 +46,8 @@ type createOptions struct {
 	StorageSize               int
 	StorageType               string
 	StorageOnSpotDiscontinue  string
+
+	Wait cmdutil.WaitOptions
 }
 
 // NewCmdCreate creates the vm create cobra command.
@@ -120,6 +122,7 @@ func NewCmdCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 	_ = flags.MarkHidden("ssh-key-id")
 	_ = flags.MarkHidden("startup-script-id")
 	_ = flags.MarkHidden("spot")
+	opts.Wait.AddFlags(flags, true) // --wait defaults to true for vm create
 
 	return cmd
 }
@@ -160,7 +163,23 @@ func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 		return err
 	}
 
+	// Structured output: emit JSON and return (optionally after waiting).
+	if wrote, werr := cmdutil.WriteStructured(ioStreams.Out, f.OutputFormat(), instance); wrote {
+		if werr != nil {
+			return werr
+		}
+		if opts.Wait.Wait {
+			_, err = cmdutil.PollInstanceStatus(cmd.Context(), nil, client, instance.ID, opts.Wait)
+			return err
+		}
+		return nil
+	}
+
 	// Show live status view, polling until the instance reaches a terminal state.
+	if !opts.Wait.Wait {
+		_, _ = fmt.Fprintf(ioStreams.Out, "Created instance: %s (%s)\n", instance.Hostname, instance.ID)
+		return nil
+	}
 	return pollInstanceStatus(cmd.Context(), ioStreams.ErrOut, client, instance.ID)
 }
 

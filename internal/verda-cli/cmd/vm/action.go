@@ -88,6 +88,7 @@ func availableActions(status string) []instanceAction {
 // NewCmdAction creates the vm action cobra command.
 func NewCmdAction(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 	var instanceID string
+	var waitOpts cmdutil.WaitOptions
 
 	cmd := &cobra.Command{
 		Use:   "action",
@@ -102,20 +103,24 @@ func NewCmdAction(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 
 			# Specify instance ID
 			verda vm action --id abc-123
+
+			# Run action and wait for completion
+			verda vm action --id abc-123 --wait
 		`),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runAction(cmd, f, ioStreams, instanceID)
+			return runAction(cmd, f, ioStreams, instanceID, waitOpts)
 		},
 	}
 
 	cmd.Flags().StringVar(&instanceID, "id", "", "Instance ID to act on")
+	waitOpts.AddFlags(cmd.Flags(), true) // --wait defaults to true to preserve existing behavior
 
 	return cmd
 }
 
 //nolint:gocyclo // Interactive CLI command with prompts, confirmation, and spinner — inherently complex.
-func runAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, instanceID string) error {
+func runAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, instanceID string, waitOpts cmdutil.WaitOptions) error {
 	client, err := f.VerdaClient()
 	if err != nil {
 		return err
@@ -213,7 +218,7 @@ func runAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 	}
 
 	// Poll until expected status or show immediate result.
-	if action.ExpectStatus != "" {
+	if action.ExpectStatus != "" && waitOpts.Wait {
 		return pollInstanceStatus(ctx, ioStreams.ErrOut, client, inst.ID, action.ExpectStatus)
 	}
 

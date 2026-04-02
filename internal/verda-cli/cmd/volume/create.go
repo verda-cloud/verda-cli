@@ -21,6 +21,7 @@ type createOptions struct {
 	Size     int
 	Type     string
 	Location string
+	Wait     cmdutil.WaitOptions
 }
 
 // NewCmdCreate creates the volume create command.
@@ -52,6 +53,7 @@ func NewCmdCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 	flags.IntVar(&opts.Size, "size", 0, "Volume size in GiB")
 	flags.StringVar(&opts.Type, "type", "", "Volume type: NVMe or HDD")
 	flags.StringVar(&opts.Location, "location", "", "Location code, e.g. FIN-01")
+	opts.Wait.AddFlags(flags, false) // --wait defaults to false for volume create
 
 	return cmd
 }
@@ -208,5 +210,17 @@ func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 	}
 
 	_, _ = fmt.Fprintf(ioStreams.Out, "Created volume: %s (%s)\n", opts.Name, volID)
+
+	if opts.Wait.Wait {
+		vol, err := cmdutil.PollVolumeStatus(ctx, ioStreams.ErrOut, client, volID, opts.Wait, "detached")
+		if err != nil {
+			return err
+		}
+		if vol != nil {
+			if wrote, werr := cmdutil.WriteStructured(ioStreams.Out, f.OutputFormat(), vol); wrote {
+				return werr
+			}
+		}
+	}
 	return nil
 }

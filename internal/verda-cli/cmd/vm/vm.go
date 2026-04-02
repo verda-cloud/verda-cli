@@ -21,6 +21,7 @@ func NewCmdVM(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 	cmd.AddCommand(
 		NewCmdCreate(f, ioStreams),
 		NewCmdList(f, ioStreams),
+		NewCmdDescribe(f, ioStreams),
 		NewCmdAction(f, ioStreams),
 	)
 	return cmd
