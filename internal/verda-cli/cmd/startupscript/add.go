@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
+	"github.com/verda-cloud/verdagostack/pkg/tui"
 
 	cmdutil "github/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
@@ -106,7 +107,9 @@ func runAdd(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, 
 			}
 			content = string(data)
 		case 1: // Paste content
-			content, err = prompter.Editor(ctx, "Script content (Ctrl+D to finish)")
+			content, err = prompter.Editor(ctx, "Script content (Ctrl+D to finish)",
+				tui.WithEditorDefault("#!/bin/bash\n\n# Your startup script here\n"),
+				tui.WithFileExt(".sh"))
 			if err != nil {
 				return nil //nolint:nilerr
 			}

@@ -887,7 +887,9 @@ func promptAddStartupScript(ctx context.Context, prompter tui.Prompter, client *
 		}
 		content = string(data)
 	case 1: // Paste content
-		content, err = prompter.Editor(ctx, "Script content (Ctrl+D to finish)")
+		content, err = prompter.Editor(ctx, "Script content (Ctrl+D to finish)",
+			tui.WithEditorDefault("#!/bin/bash\n\n# Your startup script here\n"),
+			tui.WithFileExt(".sh"))
 		if err != nil {
 			return nil, nil //nolint:nilerr
 		}

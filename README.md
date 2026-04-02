@@ -1,52 +1,179 @@
-# verda
+# Verda CLI
 
-verda command-line application
+Command-line interface for [Verda Cloud](https://verda.com) — manage VMs, volumes, SSH keys, startup scripts, and more from your terminal.
 
-## Prerequisites
+## Install
 
-- **Go 1.25+**
-- **golangci-lint** (optional, for linting)
-
-## Quick Start
-
-### Build
+### Quick install (macOS / Linux)
 
 ```bash
-make build
+curl -sSL https://raw.githubusercontent.com/verda-cloud/verda-cli/main/scripts/install.sh | sh
 ```
 
-### Run
+Install to a custom directory:
 
 ```bash
-./bin/verda --help
+VERDA_INSTALL_DIR=~/.local/bin curl -sSL https://raw.githubusercontent.com/verda-cloud/verda-cli/main/scripts/install.sh | sh
 ```
 
-## Development
+Install a specific version:
 
 ```bash
-make test        # Run all tests
-make lint        # Run linter
-make lint.fix    # Auto-fix lint issues
-make clean       # Remove build artifacts
+VERDA_VERSION=v1.0.0 curl -sSL https://raw.githubusercontent.com/verda-cloud/verda-cli/main/scripts/install.sh | sh
 ```
 
-### Git hooks (optional)
+### Manual download
 
-Sample pre-commit script lives in **`githooks/pre-commit`** (runs `go build`, `go vet`, optional `golangci-lint`, and short tests for affected packages). Wire it once per clone:
+Download the binary for your platform from [GitHub Releases](https://github.com/verda-cloud/verda-cli/releases):
+
+| Platform | File |
+|----------|------|
+| macOS (Apple Silicon) | `verda_VERSION_darwin_arm64.tar.gz` |
+| macOS (Intel) | `verda_VERSION_darwin_amd64.tar.gz` |
+| Linux (x86_64) | `verda_VERSION_linux_amd64.tar.gz` |
+| Linux (ARM64) | `verda_VERSION_linux_arm64.tar.gz` |
+| Windows (x86_64) | `verda_VERSION_windows_amd64.zip` |
+| Windows (ARM64) | `verda_VERSION_windows_arm64.zip` |
+
+Extract and move to your PATH:
 
 ```bash
-make hooks.install   # sets git config core.hooksPath to githooks/
+tar xzf verda_*.tar.gz
+sudo mv verda /usr/local/bin/
 ```
 
-> **Note:** The template repo’s **`hooks/`** directory is only for `verdactl` post-generation scripts and is not part of the scaffolded project. Use **`githooks/`** for git hooks in generated apps.
+### Go install (for Go developers)
 
-## Project Structure
+```bash
+go install github.com/verda-cloud/verda-cli/cmd/verda@latest
+```
+
+### Verify installation
+
+```bash
+verda version
+```
+
+## Getting Started
+
+### 1. Configure credentials
+
+```bash
+verda auth login
+```
+
+This starts an interactive wizard to save your API credentials to `~/.verda/credentials`.
+
+### 2. List your VMs
+
+```bash
+verda vm list
+```
+
+### 3. Create a VM
+
+```bash
+# Interactive wizard
+verda vm create
+
+# Non-interactive
+verda vm create \
+  --kind gpu \
+  --instance-type 1V100.6V \
+  --location FIN-01 \
+  --os ubuntu-24.04-cuda-12.8-open-docker \
+  --os-volume-size 100 \
+  --hostname gpu-runner
+```
+
+## Commands
 
 ```
-githooks/                  Sample pre-commit (optional: make hooks.install)
-cmd/verda/              Entry point
-internal/verda-cli/
-  cmd/                     Cobra commands
-  cmd/util/                CLI utilities (factory, iostreams)
-  options/                 Shared CLI options
+Auth Commands:
+  auth              Manage shared credentials and profiles
+
+VM Commands:
+  vm                Manage VM instances
+
+Resource Commands:
+  ssh-key           Manage SSH keys
+  startup-script    Manage startup scripts
+  volume            Manage volumes
+
+Other Commands:
+  settings          Manage CLI settings
+  version           Print version information
 ```
+
+### VM
+
+| Command | Description |
+|---------|-------------|
+| `verda vm create` | Create a VM (interactive wizard or flags) |
+| `verda vm list` | List and inspect VM instances |
+| `verda vm action` | Start, shutdown, hibernate, or delete a VM |
+
+### Volume
+
+| Command | Description |
+|---------|-------------|
+| `verda volume create` | Create a block storage volume |
+| `verda volume list` | List volumes |
+| `verda volume action` | Detach, rename, resize, clone, or delete |
+| `verda volume trash` | List deleted volumes (restorable within 96h) |
+
+### SSH Keys & Startup Scripts
+
+| Command | Description |
+|---------|-------------|
+| `verda ssh-key list / add / delete` | Manage SSH keys |
+| `verda startup-script list / add / delete` | Manage startup scripts |
+
+### Settings
+
+| Command | Description |
+|---------|-------------|
+| `verda settings theme` | View or change the color theme |
+| `verda settings theme --select` | Interactive theme picker |
+
+Available themes: `default`, `dracula`, `catppuccin`, `catppuccin-latte`, `nord`, `tokyonight`, `github-light`, `solarized-light`
+
+### Auth
+
+| Command | Description |
+|---------|-------------|
+| `verda auth login` | Save API credentials (interactive wizard) |
+| `verda auth show` | Show active profile and credentials path |
+| `verda auth use PROFILE` | Switch active auth profile |
+
+## Global Flags
+
+| Flag | Description |
+|------|-------------|
+| `--debug` | Enable debug output (API request/response details) |
+| `--timeout` | HTTP request timeout (default: 30s) |
+| `--base-url` | Override API base URL |
+| `--config` | Path to config file (default: `~/.verda/config.yaml`) |
+
+## Configuration
+
+Credentials are stored in `~/.verda/credentials` (AWS-style INI format):
+
+```ini
+[default]
+verda_base_url      = https://api.verda.com/v1
+verda_client_id     = your-client-id
+verda_client_secret = your-client-secret
+```
+
+Settings (theme, etc.) are stored in `~/.verda/config.yaml`.
+
+Override the config directory with `VERDA_HOME` environment variable.
+
+## Contributing
+
+See [CLAUDE.md](CLAUDE.md) and [AGENTS.md](AGENTS.md) for development setup and coding conventions.
+
+## License
+
+See [LICENSE](LICENSE) for details.
