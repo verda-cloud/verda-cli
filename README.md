@@ -84,6 +84,8 @@ verda vm list
 
 ### 3. Create a VM
 
+![verda vm create](docs/images/vm-create-demo.gif)
+
 ```bash
 # Interactive wizard
 verda vm create
