@@ -40,7 +40,7 @@ func NewCmdUse(_ cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 				return err
 			}
 
-			fmt.Fprintf(ioStreams.Out, "Active auth profile: %s\n", profile)
+			_, _ = fmt.Fprintf(ioStreams.Out, "Active auth profile: %s\n", profile)
 			return nil
 		},
 	}
@@ -51,7 +51,7 @@ func NewCmdUse(_ cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 
 func writeActiveProfile(path string, profile string) error {
 	cfg := map[string]any{}
-	if data, err := os.ReadFile(path); err == nil {
+	if data, err := os.ReadFile(path); err == nil { //nolint:gosec // path is from our own config
 		if err := yaml.Unmarshal(data, &cfg); err != nil {
 			return err
 		}

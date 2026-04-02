@@ -66,7 +66,7 @@ func mkdirSecure(dir string) error {
 	}
 	// On Unix, enforce 0700 on the leaf directory.
 	if runtime.GOOS != "windows" {
-		_ = os.Chmod(dir, 0o700)
+		_ = os.Chmod(dir, 0o700) //nolint:gosec // 0700 is correct for a config directory
 	}
 	return nil
 }

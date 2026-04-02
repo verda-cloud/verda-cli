@@ -21,7 +21,7 @@ func ValidateHostname(s string) error {
 	for _, c := range s {
 		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') {
 			hasLetter = true
-		} else if !((c >= '0' && c <= '9') || c == '-') {
+		} else if (c < '0' || c > '9') && c != '-' {
 			return fmt.Errorf("hostname must contain only letters, digits, hyphens and underscores")
 		}
 	}

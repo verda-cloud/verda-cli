@@ -86,11 +86,11 @@ func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 	if opts.Type == "" {
 		nvmeLabel := "NVMe (fast SSD)"
 		hddLabel := "HDD (large capacity)"
-		if vt, ok := vtMap[verda.VolumeTypeNVMe]; ok && vt.Price.MonthlyPerGB > 0 {
-			nvmeLabel = fmt.Sprintf("NVMe (fast SSD)  $%.2f/GB/mo", vt.Price.MonthlyPerGB)
+		if vt, ok := vtMap[verda.VolumeTypeNVMe]; ok && vt.Price.PricePerMonthPerGB > 0 {
+			nvmeLabel = fmt.Sprintf("NVMe (fast SSD)  $%.2f/GB/mo", vt.Price.PricePerMonthPerGB)
 		}
-		if vt, ok := vtMap[verda.VolumeTypeHDD]; ok && vt.Price.MonthlyPerGB > 0 {
-			hddLabel = fmt.Sprintf("HDD (large capacity)  $%.2f/GB/mo", vt.Price.MonthlyPerGB)
+		if vt, ok := vtMap[verda.VolumeTypeHDD]; ok && vt.Price.PricePerMonthPerGB > 0 {
+			hddLabel = fmt.Sprintf("HDD (large capacity)  $%.2f/GB/mo", vt.Price.PricePerMonthPerGB)
 		}
 		idx, err := prompter.Select(ctx, "Volume type", []string{nvmeLabel, hddLabel})
 		if err != nil {
@@ -157,7 +157,7 @@ func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 
 	var monthlyPerGB float64
 	if vt, ok := vtMap[opts.Type]; ok {
-		monthlyPerGB = vt.Price.MonthlyPerGB
+		monthlyPerGB = vt.Price.PricePerMonthPerGB
 	}
 	const hoursInMonth = 730 // 365*24/12, matching web frontend
 	hourly := math.Ceil(monthlyPerGB*float64(opts.Size)/hoursInMonth*10000) / 10000

@@ -532,11 +532,11 @@ func promptAddVolume(ctx context.Context, prompter tui.Prompter, store *wizard.S
 	nvmeLabel := "NVMe (fast SSD)"
 	hddLabel := "HDD (large capacity)"
 	if cache != nil && cache.volumeTypes != nil {
-		if vt, ok := cache.volumeTypes[verda.VolumeTypeNVMe]; ok && vt.Price.MonthlyPerGB > 0 {
-			nvmeLabel = fmt.Sprintf("NVMe (fast SSD)  $%.2f/GB/mo", vt.Price.MonthlyPerGB)
+		if vt, ok := cache.volumeTypes[verda.VolumeTypeNVMe]; ok && vt.Price.PricePerMonthPerGB > 0 {
+			nvmeLabel = fmt.Sprintf("NVMe (fast SSD)  $%.2f/GB/mo", vt.Price.PricePerMonthPerGB)
 		}
-		if vt, ok := cache.volumeTypes[verda.VolumeTypeHDD]; ok && vt.Price.MonthlyPerGB > 0 {
-			hddLabel = fmt.Sprintf("HDD (large capacity)  $%.2f/GB/mo", vt.Price.MonthlyPerGB)
+		if vt, ok := cache.volumeTypes[verda.VolumeTypeHDD]; ok && vt.Price.PricePerMonthPerGB > 0 {
+			hddLabel = fmt.Sprintf("HDD (large capacity)  $%.2f/GB/mo", vt.Price.PricePerMonthPerGB)
 		}
 	}
 	typeIdx, err := prompter.Select(ctx, "Volume type", []string{
@@ -1006,7 +1006,7 @@ func renderDeploymentSummary(opts *createOptions, cache *apiCache) {
 	var osVolUnitPrice float64
 	if opts.OSVolumeSize > 0 {
 		if vt, ok := cache.volumeTypes[verda.VolumeTypeNVMe]; ok {
-			osVolUnitPrice = vt.Price.MonthlyPerGB
+			osVolUnitPrice = vt.Price.PricePerMonthPerGB
 			osVolPrice = volumeHourlyPrice(osVolUnitPrice, opts.OSVolumeSize)
 			storageHourly += osVolPrice
 		}
@@ -1029,7 +1029,7 @@ func renderDeploymentSummary(opts *createOptions, cache *apiCache) {
 		size, _ := strconv.Atoi(sizeStr)
 		var hourly, unitP float64
 		if vt, ok := cache.volumeTypes[vType]; ok {
-			unitP = vt.Price.MonthlyPerGB
+			unitP = vt.Price.PricePerMonthPerGB
 			hourly = volumeHourlyPrice(unitP, size)
 			storageHourly += hourly
 		}
