@@ -91,6 +91,13 @@ linters:
       - path: cmd/
         linters:
           - unparam
+      - path: cmd/util/
+        linters:
+          - revive
+        text: "var-naming"
+      - linters:
+          - nolintlint
+        text: "gosec"
 
 formatters:
   enable:

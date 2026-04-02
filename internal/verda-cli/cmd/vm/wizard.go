@@ -18,7 +18,10 @@ import (
 	cmdutil "github/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
 
-const billingTypeSpot = "spot"
+const (
+	billingTypeSpot = "spot"
+	kindGPU         = "gpu"
+)
 
 // clientFunc lazily resolves a Verda API client. This allows the wizard
 // to start without credentials — steps that don't need API (billing-type,
@@ -184,7 +187,7 @@ func stepKind(opts *createOptions) wizard.Step {
 		Prompt:      wizard.SelectPrompt,
 		Required:    true,
 		Loader: wizard.StaticChoices(
-			wizard.Choice{Label: "GPU", Value: "gpu", Description: "GPU-accelerated instances"},
+			wizard.Choice{Label: "GPU", Value: kindGPU, Description: "GPU-accelerated instances"},
 			wizard.Choice{Label: "CPU", Value: "cpu", Description: "CPU-only instances"},
 		),
 		Setter:   func(v any) { opts.Kind = v.(string) },
@@ -1019,7 +1022,7 @@ func renderDeploymentSummary(opts *createOptions, cache *apiCache) {
 		unitPrice     float64 // per GB per month
 		hourly        float64
 	}
-	var volDetails []volDetail
+	volDetails := make([]volDetail, 0, len(opts.VolumeSpecs))
 	for _, spec := range opts.VolumeSpecs {
 		parts := strings.SplitN(spec, ":", 3)
 		if len(parts) < 3 {
@@ -1104,7 +1107,7 @@ func matchesKind(instanceType, kind string) bool {
 	switch strings.ToLower(kind) {
 	case "cpu":
 		return isCPU
-	case "gpu":
+	case kindGPU:
 		return !isCPU
 	default:
 		return true

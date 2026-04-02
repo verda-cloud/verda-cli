@@ -120,7 +120,7 @@ func fetchInstanceVolumes(ctx context.Context, client *verda.Client, inst *verda
 		}
 	}
 
-	var volumes []verda.Volume
+	volumes := make([]verda.Volume, 0, len(ids))
 	for _, id := range ids {
 		vol, err := client.Volumes.GetVolume(ctx, id)
 		if err != nil {
