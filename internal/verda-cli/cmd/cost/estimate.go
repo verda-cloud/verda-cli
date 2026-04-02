@@ -108,7 +108,7 @@ func runEstimate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStre
 	}
 
 	// Fetch all instance types and find the matching one.
-	allTypes, err := client.InstanceTypes.Get(ctx, "USD")
+	allTypes, err := client.InstanceTypes.Get(ctx, "usd")
 	if sp != nil {
 		sp.Stop("")
 	}

@@ -64,7 +64,7 @@ func runPriceHistory(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IO
 	if status := f.Status(); status != nil {
 		sp, _ = status.Spinner(ctx, "Loading price history...")
 	}
-	history, err := client.InstanceTypes.GetPriceHistory(ctx, opts.Months, "USD")
+	history, err := client.InstanceTypes.GetPriceHistory(ctx, opts.Months, "usd")
 	if sp != nil {
 		sp.Stop("")
 	}
