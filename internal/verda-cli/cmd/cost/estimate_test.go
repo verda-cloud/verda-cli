@@ -105,6 +105,35 @@ func TestFormatPrice(t *testing.T) {
 	}
 }
 
+func TestFindInstanceType(t *testing.T) {
+	t.Parallel()
+
+	types := []verda.InstanceTypeInfo{
+		{InstanceType: "1V100.6V", PricePerHour: 0.44},
+		{InstanceType: "CPU.8V.32G", PricePerHour: 0.06},
+	}
+
+	found := findInstanceType(types, "CPU.8V.32G")
+	if found == nil {
+		t.Fatal("expected to find CPU.8V.32G")
+	}
+	if float64(found.PricePerHour) != 0.06 {
+		t.Fatalf("unexpected price: %v", found.PricePerHour)
+	}
+
+	// Case insensitive.
+	found = findInstanceType(types, "cpu.8v.32g")
+	if found == nil {
+		t.Fatal("expected case-insensitive match")
+	}
+
+	// Not found.
+	found = findInstanceType(types, "nonexistent")
+	if found != nil {
+		t.Fatal("expected nil for nonexistent type")
+	}
+}
+
 func TestCostEstimateTotals(t *testing.T) {
 	t.Parallel()
 

@@ -107,14 +107,16 @@ func runEstimate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStre
 		sp, _ = status.Spinner(ctx, "Loading pricing...")
 	}
 
-	// Fetch instance type pricing.
-	instType, err := client.InstanceTypes.GetByInstanceType(ctx, opts.InstanceType, opts.IsSpot, opts.Location, "USD")
+	// Fetch all instance types and find the matching one.
+	allTypes, err := client.InstanceTypes.Get(ctx, "USD")
 	if sp != nil {
 		sp.Stop("")
 	}
 	if err != nil {
 		return fmt.Errorf("fetching instance type pricing: %w", err)
 	}
+
+	instType := findInstanceType(allTypes, opts.InstanceType)
 	if instType == nil {
 		return fmt.Errorf("instance type %q not found", opts.InstanceType)
 	}
@@ -179,6 +181,15 @@ func runEstimate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStre
 	}
 
 	renderEstimate(ioStreams.Out, &estimate)
+	return nil
+}
+
+func findInstanceType(types []verda.InstanceTypeInfo, name string) *verda.InstanceTypeInfo {
+	for i := range types {
+		if strings.EqualFold(types[i].InstanceType, name) {
+			return &types[i]
+		}
+	}
 	return nil
 }
 
