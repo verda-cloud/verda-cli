@@ -27,6 +27,7 @@ repos:
         name: Tidy Go modules (go mod tidy)
       - id: go-unit-tests
         name: Run Go unit tests
+        args: [-short]
 
   - repo: local
     hooks:
