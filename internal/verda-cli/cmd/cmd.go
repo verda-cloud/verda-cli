@@ -7,7 +7,10 @@ import (
 	"github.com/verda-cloud/verdagostack/pkg/tui/bubbletea"
 
 	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/auth"
+	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/availability"
 	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/completion"
+	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/cost"
+	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/images"
 	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/settings"
 	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/ssh"
 	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/sshkey"
@@ -72,9 +75,17 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) *cobra.Command {
 		{
 			Message: "Resource Commands:",
 			Commands: []*cobra.Command{
+				availability.NewCmdAvailability(f, ioStreams),
+				images.NewCmdImages(f, ioStreams),
 				sshkey.NewCmdSSHKey(f, ioStreams),
 				startupscript.NewCmdStartupScript(f, ioStreams),
 				volume.NewCmdVolume(f, ioStreams),
+			},
+		},
+		{
+			Message: "Info Commands:",
+			Commands: []*cobra.Command{
+				cost.NewCmdCost(f, ioStreams),
 			},
 		},
 		{

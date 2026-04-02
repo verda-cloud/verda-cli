@@ -113,9 +113,14 @@ VM Commands:
   ssh               SSH into a running VM instance
 
 Resource Commands:
+  availability      Check instance type availability
+  images            List available OS images
   ssh-key           Manage SSH keys
   startup-script    Manage startup scripts
   volume            Manage volumes
+
+Info Commands:
+  cost              Cost estimation, pricing, and billing
 
 Other Commands:
   completion        Generate shell completion scripts
@@ -159,6 +164,35 @@ verda ssh gpu-runner -- -L 8080:localhost:8080
 | `verda volume action`   | Detach, rename, resize, clone, or delete     |
 | `verda volume trash`    | List deleted volumes (restorable within 96h) |
 
+
+### Images & Availability
+
+```bash
+# List all OS images
+verda images
+verda images --type 1V100.6V          # compatible with instance type
+verda images --category ubuntu         # filter by category
+
+# Check capacity
+verda availability                     # full matrix
+verda availability --location FIN-01   # specific location
+verda availability --type 1V100.6V     # specific type
+verda availability --spot              # spot only
+```
+
+### Cost & Billing
+
+```bash
+# Estimate costs before creating
+verda cost estimate --type 1V100.6V --os-volume 100 --storage 500
+verda cost estimate --type 1V100.6V --spot
+
+# Price history and trends
+verda cost price-history --type 1V100.6V --months 3
+
+# Account balance
+verda cost balance
+```
 
 ### SSH Keys & Startup Scripts
 
