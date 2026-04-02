@@ -187,9 +187,6 @@ verda availability --spot              # spot only
 verda cost estimate --type 1V100.6V --os-volume 100 --storage 500
 verda cost estimate --type 1V100.6V --spot
 
-# Price history and trends
-verda cost price-history --type 1V100.6V --months 3
-
 # Account balance
 verda cost balance
 ```

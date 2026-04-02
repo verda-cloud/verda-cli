@@ -19,7 +19,6 @@ func NewCmdCost(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 
 	cmd.AddCommand(
 		newCmdEstimate(f, ioStreams),
-		newCmdPriceHistory(f, ioStreams),
 		newCmdBalance(f, ioStreams),
 	)
 
