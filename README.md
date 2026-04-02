@@ -115,6 +115,7 @@ VM Commands:
 Resource Commands:
   availability      Check instance type availability
   images            List available OS images
+  locations         List datacenter locations
   ssh-key           Manage SSH keys
   startup-script    Manage startup scripts
   volume            Manage volumes
@@ -165,13 +166,16 @@ verda ssh gpu-runner -- -L 8080:localhost:8080
 | `verda volume trash`    | List deleted volumes (restorable within 96h) |
 
 
-### Images & Availability
+### Images, Locations & Availability
 
 ```bash
 # List all OS images
 verda images
 verda images --type 1V100.6V          # compatible with instance type
 verda images --category ubuntu         # filter by category
+
+# List datacenter locations
+verda locations
 
 # Check capacity
 verda availability                     # full matrix
