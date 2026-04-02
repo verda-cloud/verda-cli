@@ -110,7 +110,8 @@ func renderInstanceCard(inst *verda.Instance, volumes ...verda.Volume) string {
 	// Storage section.
 	if len(volumes) > 0 {
 		_, _ = fmt.Fprintf(&b, "\n  %s\n", bold.Render("Storage"))
-		for i, v := range volumes {
+		for i := range volumes {
+			v := &volumes[i]
 			volStatus := "Attached"
 			if v.IsOSVolume {
 				volStatus = "Main OS"
@@ -129,7 +130,7 @@ func renderInstanceCard(inst *verda.Instance, volumes ...verda.Volume) string {
 
 	if inst.Status == verda.StatusRunning && inst.IP != nil && *inst.IP != "" {
 		sshStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("14")).Bold(true)
-		_, _ = fmt.Fprintf(&b, "\n  %s\n", sshStyle.Render(fmt.Sprintf("ssh root@%s", *inst.IP)))
+		_, _ = fmt.Fprintf(&b, "\n  %s\n", sshStyle.Render("ssh root@"+*inst.IP))
 	}
 
 	_, _ = fmt.Fprintln(&b)

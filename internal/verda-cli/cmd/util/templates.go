@@ -7,7 +7,7 @@ const indentation = "  "
 // LongDesc normalises a command's long description by trimming leading/trailing
 // whitespace and collapsing leading tabs (heredoc-style).
 func LongDesc(s string) string {
-	if len(s) == 0 {
+	if s == "" {
 		return s
 	}
 	return strings.TrimSpace(dedent(s))
@@ -16,7 +16,7 @@ func LongDesc(s string) string {
 // Examples normalises a command's examples by trimming whitespace and adding
 // consistent 2-space indentation to each line.
 func Examples(s string) string {
-	if len(s) == 0 {
+	if s == "" {
 		return s
 	}
 	trimmed := strings.TrimSpace(dedent(s))
@@ -51,11 +51,12 @@ func dedent(s string) string {
 
 	result := make([]string, len(lines))
 	for i, line := range lines {
-		if strings.TrimSpace(line) == "" {
+		switch {
+		case strings.TrimSpace(line) == "":
 			result[i] = ""
-		} else if len(line) >= minIndent {
+		case len(line) >= minIndent:
 			result[i] = line[minIndent:]
-		} else {
+		default:
 			result[i] = line
 		}
 	}

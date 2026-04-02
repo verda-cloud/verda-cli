@@ -49,9 +49,9 @@ func NewCmdUse(_ cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 	return cmd
 }
 
-func writeActiveProfile(path string, profile string) error {
+func writeActiveProfile(path, profile string) error {
 	cfg := map[string]any{}
-	if data, err := os.ReadFile(path); err == nil { //nolint:gosec // path is from our own config
+	if data, err := os.ReadFile(path); err == nil {
 		if err := yaml.Unmarshal(data, &cfg); err != nil {
 			return err
 		}

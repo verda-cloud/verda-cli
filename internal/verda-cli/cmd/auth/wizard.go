@@ -1,13 +1,16 @@
 package auth
 
 import (
-	"fmt"
+	"errors"
 	"strings"
 
 	"github.com/verda-cloud/verdagostack/pkg/tui/wizard"
 )
 
-const defaultBaseURL = "https://api.verda.com/v1"
+const (
+	defaultBaseURL     = "https://api.verda.com/v1"
+	defaultProfileName = "default"
+)
 
 // buildLoginFlow builds the interactive wizard flow for auth login.
 //
@@ -34,16 +37,16 @@ func loginStepProfile(opts *loginOptions) wizard.Step {
 		Description: "Profile name",
 		Prompt:      wizard.TextInputPrompt,
 		Required:    true,
-		Default:     func(_ map[string]any) any { return "default" },
+		Default:     func(_ map[string]any) any { return defaultProfileName },
 		Validate: func(v any) error {
 			if strings.TrimSpace(v.(string)) == "" {
-				return fmt.Errorf("profile name cannot be empty")
+				return errors.New("profile name cannot be empty")
 			}
 			return nil
 		},
 		Setter:   func(v any) { opts.Profile = strings.TrimSpace(v.(string)) },
-		Resetter: func() { opts.Profile = "default" },
-		IsSet:    func() bool { return opts.Profile != "" && opts.Profile != "default" },
+		Resetter: func() { opts.Profile = defaultProfileName },
+		IsSet:    func() bool { return opts.Profile != "" && opts.Profile != defaultProfileName },
 		Value:    func() any { return opts.Profile },
 	}
 }
@@ -58,10 +61,10 @@ func loginStepBaseURL(opts *loginOptions) wizard.Step {
 		Validate: func(v any) error {
 			s := strings.TrimSpace(v.(string))
 			if s == "" {
-				return fmt.Errorf("base URL cannot be empty")
+				return errors.New("base URL cannot be empty")
 			}
 			if !strings.HasPrefix(s, "http://") && !strings.HasPrefix(s, "https://") {
-				return fmt.Errorf("base URL must start with http:// or https://")
+				return errors.New("base URL must start with http:// or https://")
 			}
 			return nil
 		},
@@ -80,7 +83,7 @@ func loginStepClientID(opts *loginOptions) wizard.Step {
 		Required:    true,
 		Validate: func(v any) error {
 			if strings.TrimSpace(v.(string)) == "" {
-				return fmt.Errorf("client ID cannot be empty")
+				return errors.New("client ID cannot be empty")
 			}
 			return nil
 		},

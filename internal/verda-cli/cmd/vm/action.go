@@ -26,7 +26,9 @@ var allActions = []instanceAction{
 		Label:        "Start",
 		ValidFrom:    []string{verda.StatusOffline},
 		ExpectStatus: verda.StatusRunning,
-		Execute:      func(ctx context.Context, c *verda.Client, inst *verda.Instance) error { return c.Instances.Start(ctx, inst.ID) },
+		Execute: func(ctx context.Context, c *verda.Client, inst *verda.Instance) error {
+			return c.Instances.Start(ctx, inst.ID)
+		},
 	},
 	{
 		Label:     "Shutdown",
@@ -35,15 +37,19 @@ var allActions = []instanceAction{
 			"  processes can occur, such as attaching or detaching volumes.",
 		WarningMsg:   "Shutdown instances continue to charge your account.",
 		ExpectStatus: verda.StatusOffline,
-		Execute:      func(ctx context.Context, c *verda.Client, inst *verda.Instance) error { return c.Instances.Shutdown(ctx, inst.ID) },
+		Execute: func(ctx context.Context, c *verda.Client, inst *verda.Instance) error {
+			return c.Instances.Shutdown(ctx, inst.ID)
+		},
 	},
 	{
-		Label:      "Force shutdown",
-		ValidFrom:  []string{verda.StatusRunning},
-		ConfirmMsg: "Force shutdown immediately stops the instance without graceful shutdown.",
-		WarningMsg: "This may cause data loss.",
+		Label:        "Force shutdown",
+		ValidFrom:    []string{verda.StatusRunning},
+		ConfirmMsg:   "Force shutdown immediately stops the instance without graceful shutdown.",
+		WarningMsg:   "This may cause data loss.",
 		ExpectStatus: verda.StatusOffline,
-		Execute:      func(ctx context.Context, c *verda.Client, inst *verda.Instance) error { return c.Instances.ForceShutdown(ctx, inst.ID) },
+		Execute: func(ctx context.Context, c *verda.Client, inst *verda.Instance) error {
+			return c.Instances.ForceShutdown(ctx, inst.ID)
+		},
 	},
 	{
 		Label:     "Hibernate",
@@ -51,7 +57,9 @@ var allActions = []instanceAction{
 		ConfirmMsg: "Hibernating the instance saves its state and stops billing.\n" +
 			"  You can resume it later.",
 		ExpectStatus: verda.StatusOffline,
-		Execute:      func(ctx context.Context, c *verda.Client, inst *verda.Instance) error { return c.Instances.Hibernate(ctx, inst.ID) },
+		Execute: func(ctx context.Context, c *verda.Client, inst *verda.Instance) error {
+			return c.Instances.Hibernate(ctx, inst.ID)
+		},
 	},
 	{
 		Label:   "Delete instance",
@@ -82,8 +90,8 @@ func NewCmdAction(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 	var instanceID string
 
 	cmd := &cobra.Command{
-		Use:     "action",
-		Short:   "Perform actions on a VM instance",
+		Use:   "action",
+		Short: "Perform actions on a VM instance",
 		Long: cmdutil.LongDesc(`
 			Select a VM instance and perform an action: start, shutdown,
 			force shutdown, hibernate, or delete.
@@ -106,6 +114,7 @@ func NewCmdAction(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 	return cmd
 }
 
+//nolint:gocyclo // Interactive CLI command with prompts, confirmation, and spinner — inherently complex.
 func runAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, instanceID string) error {
 	client, err := f.VerdaClient()
 	if err != nil {
@@ -143,15 +152,15 @@ func runAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 		return nil
 	}
 
-	actionLabels := make([]string, len(validActions))
-	for i, a := range validActions {
-		actionLabels[i] = a.Label
+	actionLabels := make([]string, 0, len(validActions)+1)
+	for _, a := range validActions {
+		actionLabels = append(actionLabels, a.Label)
 	}
 	actionLabels = append(actionLabels, "Cancel")
 
 	actionIdx, err := prompter.Select(ctx, "Select action", actionLabels)
 	if err != nil {
-		return nil //nolint:nilerr
+		return nil
 	}
 	if actionIdx == len(validActions) { // Cancel
 		return nil
@@ -176,7 +185,7 @@ func runAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 		_, _ = fmt.Fprintln(ioStreams.ErrOut)
 		confirmed, err := prompter.Confirm(ctx, fmt.Sprintf("Would you like to continue? (%s on %s)", action.Label, inst.Hostname))
 		if err != nil || !confirmed {
-			_, _ = fmt.Fprintln(ioStreams.ErrOut, "Cancelled.")
+			_, _ = fmt.Fprintln(ioStreams.ErrOut, "Canceled.")
 			return nil
 		}
 	}
@@ -230,15 +239,15 @@ func selectInstance(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IO
 		return "", nil
 	}
 
-	labels := make([]string, len(instances))
-	for i, inst := range instances {
-		labels[i] = formatInstanceRow(inst)
+	labels := make([]string, 0, len(instances)+1)
+	for i := range instances {
+		labels = append(labels, formatInstanceRow(&instances[i]))
 	}
 	labels = append(labels, "Cancel")
 
 	idx, err := f.Prompter().Select(ctx, "Select instance (type to filter)", labels)
 	if err != nil {
-		return "", nil //nolint:nilerr
+		return "", nil //nolint:nilerr // User pressed Esc/Ctrl+C during prompt.
 	}
 	if idx == len(instances) {
 		return "", nil
@@ -250,8 +259,8 @@ func selectInstance(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IO
 // runDeleteFlow handles the delete action with volume selection.
 func runDeleteFlow(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client *verda.Client, inst *verda.Instance) error {
 	prompter := f.Prompter()
-	warnStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Bold(true)  // red
-	noteStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("3"))             // yellow
+	warnStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Bold(true) // red
+	noteStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("3"))            // yellow
 	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 
 	_, _ = fmt.Fprintf(ioStreams.ErrOut, "\n  %s %s\n\n",
@@ -267,17 +276,17 @@ func runDeleteFlow(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOS
 		_, _ = fmt.Fprintf(ioStreams.ErrOut, "  %s\n\n", dimStyle.Render("Deleted storage can be restored within 96 hours"))
 
 		labels := make([]string, len(volumes))
-		for i, v := range volumes {
+		for i := range volumes {
 			volType := "Block"
-			if v.IsOSVolume {
+			if volumes[i].IsOSVolume {
 				volType = "OS"
 			}
-			labels[i] = fmt.Sprintf("%s  %s  %dGB %s", v.Name, volType, v.Size, v.Type)
+			labels[i] = fmt.Sprintf("%s  %s  %dGB %s", volumes[i].Name, volType, volumes[i].Size, volumes[i].Type)
 		}
 
 		indices, err := prompter.MultiSelect(ctx, "Select volumes to delete (optional)", labels)
 		if err != nil {
-			return nil //nolint:nilerr
+			return nil
 		}
 		for _, idx := range indices {
 			volumeIDs = append(volumeIDs, volumes[idx].ID)
@@ -296,7 +305,7 @@ func runDeleteFlow(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOS
 
 	confirmed, err := prompter.Confirm(ctx, fmt.Sprintf("Delete %s?", inst.Hostname))
 	if err != nil || !confirmed {
-		_, _ = fmt.Fprintln(ioStreams.ErrOut, "Cancelled.")
+		_, _ = fmt.Fprintln(ioStreams.ErrOut, "Canceled.")
 		return nil
 	}
 

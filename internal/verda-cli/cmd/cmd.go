@@ -5,6 +5,7 @@ import (
 	"github.com/spf13/viper"
 	"github.com/verda-cloud/verdagostack/pkg/log"
 	"github.com/verda-cloud/verdagostack/pkg/tui/bubbletea"
+
 	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/auth"
 	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/settings"
 	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/sshkey"
@@ -17,7 +18,7 @@ import (
 )
 
 // NewRootCommand creates the root `verda` cobra command with all subcommands
-// organised into logical groups.
+// organized into logical groups.
 func NewRootCommand(ioStreams cmdutil.IOStreams) *cobra.Command {
 	opts := clioptions.NewOptions()
 

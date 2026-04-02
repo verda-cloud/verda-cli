@@ -2,6 +2,7 @@ package sshkey
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -60,10 +61,10 @@ func runAdd(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, 
 	if name == "" {
 		name, err = prompter.TextInput(ctx, "SSH key name")
 		if err != nil {
-			return nil //nolint:nilerr
+			return nil
 		}
 		if name == "" {
-			return fmt.Errorf("name is required")
+			return errors.New("name is required")
 		}
 	}
 
@@ -71,10 +72,10 @@ func runAdd(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, 
 	if publicKey == "" {
 		publicKey, err = prompter.TextInput(ctx, "Public key (paste)")
 		if err != nil {
-			return nil //nolint:nilerr
+			return nil
 		}
 		if publicKey == "" {
-			return fmt.Errorf("public key is required")
+			return errors.New("public key is required")
 		}
 	}
 

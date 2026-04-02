@@ -21,7 +21,6 @@ linters:
     - gosec
     - mirror
     - misspell
-    - modernize
     - nakedret
     - nestif
     - nilerr

@@ -67,7 +67,8 @@ func runTrash(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams
 	var b strings.Builder
 	_, _ = fmt.Fprintf(&b, "  %d volume(s) in trash\n\n", len(volumes))
 
-	for _, v := range volumes {
+	for i := range volumes {
+		v := &volumes[i]
 		volType := "Block"
 		if v.IsOSVolume {
 			volType = "OS"

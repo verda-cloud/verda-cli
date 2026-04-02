@@ -2,6 +2,7 @@ package vm
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -181,7 +182,7 @@ func (o *createOptions) request() (verda.CreateInstanceRequest, error) {
 		return verda.CreateInstanceRequest{}, fmt.Errorf("invalid --os-volume-on-spot-discontinue %q", o.OSVolumeOnSpotDiscontinue)
 	}
 	if o.OSVolumeOnSpotDiscontinue != "" && !o.IsSpot {
-		return verda.CreateInstanceRequest{}, fmt.Errorf("--os-volume-on-spot-discontinue requires --is-spot")
+		return verda.CreateInstanceRequest{}, errors.New("--os-volume-on-spot-discontinue requires --is-spot")
 	}
 	if err := validateKind(o.Kind, o.InstanceType); err != nil {
 		return verda.CreateInstanceRequest{}, err
@@ -221,11 +222,11 @@ func (o *createOptions) request() (verda.CreateInstanceRequest, error) {
 	}
 	if o.OSVolumeName != "" || o.OSVolumeSize > 0 || o.OSVolumeOnSpotDiscontinue != "" {
 		if o.OSVolumeSize <= 0 {
-			return verda.CreateInstanceRequest{}, fmt.Errorf("--os-volume-size must be positive when OS volume options are provided")
+			return verda.CreateInstanceRequest{}, errors.New("--os-volume-size must be positive when OS volume options are provided")
 		}
 		name := o.OSVolumeName
 		if name == "" {
-			name = fmt.Sprintf("%s-os", o.Hostname)
+			name = o.Hostname + "-os"
 		}
 		req.OSVolume = &verda.OSVolumeCreateRequest{
 			Name:              name,
@@ -260,13 +261,13 @@ func normalizeContract(value string) (string, error) {
 	case "long_term", "long-term", "long term":
 		return "LONG_TERM", nil
 	case "1 month", "3 months", "6 months", "1 year", "2 years", "1_month", "3_months", "6_months", "1_year", "2_years":
-		return "", fmt.Errorf("the current POST /v1/instances public API does not accept long-term duration values on instance creation; use --contract long_term only if your backend supports it")
+		return "", errors.New("the current POST /v1/instances public API does not accept long-term duration values on instance creation; use --contract long_term only if your backend supports it")
 	default:
 		return "", fmt.Errorf("invalid --contract %q", value)
 	}
 }
 
-func validateKind(kind string, instanceType string) error {
+func validateKind(kind, instanceType string) error {
 	if kind == "" {
 		return nil
 	}
@@ -345,19 +346,19 @@ func appendStorageVolume(volumes []verda.VolumeCreateRequest, o *createOptions) 
 		return nil, fmt.Errorf("invalid --storage-on-spot-discontinue %q", o.StorageOnSpotDiscontinue)
 	}
 	if o.StorageOnSpotDiscontinue != "" && !o.IsSpot {
-		return nil, fmt.Errorf("--storage-on-spot-discontinue requires --is-spot")
+		return nil, errors.New("--storage-on-spot-discontinue requires --is-spot")
 	}
 
 	if o.StorageSize == 0 && o.StorageName == "" && o.StorageOnSpotDiscontinue == "" {
 		return volumes, nil
 	}
 	if o.StorageSize <= 0 {
-		return nil, fmt.Errorf("--storage-size must be positive when storage options are provided")
+		return nil, errors.New("--storage-size must be positive when storage options are provided")
 	}
 
 	name := o.StorageName
 	if name == "" {
-		name = fmt.Sprintf("%s-storage", o.Hostname)
+		name = o.Hostname + "-storage"
 	}
 
 	volume := verda.VolumeCreateRequest{

@@ -2,7 +2,7 @@ package vm
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"testing"
 
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
@@ -36,7 +36,7 @@ func TestBuildCreateFlowHappyPath(t *testing.T) {
 	mock.AddConfirm(true)       // confirm deploy
 
 	// errClient returns error — API steps skipped via IsSet, confirm step handles error gracefully.
-	errClient := func() (*verda.Client, error) { return nil, fmt.Errorf("no client in test") }
+	errClient := func() (*verda.Client, error) { return nil, errors.New("no client in test") }
 	flow := buildCreateFlow(errClient, opts)
 	engine := wizard.NewEngine(mock, nil)
 
@@ -81,7 +81,7 @@ func TestBuildCreateFlowSpotSkipsContract(t *testing.T) {
 	mock.AddTextInput("")        // description
 	mock.AddConfirm(true)        // confirm deploy
 
-	errClient := func() (*verda.Client, error) { return nil, fmt.Errorf("no client in test") }
+	errClient := func() (*verda.Client, error) { return nil, errors.New("no client in test") }
 	flow := buildCreateFlow(errClient, opts)
 	engine := wizard.NewEngine(mock, nil)
 

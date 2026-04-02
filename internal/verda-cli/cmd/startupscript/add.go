@@ -2,6 +2,7 @@ package startupscript
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -68,10 +69,10 @@ func runAdd(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, 
 	if name == "" {
 		name, err = prompter.TextInput(ctx, "Script name")
 		if err != nil {
-			return nil //nolint:nilerr
+			return nil
 		}
 		if name == "" {
-			return fmt.Errorf("name is required")
+			return errors.New("name is required")
 		}
 	}
 
@@ -92,14 +93,14 @@ func runAdd(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, 
 			"Paste content",
 		})
 		if err != nil {
-			return nil //nolint:nilerr
+			return nil
 		}
 
 		switch sourceIdx {
 		case 0: // Load from file
 			path, err := prompter.TextInput(ctx, "File path")
 			if err != nil || strings.TrimSpace(path) == "" {
-				return nil //nolint:nilerr
+				return nil
 			}
 			data, err := os.ReadFile(strings.TrimSpace(path))
 			if err != nil {
@@ -111,13 +112,13 @@ func runAdd(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, 
 				tui.WithEditorDefault("#!/bin/bash\n\n# Your startup script here\n"),
 				tui.WithFileExt(".sh"))
 			if err != nil {
-				return nil //nolint:nilerr
+				return nil
 			}
 		}
 	}
 
 	if strings.TrimSpace(content) == "" {
-		return fmt.Errorf("script content is required")
+		return errors.New("script content is required")
 	}
 
 	req := &verda.CreateStartupScriptRequest{

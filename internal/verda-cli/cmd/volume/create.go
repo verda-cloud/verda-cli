@@ -2,6 +2,7 @@ package volume
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"strconv"
@@ -55,6 +56,7 @@ func NewCmdCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 	return cmd
 }
 
+//nolint:gocyclo // Interactive CLI command with multiple prompt steps — inherently complex.
 func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *createOptions) error {
 	client, err := f.VerdaClient()
 	if err != nil {
@@ -83,7 +85,7 @@ func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 	}
 
 	// Volume type.
-	if opts.Type == "" {
+	if opts.Type == "" { //nolint:nestif // Interactive prompt flow requires nested conditionals.
 		nvmeLabel := "NVMe (fast SSD)"
 		hddLabel := "HDD (large capacity)"
 		if vt, ok := vtMap[verda.VolumeTypeNVMe]; ok && vt.Price.PricePerMonthPerGB > 0 {
@@ -94,7 +96,7 @@ func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 		}
 		idx, err := prompter.Select(ctx, "Volume type", []string{nvmeLabel, hddLabel})
 		if err != nil {
-			return nil //nolint:nilerr
+			return nil
 		}
 		if idx == 0 {
 			opts.Type = verda.VolumeTypeNVMe
@@ -107,7 +109,7 @@ func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 	if opts.Name == "" {
 		name, err := prompter.TextInput(ctx, "Volume name")
 		if err != nil || strings.TrimSpace(name) == "" {
-			return nil //nolint:nilerr
+			return nil
 		}
 		opts.Name = strings.TrimSpace(name)
 	}
@@ -116,11 +118,11 @@ func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 	if opts.Size == 0 {
 		sizeStr, err := prompter.TextInput(ctx, "Size in GiB", tui.WithDefault("100"))
 		if err != nil || strings.TrimSpace(sizeStr) == "" {
-			return nil //nolint:nilerr
+			return nil
 		}
 		size, err := strconv.Atoi(strings.TrimSpace(sizeStr))
 		if err != nil || size <= 0 {
-			return fmt.Errorf("size must be a positive integer")
+			return errors.New("size must be a positive integer")
 		}
 		opts.Size = size
 	}
@@ -145,7 +147,7 @@ func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 		}
 		idx, err := prompter.Select(ctx, "Location", labels)
 		if err != nil {
-			return nil //nolint:nilerr
+			return nil
 		}
 		opts.Location = locations[idx].Code
 	}
@@ -177,7 +179,7 @@ func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 
 	confirmed, err := prompter.Confirm(ctx, "Create volume?", tui.WithConfirmDefault(true))
 	if err != nil || !confirmed {
-		_, _ = fmt.Fprintln(ioStreams.ErrOut, "Cancelled.")
+		_, _ = fmt.Fprintln(ioStreams.ErrOut, "Canceled.")
 		return nil
 	}
 

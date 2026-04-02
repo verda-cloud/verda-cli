@@ -9,8 +9,8 @@ import (
 // NewCmdStartupScript creates the parent startup-script command.
 func NewCmdStartupScript(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:     "startup-script",
-		Short:   "Manage startup scripts",
+		Use:   "startup-script",
+		Short: "Manage startup scripts",
 		Long: cmdutil.LongDesc(`
 			Create, list, and delete startup scripts that run when a VM boots.
 		`),

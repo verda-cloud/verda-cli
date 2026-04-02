@@ -6,6 +6,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/verda-cloud/verdagostack/pkg/version"
+
 	cmdutil "github/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
 

@@ -79,9 +79,9 @@ func runList(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams,
 	_, _ = fmt.Fprintf(ioStreams.Out, "  %d volume(s) found\n\n", len(volumes))
 	_, _ = fmt.Fprintf(ioStreams.Out, "  %-20s  %-36s  %6s  %-10s  %-10s  %s\n", "NAME", "ID", "SIZE", "TYPE", "STATUS", "LOCATION")
 	_, _ = fmt.Fprintf(ioStreams.Out, "  %-20s  %-36s  %6s  %-10s  %-10s  %s\n", "----", "--", "----", "----", "------", "--------")
-	for _, v := range volumes {
+	for i := range volumes {
 		_, _ = fmt.Fprintf(ioStreams.Out, "  %-20s  %-36s  %4dGB  %-10s  %-10s  %s\n",
-			v.Name, v.ID, v.Size, v.Type, v.Status, v.Location)
+			volumes[i].Name, volumes[i].ID, volumes[i].Size, volumes[i].Type, volumes[i].Status, volumes[i].Location)
 	}
 	return nil
 }

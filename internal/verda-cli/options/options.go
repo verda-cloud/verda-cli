@@ -1,7 +1,7 @@
 package options
 
 import (
-	"fmt"
+	"errors"
 	"os"
 	"time"
 
@@ -89,6 +89,8 @@ func hideFlags(fs *pflag.FlagSet, names ...string) {
 }
 
 // Complete fills in zero-value fields from viper (config file / env).
+//
+//nolint:gocyclo // Configuration resolution checks many sources (flags, env, config, credentials) — inherently sequential.
 func (o *Options) Complete() {
 	if o.Config == "" {
 		o.Config = viper.GetString(FlagConfig)
@@ -165,10 +167,10 @@ func (o *Options) Validate() error {
 		return o.AuthOptions.resolveErr
 	}
 	if o.Server == "" {
-		return fmt.Errorf("--base-url must not be empty")
+		return errors.New("--base-url must not be empty")
 	}
 	if o.Timeout <= 0 {
-		return fmt.Errorf("--timeout must be positive")
+		return errors.New("--timeout must be positive")
 	}
 	return nil
 }

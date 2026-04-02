@@ -17,10 +17,10 @@ func TestBuildLoginFlowHappyPath(t *testing.T) {
 	}
 
 	mock := tuitest.New()
-	mock.AddTextInput("staging")                        // profile
-	mock.AddTextInput("https://staging-api.verda.com")  // base-url
-	mock.AddTextInput("my-id")                          // client-id
-	mock.AddPassword("my-secret")                       // client-secret
+	mock.AddTextInput("staging")                       // profile
+	mock.AddTextInput("https://staging-api.verda.com") // base-url
+	mock.AddTextInput("my-id")                         // client-id
+	mock.AddPassword("my-secret")                      // client-secret
 
 	flow := buildLoginFlow(opts)
 	engine := wizard.NewEngine(mock, nil)

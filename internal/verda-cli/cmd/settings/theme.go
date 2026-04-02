@@ -93,7 +93,7 @@ func selectTheme(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStre
 	prompter := f.Prompter()
 	idx, err := prompter.Select(cmd.Context(), "Select theme", labels)
 	if err != nil {
-		return nil //nolint:nilerr
+		return nil //nolint:nilerr // User pressed Esc/Ctrl+C during prompt.
 	}
 
 	return setTheme(f, ioStreams, names[idx])

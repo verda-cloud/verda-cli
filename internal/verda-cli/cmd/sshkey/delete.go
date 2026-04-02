@@ -56,7 +56,7 @@ func runDelete(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 	keyID := opts.ID
 	keyName := keyID
 
-	if keyID == "" {
+	if keyID == "" { //nolint:nestif // Interactive prompt flow requires nested conditionals.
 		// Interactive: list keys and let user select.
 		listCtx, cancel := context.WithTimeout(ctx, f.Options().Timeout)
 		defer cancel()
@@ -78,15 +78,15 @@ func runDelete(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 			return nil
 		}
 
-		labels := make([]string, len(keys))
-		for i, k := range keys {
-			labels[i] = fmt.Sprintf("%s  %s  %s", k.Name, k.ID, k.Fingerprint)
+		labels := make([]string, 0, len(keys)+1)
+		for _, k := range keys {
+			labels = append(labels, fmt.Sprintf("%s  %s  %s", k.Name, k.ID, k.Fingerprint))
 		}
 		labels = append(labels, "Cancel")
 
 		idx, err := prompter.Select(ctx, "Select SSH key to delete", labels)
 		if err != nil {
-			return nil //nolint:nilerr
+			return nil
 		}
 		if idx == len(keys) {
 			return nil
@@ -99,7 +99,7 @@ func runDelete(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 	// Confirm deletion.
 	confirmed, err := prompter.Confirm(ctx, fmt.Sprintf("Are you sure you want to delete SSH key %q?", keyName))
 	if err != nil || !confirmed {
-		_, _ = fmt.Fprintln(ioStreams.ErrOut, "Cancelled.")
+		_, _ = fmt.Fprintln(ioStreams.ErrOut, "Canceled.")
 		return nil
 	}
 

@@ -74,16 +74,16 @@ func runList(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams,
 	_, _ = fmt.Fprintf(ioStreams.ErrOut, "  %d instance(s) found\n\n", len(instances))
 
 	prompter := f.Prompter()
-	labels := make([]string, len(instances))
-	for i, inst := range instances {
-		labels[i] = formatInstanceRow(inst)
+	labels := make([]string, 0, len(instances)+1)
+	for i := range instances {
+		labels = append(labels, formatInstanceRow(&instances[i]))
 	}
 	labels = append(labels, "Exit")
 
 	for {
 		idx, err := prompter.Select(cmd.Context(), "Select instance (type to filter)", labels)
 		if err != nil {
-			return nil //nolint:nilerr // User pressed Esc/Ctrl+C.
+			return nil
 		}
 		if idx == len(instances) { // "Exit"
 			return nil
@@ -131,7 +131,7 @@ func fetchInstanceVolumes(ctx context.Context, client *verda.Client, inst *verda
 	return volumes
 }
 
-func formatInstanceRow(inst verda.Instance) string {
+func formatInstanceRow(inst *verda.Instance) string {
 	ip := ""
 	if inst.IP != nil && *inst.IP != "" {
 		ip = "  " + *inst.IP
@@ -144,5 +144,3 @@ func formatInstanceRow(inst verda.Instance) string {
 		inst.Location,
 		ip)
 }
-
-

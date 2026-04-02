@@ -26,11 +26,11 @@ func DefaultCredentialsFilePath() (string, error) {
 }
 
 // LoadSharedCredentialsForProfile loads credentials for a specific profile.
-func LoadSharedCredentialsForProfile(path string, profile string) (*SharedCredentials, error) {
+func LoadSharedCredentialsForProfile(path, profile string) (*SharedCredentials, error) {
 	return loadSharedCredentials(path, profile)
 }
 
-func loadSharedCredentials(path string, profile string) (*SharedCredentials, error) {
+func loadSharedCredentials(path, profile string) (*SharedCredentials, error) {
 	if path == "" {
 		return nil, os.ErrNotExist
 	}

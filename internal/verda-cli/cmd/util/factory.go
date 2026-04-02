@@ -1,13 +1,14 @@
 package util
 
 import (
-	"fmt"
+	"errors"
 	"net/http"
 	"strings"
 
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
 	"github.com/verda-cloud/verdagostack/pkg/tui"
-	_ "github.com/verda-cloud/verdagostack/pkg/tui/bubbletea"
+	_ "github.com/verda-cloud/verdagostack/pkg/tui/bubbletea" // registers bubbletea TUI backend
+
 	clioptions "github/verda-cloud/verda-cli/internal/verda-cli/options"
 )
 
@@ -68,7 +69,7 @@ func (f *factoryImpl) VerdaClient() (*verda.Client, error) {
 
 	auth := f.opts.AuthOptions
 	if auth.ClientID == "" || auth.ClientSecret == "" {
-		return nil, fmt.Errorf("no credentials configured\n\n" +
+		return nil, errors.New("no credentials configured\n\n" +
 			"Run \"verda auth login\" to set up your credentials, or provide them via:\n" +
 			"  --auth.client-id / VERDA_CLIENT_ID\n" +
 			"  --auth.client-secret / VERDA_CLIENT_SECRET")

@@ -2,6 +2,7 @@ package vm
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -16,6 +17,8 @@ import (
 
 	cmdutil "github/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
+
+const billingTypeSpot = "spot"
 
 // clientFunc lazily resolves a Verda API client. This allows the wizard
 // to start without credentials — steps that don't need API (billing-type,
@@ -104,10 +107,10 @@ func stepBillingType(opts *createOptions) wizard.Step {
 		Required:    true,
 		Loader: wizard.StaticChoices(
 			wizard.Choice{Label: "On-Demand", Value: "on-demand", Description: "Pay as you go or long-term contract"},
-			wizard.Choice{Label: "Spot Instance", Value: "spot", Description: "Lower price, may be interrupted"},
+			wizard.Choice{Label: "Spot Instance", Value: billingTypeSpot, Description: "Lower price, may be interrupted"},
 		),
 		Setter: func(v any) {
-			opts.IsSpot = v.(string) == "spot"
+			opts.IsSpot = v.(string) == billingTypeSpot
 		},
 		Resetter: func() {
 			opts.IsSpot = false
@@ -115,7 +118,7 @@ func stepBillingType(opts *createOptions) wizard.Step {
 		IsSet: func() bool { return opts.IsSpot },
 		Value: func() any {
 			if opts.IsSpot {
-				return "spot"
+				return billingTypeSpot
 			}
 			return "on-demand"
 		},
@@ -132,7 +135,7 @@ func stepContract(getClient clientFunc, opts *createOptions) wizard.Step {
 		Required:    true,
 		DependsOn:   []string{"billing-type"},
 		ShouldSkip: func(c map[string]any) bool {
-			return c["billing-type"] == "spot"
+			return c["billing-type"] == billingTypeSpot
 		},
 		Loader: func(ctx context.Context, _ tui.Prompter, status tui.Status, store *wizard.Store) ([]wizard.Choice, error) {
 			choices := []wizard.Choice{
@@ -207,7 +210,7 @@ func stepInstanceType(getClient clientFunc, cache *apiCache, opts *createOptions
 			}
 			c := store.Collected()
 			kind := c["kind"].(string)
-			isSpot := c["billing-type"] == "spot"
+			isSpot := c["billing-type"] == billingTypeSpot
 
 			types, err := withSpinner(ctx, status, "Loading instance types...", func() ([]verda.InstanceTypeInfo, error) {
 				return client.InstanceTypes.Get(ctx, "usd")
@@ -220,8 +223,8 @@ func stepInstanceType(getClient clientFunc, cache *apiCache, opts *createOptions
 			if cache.instanceTypes == nil {
 				cache.instanceTypes = make(map[string]verda.InstanceTypeInfo, len(types))
 			}
-			for _, t := range types {
-				cache.instanceTypes[t.InstanceType] = t
+			for i := range types {
+				cache.instanceTypes[types[i].InstanceType] = types[i]
 			}
 
 			avail, locMap, err := cache.fetchAvailability(ctx, getClient, isSpot)
@@ -300,7 +303,7 @@ func stepLocation(getClient clientFunc, cache *apiCache, opts *createOptions) wi
 		DependsOn:   []string{"instance-type", "billing-type"},
 		Loader: func(ctx context.Context, _ tui.Prompter, _ tui.Status, store *wizard.Store) ([]wizard.Choice, error) {
 			c := store.Collected()
-			isSpot := c["billing-type"] == "spot"
+			isSpot := c["billing-type"] == billingTypeSpot
 			instType := c["instance-type"].(string)
 
 			// Usually a cache hit — instance-type step already fetched this.
@@ -389,7 +392,7 @@ func stepOSVolumeSize(opts *createOptions) wizard.Step {
 			}
 			n, err := strconv.Atoi(s)
 			if err != nil || n <= 0 {
-				return fmt.Errorf("must be a positive integer")
+				return errors.New("must be a positive integer")
 			}
 			return nil
 		},
@@ -490,8 +493,8 @@ func stepStorage(getClient clientFunc, cache *apiCache, opts *createOptions) wiz
 				}
 			}
 		},
-		Setter:   func(v any) {},  // Set directly in Loader.
-		Resetter: func() {},       // Don't clear — Loader manages the value.
+		Setter:   func(v any) {}, // Set directly in Loader.
+		Resetter: func() {},      // Don't clear — Loader manages the value.
 		IsSet:    func() bool { return opts.StorageSize > 0 || len(opts.VolumeSpecs) > 0 || len(opts.ExistingVolumes) > 0 },
 		Value:    func() any { return "" },
 	}
@@ -514,7 +517,7 @@ func buildStorageChoices(volumes []verda.VolumeCreateRequest, existingIDs []stri
 		}
 		for _, id := range existingIDs {
 			choices = append(choices, wizard.Choice{
-				Label: fmt.Sprintf("  Existing: %s", id),
+				Label: "  Existing: " + id,
 				Value: "__info__",
 			})
 		}
@@ -545,7 +548,7 @@ func promptAddVolume(ctx context.Context, prompter tui.Prompter, store *wizard.S
 		"← Back",
 	})
 	if err != nil {
-		return nil, nil //nolint:nilerr
+		return nil, nil //nolint:nilerr // User pressed Esc/Ctrl+C during prompt.
 	}
 	if typeIdx == 2 { // "← Back"
 		return nil, nil
@@ -564,18 +567,18 @@ func promptAddVolume(ctx context.Context, prompter tui.Prompter, store *wizard.S
 	}
 	name, err := prompter.TextInput(ctx, "Volume name", tui.WithDefault(defaultName))
 	if err != nil || strings.TrimSpace(name) == "" {
-		return nil, nil //nolint:nilerr
+		return nil, nil //nolint:nilerr // User pressed Esc/Ctrl+C or left input blank.
 	}
 
 	// Size
 	sizeStr, err := prompter.TextInput(ctx, "Size in GiB", tui.WithDefault("100"))
 	if err != nil || strings.TrimSpace(sizeStr) == "" {
-		return nil, nil //nolint:nilerr
+		return nil, nil //nolint:nilerr // User pressed Esc/Ctrl+C or left input blank.
 	}
-	size, err := strconv.Atoi(strings.TrimSpace(sizeStr))
-	if err != nil || size <= 0 {
+	size, parseErr := strconv.Atoi(strings.TrimSpace(sizeStr))
+	if parseErr != nil || size <= 0 {
 		_, _ = prompter.Confirm(ctx, "Error: size must be a positive integer. Press Enter to continue.", tui.WithConfirmDefault(true))
-		return nil, nil
+		return nil, nil //nolint:nilerr // Invalid input is not a fatal error; show message and return to menu.
 	}
 
 	return &verda.VolumeCreateRequest{
@@ -595,9 +598,9 @@ func promptAttachExisting(ctx context.Context, prompter tui.Prompter, status tui
 
 	// Filter to detached volumes only.
 	var detached []verda.Volume
-	for _, v := range volumes {
-		if v.InstanceID == nil || *v.InstanceID == "" {
-			detached = append(detached, v)
+	for i := range volumes {
+		if volumes[i].InstanceID == nil || *volumes[i].InstanceID == "" {
+			detached = append(detached, volumes[i])
 		}
 	}
 
@@ -606,15 +609,15 @@ func promptAttachExisting(ctx context.Context, prompter tui.Prompter, status tui
 		return "", nil
 	}
 
-	labels := make([]string, len(detached))
-	for i, v := range detached {
-		labels[i] = fmt.Sprintf("%s (%dGB %s, %s)", v.Name, v.Size, v.Type, v.Location)
+	labels := make([]string, 0, len(detached)+1)
+	for i := range detached {
+		labels = append(labels, fmt.Sprintf("%s (%dGB %s, %s)", detached[i].Name, detached[i].Size, detached[i].Type, detached[i].Location))
 	}
 	labels = append(labels, "← Back")
 
 	idx, err := prompter.Select(ctx, "Select volume to attach", labels)
 	if err != nil {
-		return "", nil //nolint:nilerr
+		return "", nil //nolint:nilerr // User canceled or left input blank.
 	}
 	if idx == len(detached) { // "← Back"
 		return "", nil
@@ -695,17 +698,16 @@ func stepSSHKeys(getClient clientFunc, opts *createOptions) wizard.Step {
 				}
 			}
 		},
-		Setter:   func(v any) {},                        // Set directly in Loader.
-		Resetter: func() {},                               // Don't clear — Loader manages the value.
+		Setter:   func(v any) {}, // Set directly in Loader.
+		Resetter: func() {},      // Don't clear — Loader manages the value.
 		IsSet:    func() bool { return len(opts.SSHKeyIDs) > 0 },
 		Value:    func() any { return opts.SSHKeyIDs },
 	}
 }
 
 func buildSSHKeyChoices(keys []verda.SSHKey) []wizard.Choice {
-	choices := []wizard.Choice{
-		{Label: "+ Add new SSH key", Value: addNewSSHKeyValue},
-	}
+	choices := make([]wizard.Choice, 0, 1+len(keys))
+	choices = append(choices, wizard.Choice{Label: "+ Add new SSH key", Value: addNewSSHKeyValue})
 	for _, k := range keys {
 		choices = append(choices, wizard.Choice{
 			Label:       k.Name,
@@ -719,19 +721,20 @@ func buildSSHKeyChoices(keys []verda.SSHKey) []wizard.Choice {
 func promptAddSSHKey(ctx context.Context, prompter tui.Prompter, client *verda.Client) (*verda.SSHKey, error) {
 	name, err := prompter.TextInput(ctx, "SSH key name")
 	if err != nil || strings.TrimSpace(name) == "" {
-		return nil, nil //nolint:nilerr
+		return nil, nil //nolint:nilerr // User canceled or left input blank.
 	}
 	pubKey, err := prompter.TextInput(ctx, "Public key (paste)")
 	if err != nil || strings.TrimSpace(pubKey) == "" {
-		return nil, nil //nolint:nilerr
+		return nil, nil //nolint:nilerr // User canceled or left input blank.
 	}
 	created, err := client.SSHKeys.AddSSHKey(ctx, &verda.CreateSSHKeyRequest{
-		Name:     strings.TrimSpace(name),
+		Name:      strings.TrimSpace(name),
 		PublicKey: strings.TrimSpace(pubKey),
 	})
 	if err != nil {
+		// Show error and return to menu instead of crashing.
 		_, _ = prompter.Confirm(ctx, fmt.Sprintf("Error: %v. Press Enter to continue.", err), tui.WithConfirmDefault(true))
-		return nil, nil //nolint:nilerr
+		return nil, nil
 	}
 	return created, nil
 }
@@ -787,8 +790,8 @@ func stepStartupScript(getClient clientFunc, opts *createOptions) wizard.Step {
 				}
 			}
 		},
-		Setter:   func(v any) {},  // Set directly in Loader.
-		Resetter: func() {},       // Don't clear — Loader manages the value.
+		Setter:   func(v any) {}, // Set directly in Loader.
+		Resetter: func() {},      // Don't clear — Loader manages the value.
 		IsSet:    func() bool { return opts.StartupScriptID != "" },
 		Value:    func() any { return opts.StartupScriptID },
 	}
@@ -845,10 +848,11 @@ func stepDescription(opts *createOptions) wizard.Step {
 // --- Startup script helpers ---
 
 func buildStartupScriptChoices(scripts []verda.StartupScript) []wizard.Choice {
-	choices := []wizard.Choice{
-		{Label: "None (skip)", Value: ""},
-		{Label: "+ Add new startup script", Value: addNewScriptValue},
-	}
+	choices := make([]wizard.Choice, 0, 2+len(scripts))
+	choices = append(choices,
+		wizard.Choice{Label: "None (skip)", Value: ""},
+		wizard.Choice{Label: "+ Add new startup script", Value: addNewScriptValue},
+	)
 	for _, s := range scripts {
 		choices = append(choices, wizard.Choice{
 			Label: s.Name,
@@ -861,7 +865,7 @@ func buildStartupScriptChoices(scripts []verda.StartupScript) []wizard.Choice {
 func promptAddStartupScript(ctx context.Context, prompter tui.Prompter, client *verda.Client) (*verda.StartupScript, error) {
 	name, err := prompter.TextInput(ctx, "Script name")
 	if err != nil || strings.TrimSpace(name) == "" {
-		return nil, nil //nolint:nilerr
+		return nil, nil //nolint:nilerr // User canceled or left input blank.
 	}
 
 	// Ask for source: paste or load from file.
@@ -870,7 +874,7 @@ func promptAddStartupScript(ctx context.Context, prompter tui.Prompter, client *
 		"Paste content",
 	})
 	if err != nil {
-		return nil, nil //nolint:nilerr
+		return nil, nil //nolint:nilerr // User canceled or left input blank.
 	}
 
 	var content string
@@ -878,12 +882,12 @@ func promptAddStartupScript(ctx context.Context, prompter tui.Prompter, client *
 	case 0: // Load from file
 		path, err := prompter.TextInput(ctx, "File path")
 		if err != nil || strings.TrimSpace(path) == "" {
-			return nil, nil //nolint:nilerr
+			return nil, nil //nolint:nilerr // User canceled or left input blank.
 		}
 		data, err := os.ReadFile(strings.TrimSpace(path))
 		if err != nil {
 			_, _ = prompter.Confirm(ctx, fmt.Sprintf("Error: %v. Press Enter to continue.", err), tui.WithConfirmDefault(true))
-			return nil, nil //nolint:nilerr
+			return nil, nil
 		}
 		content = string(data)
 	case 1: // Paste content
@@ -891,7 +895,7 @@ func promptAddStartupScript(ctx context.Context, prompter tui.Prompter, client *
 			tui.WithEditorDefault("#!/bin/bash\n\n# Your startup script here\n"),
 			tui.WithFileExt(".sh"))
 		if err != nil {
-			return nil, nil //nolint:nilerr
+			return nil, nil //nolint:nilerr // User canceled the editor; return to menu.
 		}
 	}
 
@@ -906,7 +910,7 @@ func promptAddStartupScript(ctx context.Context, prompter tui.Prompter, client *
 	if err != nil {
 		// Show error and return to menu instead of crashing.
 		_, _ = prompter.Confirm(ctx, fmt.Sprintf("Error: %v. Press Enter to continue.", err), tui.WithConfirmDefault(true))
-		return nil, nil //nolint:nilerr
+		return nil, nil
 	}
 	return created, nil
 }
@@ -923,11 +927,7 @@ func withSpinner[T any](ctx context.Context, status tui.Status, msg string, fn f
 		return fn() // fallback: run without spinner
 	}
 	result, fnErr := fn()
-	if fnErr != nil {
-		sp.Stop("")
-	} else {
-		sp.Stop("")
-	}
+	sp.Stop("")
 	return result, fnErr
 }
 

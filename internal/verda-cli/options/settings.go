@@ -17,7 +17,7 @@ func SaveSetting(key string, value any) error {
 	path := filepath.Join(dir, "config.yaml")
 
 	cfg := map[string]any{}
-	if data, err := os.ReadFile(path); err == nil { //nolint:gosec // path is from our own config dir
+	if data, err := os.ReadFile(path); err == nil {
 		if err := yaml.Unmarshal(data, &cfg); err != nil {
 			return err
 		}
@@ -42,7 +42,7 @@ func GetSetting(key string) (any, bool) {
 	}
 	path := filepath.Join(dir, "config.yaml")
 
-	data, err := os.ReadFile(path) //nolint:gosec // path is from our own config dir
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, false
 	}

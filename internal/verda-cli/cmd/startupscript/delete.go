@@ -56,7 +56,7 @@ func runDelete(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 	scriptID := opts.ID
 	scriptName := scriptID
 
-	if scriptID == "" {
+	if scriptID == "" { //nolint:nestif // Interactive prompt flow requires nested conditionals.
 		// Interactive: list scripts and let user select.
 		listCtx, cancel := context.WithTimeout(ctx, f.Options().Timeout)
 		defer cancel()
@@ -78,15 +78,15 @@ func runDelete(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 			return nil
 		}
 
-		labels := make([]string, len(scripts))
-		for i, s := range scripts {
-			labels[i] = fmt.Sprintf("%s  %s", s.Name, s.ID)
+		labels := make([]string, 0, len(scripts)+1)
+		for _, s := range scripts {
+			labels = append(labels, fmt.Sprintf("%s  %s", s.Name, s.ID))
 		}
 		labels = append(labels, "Cancel")
 
 		idx, err := prompter.Select(ctx, "Select startup script to delete", labels)
 		if err != nil {
-			return nil //nolint:nilerr
+			return nil
 		}
 		if idx == len(scripts) {
 			return nil
@@ -99,7 +99,7 @@ func runDelete(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 	// Confirm deletion.
 	confirmed, err := prompter.Confirm(ctx, fmt.Sprintf("Are you sure you want to delete startup script %q?", scriptName))
 	if err != nil || !confirmed {
-		_, _ = fmt.Fprintln(ioStreams.ErrOut, "Cancelled.")
+		_, _ = fmt.Fprintln(ioStreams.ErrOut, "Canceled.")
 		return nil
 	}
 

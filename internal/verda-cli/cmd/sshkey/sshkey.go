@@ -9,8 +9,8 @@ import (
 // NewCmdSSHKey creates the parent ssh-key command.
 func NewCmdSSHKey(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:     "ssh-key",
-		Short:   "Manage SSH keys",
+		Use:   "ssh-key",
+		Short: "Manage SSH keys",
 		Long: cmdutil.LongDesc(`
 			Create, list, and delete SSH keys used for VM authentication.
 		`),
