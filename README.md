@@ -191,6 +191,9 @@ verda availability --spot              # spot only
 verda cost estimate --type 1V100.6V --os-volume 100 --storage 500
 verda cost estimate --type 1V100.6V --spot
 
+# See what your running instances are costing you
+verda cost running
+
 # Account balance
 verda cost balance
 ```
