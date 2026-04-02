@@ -110,6 +110,7 @@ Auth Commands:
 
 VM Commands:
   vm                Manage VM instances
+  ssh               SSH into a running VM instance
 
 Resource Commands:
   ssh-key           Manage SSH keys
@@ -117,6 +118,7 @@ Resource Commands:
   volume            Manage volumes
 
 Other Commands:
+  completion        Generate shell completion scripts
   settings          Manage CLI settings
   update            Update Verda CLI to latest or specific version
   version           Print version information
@@ -125,22 +127,37 @@ Other Commands:
 ### VM
 
 
-| Command           | Description                                |
-| ----------------- | ------------------------------------------ |
-| `verda vm create` | Create a VM (interactive wizard or flags)  |
-| `verda vm list`   | List and inspect VM instances              |
-| `verda vm action` | Start, shutdown, hibernate, or delete a VM |
+| Command              | Description                                |
+| -------------------- | ------------------------------------------ |
+| `verda vm create`    | Create a VM (interactive wizard or flags)  |
+| `verda vm list`      | List and inspect VM instances              |
+| `verda vm describe`  | Show detailed info about a single VM       |
+| `verda vm action`    | Start, shutdown, hibernate, or delete a VM |
 
+
+### SSH
+
+```bash
+# Connect by hostname
+verda ssh gpu-runner
+
+# Connect with options
+verda ssh gpu-runner --user ubuntu --key ~/.ssh/id_ed25519
+
+# Port forwarding and other ssh args
+verda ssh gpu-runner -- -L 8080:localhost:8080
+```
 
 ### Volume
 
 
-| Command               | Description                                  |
-| --------------------- | -------------------------------------------- |
-| `verda volume create` | Create a block storage volume                |
-| `verda volume list`   | List volumes                                 |
-| `verda volume action` | Detach, rename, resize, clone, or delete     |
-| `verda volume trash`  | List deleted volumes (restorable within 96h) |
+| Command                 | Description                                  |
+| ----------------------- | -------------------------------------------- |
+| `verda volume create`   | Create a block storage volume                |
+| `verda volume list`     | List volumes                                 |
+| `verda volume describe` | Show detailed info about a single volume     |
+| `verda volume action`   | Detach, rename, resize, clone, or delete     |
+| `verda volume trash`    | List deleted volumes (restorable within 96h) |
 
 
 ### SSH Keys & Startup Scripts
@@ -183,15 +200,54 @@ Available themes: `default`, `dracula`, `catppuccin`, `catppuccin-latte`, `nord`
 | `verda auth use PROFILE` | Switch active auth profile                |
 
 
+### Shell Completion
+
+```bash
+# Bash
+source <(verda completion bash)
+
+# Zsh (add to ~/.zshrc or run once)
+verda completion zsh > "${fpath[1]}/_verda"
+
+# Fish
+verda completion fish | source
+```
+
 ## Global Flags
 
 
-| Flag         | Description                                           |
-| ------------ | ----------------------------------------------------- |
-| `--debug`    | Enable debug output (API request/response details)    |
-| `--timeout`  | HTTP request timeout (default: 30s)                   |
-| `--base-url` | Override API base URL                                 |
-| `--config`   | Path to config file (default: `~/.verda/config.yaml`) |
+| Flag              | Description                                           |
+| ----------------- | ----------------------------------------------------- |
+| `--output, -o`    | Output format: `table`, `json`, `yaml` (default: table) |
+| `--debug`         | Enable debug output (API request/response details)    |
+| `--timeout`       | HTTP request timeout (default: 30s)                   |
+| `--base-url`      | Override API base URL                                 |
+| `--config`        | Path to config file (default: `~/.verda/config.yaml`) |
+
+### Structured Output
+
+All list and describe commands support `--output json` and `--output yaml` for scripting:
+
+```bash
+# Pipe to jq
+verda vm list -o json | jq '.[].hostname'
+
+# YAML output
+verda volume describe vol-123 -o yaml
+
+# Use in CI/CD scripts
+INSTANCE_ID=$(verda vm list -o json | jq -r '.[0].id')
+```
+
+### Wait for Operations
+
+Async commands support `--wait` to poll until completion:
+
+```bash
+verda vm create --hostname gpu-runner --wait --wait-timeout 10m
+verda vm action --id abc-123 --wait
+verda volume create --name data --size 500 --wait
+```
 
 
 ## Configuration
