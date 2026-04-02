@@ -54,6 +54,18 @@ go install github.com/verda-cloud/verda-cli/cmd/verda@latest
 verda version
 ```
 
+### Update to latest version
+
+```bash
+verda update
+```
+
+Or install a specific version:
+
+```bash
+verda update --version v1.0.0
+```
+
 ## Getting Started
 
 ### 1. Configure credentials
@@ -102,6 +114,7 @@ Resource Commands:
 
 Other Commands:
   settings          Manage CLI settings
+  update            Update Verda CLI to latest or specific version
   version           Print version information
 ```
 
@@ -137,6 +150,14 @@ Other Commands:
 | `verda settings theme --select` | Interactive theme picker |
 
 Available themes: `default`, `dracula`, `catppuccin`, `catppuccin-latte`, `nord`, `tokyonight`, `github-light`, `solarized-light`
+
+### Update
+
+| Command | Description |
+|---------|-------------|
+| `verda update` | Update to the latest version |
+| `verda update --version v1.0.0` | Install a specific version (upgrade or downgrade) |
+| `verda update --list` | List available versions |
 
 ### Auth
 

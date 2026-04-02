@@ -10,6 +10,7 @@ import (
 	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/settings"
 	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/sshkey"
 	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/startupscript"
+	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/update"
 	cmdutil "github/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/version"
 	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/vm"
@@ -77,6 +78,7 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) *cobra.Command {
 			Message: "Other Commands:",
 			Commands: []*cobra.Command{
 				settings.NewCmdSettings(f, ioStreams),
+				update.NewCmdUpdate(f, ioStreams),
 				version.NewCmdVersion(f, ioStreams),
 			},
 		},

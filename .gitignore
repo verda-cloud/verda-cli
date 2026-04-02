@@ -357,3 +357,8 @@ dist
 tmp/
 temp/
 tmp-test-*/
+
+# VHS generated output (keep .tape files, ignore output)
+vhs/*.gif
+vhs/*.mp4
+vhs/*.webm
