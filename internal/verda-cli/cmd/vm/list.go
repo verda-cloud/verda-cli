@@ -142,15 +142,24 @@ func fetchInstanceVolumes(ctx context.Context, client *verda.Client, inst *verda
 }
 
 func printInstanceTable(ioStreams cmdutil.IOStreams, instances []verda.Instance) error {
+	// Find max hostname length for dynamic column width.
+	nameW := 20
+	for i := range instances {
+		if len(instances[i].Hostname) > nameW {
+			nameW = len(instances[i].Hostname)
+		}
+	}
+
 	_, _ = fmt.Fprintf(ioStreams.Out, "  %d instance(s) found\n\n", len(instances))
-	_, _ = fmt.Fprintf(ioStreams.Out, "  %-20s  %-13s  %-18s  %-8s  %s\n", "HOSTNAME", "STATUS", "TYPE", "LOCATION", "IP")
-	_, _ = fmt.Fprintf(ioStreams.Out, "  %-20s  %-13s  %-18s  %-8s  %s\n", "--------", "------", "----", "--------", "--")
+	_, _ = fmt.Fprintf(ioStreams.Out, "  %-*s  %-13s  %-18s  %-8s  %s\n", nameW, "HOSTNAME", "STATUS", "TYPE", "LOCATION", "IP")
+	_, _ = fmt.Fprintf(ioStreams.Out, "  %-*s  %-13s  %-18s  %-8s  %s\n", nameW, "--------", "------", "----", "--------", "--")
 	for i := range instances {
 		ip := ""
 		if instances[i].IP != nil && *instances[i].IP != "" {
 			ip = *instances[i].IP
 		}
-		_, _ = fmt.Fprintf(ioStreams.Out, "  %-20s  %-13s  %-18s  %-8s  %s\n",
+		_, _ = fmt.Fprintf(ioStreams.Out, "  %-*s  %-13s  %-18s  %-8s  %s\n",
+			nameW,
 			instances[i].Hostname,
 			instances[i].Status,
 			instances[i].InstanceType,
