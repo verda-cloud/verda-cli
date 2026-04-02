@@ -131,8 +131,8 @@ func renderTypes(w interface{ Write([]byte) (int, error) }, types []verda.Instan
 		priceLabel = "$/hr (spot)"
 	}
 
-	_, _ = fmt.Fprintf(w, "\n  %-20s  %-22s  %5s  %6s  %6s  %10s\n",
-		"TYPE", "COMPUTE", "vCPU", "RAM", "VRAM", priceLabel)
+	_, _ = fmt.Fprintf(w, "\n  %-20s  %-28s  %5s  %6s  %6s  %10s\n",
+		"TYPE", "GPU", "vCPU", "RAM", "VRAM", priceLabel)
 	_, _ = fmt.Fprintf(w, "  %s\n", sep)
 
 	if len(gpuTypes) > 0 {
@@ -155,7 +155,7 @@ func renderTypes(w interface{ Write([]byte) (int, error) }, types []verda.Instan
 func renderTypeRow(w interface{ Write([]byte) (int, error) }, t *verda.InstanceTypeInfo, showSpot bool, priceStyle, dimStyle lipgloss.Style) {
 	compute := t.CPU.Description
 	if t.GPU.NumberOfGPUs > 0 {
-		compute = fmt.Sprintf("%dx %s", t.GPU.NumberOfGPUs, t.GPU.Description)
+		compute = cleanGPUDescription(t)
 	}
 
 	vram := ""
@@ -173,11 +173,36 @@ func renderTypeRow(w interface{ Write([]byte) (int, error) }, t *verda.InstanceT
 		priceStr = dimStyle.Render("n/a")
 	}
 
-	_, _ = fmt.Fprintf(w, "  %-20s  %-22s  %5d  %4dGB  %6s  %10s\n",
+	_, _ = fmt.Fprintf(w, "  %-20s  %-28s  %5d  %6s  %6s  %10s\n",
 		t.InstanceType,
 		compute,
 		t.CPU.NumberOfCores,
-		t.Memory.SizeInGigabytes,
+		formatGB(t.Memory.SizeInGigabytes),
 		vram,
 		priceStr)
+}
+
+// cleanGPUDescription builds a clean GPU label like "1x H100 SXM5".
+// The API description often includes the count prefix and VRAM suffix
+// which we show in separate columns, so strip those.
+func cleanGPUDescription(t *verda.InstanceTypeInfo) string {
+	desc := t.GPU.Description
+	// Remove leading "Nx " prefix if it matches the GPU count — API sometimes includes it.
+	prefix := fmt.Sprintf("%dx ", t.GPU.NumberOfGPUs)
+	desc = strings.TrimPrefix(desc, prefix)
+	// Remove trailing VRAM like " 80GB" or " 288GB" since we have a VRAM column.
+	if idx := strings.LastIndex(desc, " "); idx > 0 {
+		suffix := desc[idx+1:]
+		if strings.HasSuffix(suffix, "GB") || strings.HasSuffix(suffix, "gb") {
+			desc = desc[:idx]
+		}
+	}
+	return fmt.Sprintf("%dx %s", t.GPU.NumberOfGPUs, desc)
+}
+
+func formatGB(gb int) string {
+	if gb >= 1000 {
+		return fmt.Sprintf("%.1fTB", float64(gb)/1000)
+	}
+	return fmt.Sprintf("%dGB", gb)
 }
