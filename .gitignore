@@ -360,3 +360,6 @@ tmp-test-*/
 
 # VHS demo recordings
 vhs/
+
+# Live test script (contains local testing logic)
+scripts/live-test.sh
