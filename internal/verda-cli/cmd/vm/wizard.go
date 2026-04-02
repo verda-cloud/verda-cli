@@ -13,6 +13,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
 	"github.com/verda-cloud/verdagostack/pkg/tui"
+	"github.com/verda-cloud/verdagostack/pkg/tui/bubbletea"
 	"github.com/verda-cloud/verdagostack/pkg/tui/wizard"
 
 	cmdutil "github/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
@@ -80,7 +81,7 @@ func buildCreateFlow(getClient clientFunc, opts *createOptions) *wizard.Flow {
 		Name: "vm-create",
 		Layout: []wizard.ViewDef{
 			{ID: "progress", View: wizard.NewProgressView(wizard.WithProgressPercent())},
-			{ID: "hints", View: wizard.NewHintBarView()},
+			{ID: "hints", View: wizard.NewHintBarView(wizard.WithHintStyle(bubbletea.HintStyle()))},
 		},
 		Steps: []wizard.Step{
 			stepBillingType(opts),
