@@ -76,6 +76,11 @@ func runList(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams,
 		return nil
 	}
 
+	// Non-interactive table when piped or redirected.
+	if !cmdutil.IsStdoutTerminal() {
+		return printInstanceTable(ioStreams, instances)
+	}
+
 	_, _ = fmt.Fprintf(ioStreams.ErrOut, "  %d instance(s) found\n\n", len(instances))
 
 	prompter := f.Prompter()
@@ -134,6 +139,25 @@ func fetchInstanceVolumes(ctx context.Context, client *verda.Client, inst *verda
 		volumes = append(volumes, *vol)
 	}
 	return volumes
+}
+
+func printInstanceTable(ioStreams cmdutil.IOStreams, instances []verda.Instance) error {
+	_, _ = fmt.Fprintf(ioStreams.Out, "  %d instance(s) found\n\n", len(instances))
+	_, _ = fmt.Fprintf(ioStreams.Out, "  %-20s  %-13s  %-18s  %-8s  %s\n", "HOSTNAME", "STATUS", "TYPE", "LOCATION", "IP")
+	_, _ = fmt.Fprintf(ioStreams.Out, "  %-20s  %-13s  %-18s  %-8s  %s\n", "--------", "------", "----", "--------", "--")
+	for i := range instances {
+		ip := ""
+		if instances[i].IP != nil && *instances[i].IP != "" {
+			ip = *instances[i].IP
+		}
+		_, _ = fmt.Fprintf(ioStreams.Out, "  %-20s  %-13s  %-18s  %-8s  %s\n",
+			instances[i].Hostname,
+			instances[i].Status,
+			instances[i].InstanceType,
+			instances[i].Location,
+			ip)
+	}
+	return nil
 }
 
 func formatInstanceRow(inst *verda.Instance) string {
