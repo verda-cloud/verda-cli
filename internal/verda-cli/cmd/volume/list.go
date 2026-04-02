@@ -69,6 +69,8 @@ func runList(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams,
 		return err
 	}
 
+	cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), fmt.Sprintf("API response: %d volume(s):", len(volumes)), volumes)
+
 	if len(volumes) == 0 {
 		_, _ = fmt.Fprintln(ioStreams.Out, "No volumes found.")
 		return nil

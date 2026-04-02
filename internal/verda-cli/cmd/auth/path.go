@@ -8,11 +8,11 @@ import (
 )
 
 func defaultConfigFilePath() (string, error) {
-	home, err := os.UserHomeDir()
+	dir, err := options.VerdaDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".verda", "config.yaml"), nil
+	return filepath.Join(dir, "config.yaml"), nil
 }
 
 func resolveCredentialsFile(path string) (string, error) {

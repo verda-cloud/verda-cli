@@ -103,6 +103,8 @@ func runDelete(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 		return nil
 	}
 
+	cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), "Deleting startup script:", map[string]string{"id": scriptID, "name": scriptName})
+
 	deleteCtx, cancel := context.WithTimeout(ctx, f.Options().Timeout)
 	defer cancel()
 

@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"github.com/spf13/cobra"
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
 
@@ -181,6 +181,12 @@ func runAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 		}
 	}
 
+	cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), fmt.Sprintf("Action: %s on instance:", action.Label), map[string]string{
+		"instance_id": inst.ID,
+		"hostname":    inst.Hostname,
+		"status":      inst.Status,
+	})
+
 	// Execute action with spinner.
 	actionCtx, cancel := context.WithTimeout(ctx, f.Options().Timeout)
 	defer cancel()
@@ -230,7 +236,7 @@ func selectInstance(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IO
 	}
 	labels = append(labels, "Cancel")
 
-	idx, err := f.Prompter().Select(ctx, "Select instance (↑/↓ move, type to filter)", labels)
+	idx, err := f.Prompter().Select(ctx, "Select instance (type to filter)", labels)
 	if err != nil {
 		return "", nil //nolint:nilerr
 	}
@@ -293,6 +299,12 @@ func runDeleteFlow(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOS
 		_, _ = fmt.Fprintln(ioStreams.ErrOut, "Cancelled.")
 		return nil
 	}
+
+	cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), "Delete instance:", map[string]any{
+		"instance_id": inst.ID,
+		"hostname":    inst.Hostname,
+		"volume_ids":  volumeIDs,
+	})
 
 	// Execute delete with spinner.
 	deleteCtx, cancel := context.WithTimeout(ctx, f.Options().Timeout)

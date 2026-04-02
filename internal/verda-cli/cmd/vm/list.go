@@ -64,6 +64,8 @@ func runList(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams,
 		return err
 	}
 
+	cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), fmt.Sprintf("API response: %d instance(s):", len(instances)), instances)
+
 	if len(instances) == 0 {
 		_, _ = fmt.Fprintln(ioStreams.Out, "No instances found.")
 		return nil
@@ -79,7 +81,7 @@ func runList(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams,
 	labels = append(labels, "Exit")
 
 	for {
-		idx, err := prompter.Select(cmd.Context(), "Select instance for details (↑/↓ move, type to filter, Esc to exit)", labels)
+		idx, err := prompter.Select(cmd.Context(), "Select instance (type to filter)", labels)
 		if err != nil {
 			return nil //nolint:nilerr // User pressed Esc/Ctrl+C.
 		}

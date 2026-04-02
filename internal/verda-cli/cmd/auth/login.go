@@ -3,7 +3,7 @@ package auth
 import (
 	"fmt"
 	"os"
-	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -12,6 +12,7 @@ import (
 	"github.com/verda-cloud/verdagostack/pkg/tui/wizard"
 
 	cmdutil "github/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
+	"github/verda-cloud/verda-cli/internal/verda-cli/options"
 )
 
 type loginOptions struct {
@@ -108,14 +109,15 @@ func NewCmdLogin(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command 
 			section.Key("verda_client_id").SetValue(opts.ClientID)
 			section.Key("verda_client_secret").SetValue(opts.ClientSecret)
 
-			if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			if _, err := options.EnsureVerdaDir(); err != nil {
 				return err
 			}
 			if err := cfg.SaveTo(path); err != nil {
 				return err
 			}
-			if err := os.Chmod(path, 0o600); err != nil {
-				return err
+			// Restrict file permissions on Unix (no-op on Windows).
+			if runtime.GOOS != "windows" {
+				_ = os.Chmod(path, 0o600)
 			}
 
 			_, _ = fmt.Fprintf(ioStreams.Out, "Saved profile %q to %s\n", opts.Profile, path)

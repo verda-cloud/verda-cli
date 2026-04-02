@@ -3,7 +3,6 @@ package options
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/spf13/pflag"
@@ -17,7 +16,6 @@ const FlagConfig = "config"
 const (
 	defaultBaseURL            = "https://api.verda.com/v1"
 	defaultCredentialsProfile = "default"
-	defaultCredentialsPath    = ".verda/credentials"
 )
 
 // Options holds the shared CLI configuration that is resolved once in the
@@ -133,8 +131,8 @@ func (o *Options) Complete() {
 		a.CredentialsFile = os.Getenv("VERDA_SHARED_CREDENTIALS_FILE")
 	}
 	if a.CredentialsFile == "" {
-		if home, err := os.UserHomeDir(); err == nil {
-			a.CredentialsFile = filepath.Join(home, defaultCredentialsPath)
+		if path, err := DefaultCredentialsFilePath(); err == nil {
+			a.CredentialsFile = path
 		}
 	}
 

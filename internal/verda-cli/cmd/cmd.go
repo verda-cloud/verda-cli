@@ -4,7 +4,9 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"github.com/verda-cloud/verdagostack/pkg/log"
+	"github.com/verda-cloud/verdagostack/pkg/tui/bubbletea"
 	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/auth"
+	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/settings"
 	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/sshkey"
 	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/startupscript"
 	cmdutil "github/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
@@ -23,13 +25,7 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) *cobra.Command {
 		Use:   "verda",
 		Short: "Command-line interface for Verda Cloud",
 		Long: cmdutil.LongDesc(`
-			Command-line interface for Verda Cloud.
-
-			Configuration is resolved from multiple sources in order of precedence:
-			  1. Command-line flags (highest priority)
-			  2. Environment variables with VERDA_ prefix
-			  3. Config file: ~/.verda/config.yaml or --config path
-			  4. Built-in defaults`),
+			Command-line interface for Verda Cloud.`),
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
@@ -38,6 +34,10 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) *cobra.Command {
 				return err
 			}
 			log.Init(opts.Log)
+			// Apply saved theme (best effort).
+			if theme := viper.GetString("settings.theme"); theme != "" {
+				bubbletea.SetThemeByName(theme)
+			}
 			return nil
 		},
 	}
@@ -75,6 +75,7 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) *cobra.Command {
 		{
 			Message: "Other Commands:",
 			Commands: []*cobra.Command{
+				settings.NewCmdSettings(f, ioStreams),
 				version.NewCmdVersion(f, ioStreams),
 			},
 		},

@@ -356,3 +356,4 @@ dist
 # temp dir
 tmp/
 temp/
+tmp-test-*/

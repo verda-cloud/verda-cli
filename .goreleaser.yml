@@ -1,0 +1,33 @@
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: verda
+    binary: verda
+    main: ./cmd/verda/
+    ldflags:
+      - -s -w -X github.com/verda-cloud/verdagostack/pkg/version.gitVersion={{ .Version }}
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    name_template: verda_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+
+checksum:
+  name_template: verda_{{ .Version }}_SHA256SUMS

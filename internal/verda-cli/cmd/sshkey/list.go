@@ -51,6 +51,8 @@ func runList(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams)
 		return err
 	}
 
+	cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), fmt.Sprintf("API response: %d SSH key(s):", len(keys)), keys)
+
 	if len(keys) == 0 {
 		_, _ = fmt.Fprintln(ioStreams.Out, "No SSH keys found.")
 		return nil

@@ -103,6 +103,8 @@ func runDelete(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 		return nil
 	}
 
+	cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), "Deleting SSH key:", map[string]string{"id": keyID, "name": keyName})
+
 	deleteCtx, cancel := context.WithTimeout(ctx, f.Options().Timeout)
 	defer cancel()
 

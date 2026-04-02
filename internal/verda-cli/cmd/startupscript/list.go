@@ -51,6 +51,8 @@ func runList(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams)
 		return err
 	}
 
+	cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), fmt.Sprintf("API response: %d startup script(s):", len(scripts)), scripts)
+
 	if len(scripts) == 0 {
 		_, _ = fmt.Fprintln(ioStreams.Out, "No startup scripts found.")
 		return nil

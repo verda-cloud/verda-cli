@@ -3,11 +3,12 @@ package vm
 import (
 	"context"
 	"fmt"
+	"image/color"
 	"io"
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
 )
 
@@ -46,7 +47,7 @@ func statusMessage(status string) string {
 }
 
 // statusColor returns a lipgloss color for the instance status.
-func statusColor(status string) lipgloss.Color {
+func statusColor(status string) color.Color {
 	switch status {
 	case verda.StatusRunning:
 		return lipgloss.Color("2") // green

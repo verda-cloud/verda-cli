@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"github.com/spf13/cobra"
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
 	"github.com/verda-cloud/verdagostack/pkg/tui"
@@ -119,6 +119,12 @@ func runVolumeAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IO
 			return err
 		}
 	}
+
+	cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), fmt.Sprintf("Action: %s on volume:", action.Label), map[string]string{
+		"volume_id": vol.ID,
+		"name":      vol.Name,
+		"status":    vol.Status,
+	})
 
 	actionCtx, cancel := context.WithTimeout(ctx, f.Options().Timeout)
 	defer cancel()
@@ -247,7 +253,7 @@ func selectVolume(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOSt
 	}
 	labels = append(labels, "Cancel")
 
-	idx, err := f.Prompter().Select(ctx, "Select volume (↑/↓ move, type to filter)", labels)
+	idx, err := f.Prompter().Select(ctx, "Select volume (type to filter)", labels)
 	if err != nil {
 		return "", nil //nolint:nilerr
 	}

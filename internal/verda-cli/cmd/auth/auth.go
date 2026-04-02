@@ -13,6 +13,12 @@ func NewCmdAuth(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 		Short: "Manage shared credentials and profiles",
 		Long: cmdutil.LongDesc(`
 			Manage Verda shared credentials and the active auth profile.
+
+			Configuration is resolved from multiple sources in order of precedence:
+			  1. Command-line flags (highest priority)
+			  2. Environment variables with VERDA_ prefix
+			  3. Credentials file: ~/.verda/credentials or --credentials-file path
+			  4. Built-in defaults
 		`),
 		Run: cmdutil.DefaultSubCommandRun(ioStreams.Out),
 	}

@@ -1,0 +1,102 @@
+name: Security Scan
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "0 9 * * 1"
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  gosec:
+    name: GoSec (via golangci-lint)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.25"
+          cache: true
+
+      - name: Add Go bin to PATH
+        run: echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+
+      - name: Install golangci-lint
+        run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.5.0
+
+      - name: Run gosec via golangci-lint
+        run: golangci-lint run --no-config -E gosec ./...
+
+  gitleaks:
+    name: Gitleaks (secret scanning)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Install gitleaks
+        run: |
+          GITLEAKS_VERSION=$(curl -s https://api.github.com/repos/gitleaks/gitleaks/releases/latest | grep tag_name | cut -d '"' -f4)
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION#v}_linux_x64.tar.gz" -o gitleaks.tar.gz
+          tar xzf gitleaks.tar.gz gitleaks
+          sudo mv gitleaks /usr/local/bin/
+
+      - name: Run gitleaks
+        run: gitleaks detect --source . --verbose
+
+  trivy:
+    name: Trivy (vulnerability & misconfiguration)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Run trivy filesystem scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: "fs"
+          scan-ref: "."
+          scanners: "vuln,misconfig,secret"
+          severity: "CRITICAL,HIGH"
+          exit-code: "1"
+          format: "table"
+
+  osv-scanner:
+    name: OSV Scanner (dependency vulnerabilities)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Run OSV Scanner
+        uses: google/osv-scanner-action/osv-scanner-action@v2.1.0
+        with:
+          scan-args: |-
+            --recursive
+            .
+
+  security-success:
+    name: All Security Checks Passed
+    runs-on: ubuntu-latest
+    if: always()
+    needs: [gosec, gitleaks, trivy, osv-scanner]
+    steps:
+      - name: Check results
+        run: |
+          for result in "${{ needs.gosec.result }}" "${{ needs.gitleaks.result }}" "${{ needs.trivy.result }}" "${{ needs.osv-scanner.result }}"; do
+            if [ "$result" != "success" ]; then
+              echo "One or more security checks failed"
+              exit 1
+            fi
+          done
+          echo "All security checks passed!"

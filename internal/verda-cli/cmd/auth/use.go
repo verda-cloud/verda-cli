@@ -3,7 +3,6 @@ package auth
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/spf13/cobra"
 	"go.yaml.in/yaml/v3"
@@ -71,8 +70,5 @@ func writeActiveProfile(path string, profile string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
-	}
-	return os.WriteFile(path, data, 0o600)
+	return options.WriteSecureFile(path, data)
 }

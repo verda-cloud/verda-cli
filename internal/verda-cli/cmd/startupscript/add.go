@@ -117,6 +117,12 @@ func runAdd(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, 
 		return fmt.Errorf("script content is required")
 	}
 
+	req := &verda.CreateStartupScriptRequest{
+		Name:   name,
+		Script: content,
+	}
+	cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), "Request payload:", req)
+
 	createCtx, cancel := context.WithTimeout(ctx, f.Options().Timeout)
 	defer cancel()
 
@@ -124,10 +130,7 @@ func runAdd(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, 
 	if status := f.Status(); status != nil {
 		sp, _ = status.Spinner(createCtx, "Adding startup script...")
 	}
-	script, err := client.StartupScripts.AddStartupScript(createCtx, &verda.CreateStartupScriptRequest{
-		Name:   name,
-		Script: content,
-	})
+	script, err := client.StartupScripts.AddStartupScript(createCtx, req)
 	if sp != nil {
 		sp.Stop("")
 	}

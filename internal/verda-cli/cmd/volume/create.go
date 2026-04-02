@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"github.com/spf13/cobra"
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
 	"github.com/verda-cloud/verdagostack/pkg/tui"
@@ -159,7 +159,8 @@ func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 	if vt, ok := vtMap[opts.Type]; ok {
 		monthlyPerGB = vt.Price.MonthlyPerGB
 	}
-	hourly := math.Ceil(monthlyPerGB*float64(opts.Size)/30.0/24.0*10000) / 10000
+	const hoursInMonth = 730 // 365*24/12, matching web frontend
+	hourly := math.Ceil(monthlyPerGB*float64(opts.Size)/hoursInMonth*10000) / 10000
 	monthly := monthlyPerGB * float64(opts.Size)
 
 	_, _ = fmt.Fprintf(ioStreams.ErrOut, "\n  %s\n", bold.Render("Volume Summary"))
@@ -187,6 +188,7 @@ func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 		Type:         opts.Type,
 		LocationCode: opts.Location,
 	}
+	cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), "Request payload:", req)
 
 	createCtx, cancel := context.WithTimeout(ctx, f.Options().Timeout)
 	defer cancel()

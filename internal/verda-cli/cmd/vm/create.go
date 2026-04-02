@@ -2,7 +2,6 @@ package vm
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -143,13 +142,7 @@ func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 		return cmdutil.UsageErrorf(cmd, "%v", err)
 	}
 
-	if f.Debug() {
-		enc := json.NewEncoder(ioStreams.ErrOut)
-		enc.SetIndent("", "  ")
-		_, _ = fmt.Fprintln(ioStreams.ErrOut, "DEBUG: Request payload:")
-		_ = enc.Encode(req)
-		_, _ = fmt.Fprintln(ioStreams.ErrOut)
-	}
+	cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), "Request payload:", req)
 
 	createCtx, createCancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
 	defer createCancel()
@@ -192,6 +185,9 @@ func (o *createOptions) request() (verda.CreateInstanceRequest, error) {
 	}
 	if err := validateKind(o.Kind, o.InstanceType); err != nil {
 		return verda.CreateInstanceRequest{}, err
+	}
+	if err := cmdutil.ValidateHostname(o.Hostname); err != nil {
+		return verda.CreateInstanceRequest{}, fmt.Errorf("invalid --hostname: %w", err)
 	}
 
 	volumes, err := parseVolumeSpecs(o.VolumeSpecs, o.IsSpot)

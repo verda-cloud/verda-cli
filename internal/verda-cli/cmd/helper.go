@@ -1,12 +1,12 @@
 package cmd
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+
+	"github/verda-cloud/verda-cli/internal/verda-cli/options"
 )
 
 const defaultConfigName = "config"
@@ -17,10 +17,10 @@ func initConfig(cfgFile string) {
 	if cfgFile != "" {
 		viper.SetConfigFile(cfgFile)
 	} else {
-		home, err := os.UserHomeDir()
+		dir, err := options.VerdaDir()
 		cobra.CheckErr(err)
 
-		viper.AddConfigPath(filepath.Join(home, ".verda"))
+		viper.AddConfigPath(dir)
 		viper.AddConfigPath(".")
 		viper.SetConfigType("yaml")
 		viper.SetConfigName(defaultConfigName)

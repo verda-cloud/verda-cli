@@ -78,6 +78,12 @@ func runAdd(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, 
 		}
 	}
 
+	req := &verda.CreateSSHKeyRequest{
+		Name:      name,
+		PublicKey: publicKey,
+	}
+	cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), "Request payload:", req)
+
 	createCtx, cancel := context.WithTimeout(ctx, f.Options().Timeout)
 	defer cancel()
 
@@ -85,10 +91,7 @@ func runAdd(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, 
 	if status := f.Status(); status != nil {
 		sp, _ = status.Spinner(createCtx, "Adding SSH key...")
 	}
-	key, err := client.SSHKeys.AddSSHKey(createCtx, &verda.CreateSSHKeyRequest{
-		Name:      name,
-		PublicKey: publicKey,
-	})
+	key, err := client.SSHKeys.AddSSHKey(createCtx, req)
 	if sp != nil {
 		sp.Stop("")
 	}

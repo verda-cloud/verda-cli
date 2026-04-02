@@ -9,10 +9,12 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
 	"github.com/verda-cloud/verdagostack/pkg/tui"
 	"github.com/verda-cloud/verdagostack/pkg/tui/wizard"
+
+	cmdutil "github/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
 
 // clientFunc lazily resolves a Verda API client. This allows the wizard
@@ -70,8 +72,9 @@ func buildCreateFlow(getClient clientFunc, opts *createOptions) *wizard.Flow {
 	cache := &apiCache{}
 	return &wizard.Flow{
 		Name: "vm-create",
-		Layout: []wizard.RegionDef{
-			{ID: "progress", Region: wizard.NewProgressRegion(wizard.WithProgressPercent())},
+		Layout: []wizard.ViewDef{
+			{ID: "progress", View: wizard.NewProgressView(wizard.WithProgressPercent())},
+			{ID: "hints", View: wizard.NewHintBarView()},
 		},
 		Steps: []wizard.Step{
 			stepBillingType(opts),
@@ -439,7 +442,7 @@ func stepStorage(getClient clientFunc, cache *apiCache, opts *createOptions) wiz
 				for i, c := range choices {
 					labels[i] = c.Label
 				}
-				idx, err := prompter.Select(ctx, "Storage (↑/↓ move, Enter select, Esc back)", labels)
+				idx, err := prompter.Select(ctx, "Storage", labels)
 				if err != nil {
 					return nil, err
 				}
@@ -536,7 +539,7 @@ func promptAddVolume(ctx context.Context, prompter tui.Prompter, store *wizard.S
 			hddLabel = fmt.Sprintf("HDD (large capacity)  $%.2f/GB/mo", vt.Price.MonthlyPerGB)
 		}
 	}
-	typeIdx, err := prompter.Select(ctx, "Volume type (↑/↓ move, Enter select, Esc back)", []string{
+	typeIdx, err := prompter.Select(ctx, "Volume type", []string{
 		nvmeLabel,
 		hddLabel,
 		"← Back",
@@ -609,7 +612,7 @@ func promptAttachExisting(ctx context.Context, prompter tui.Prompter, status tui
 	}
 	labels = append(labels, "← Back")
 
-	idx, err := prompter.Select(ctx, "Select volume to attach (↑/↓ move, Enter select, Esc back)", labels)
+	idx, err := prompter.Select(ctx, "Select volume to attach", labels)
 	if err != nil {
 		return "", nil //nolint:nilerr
 	}
@@ -799,10 +802,21 @@ func stepHostname(opts *createOptions) wizard.Step {
 		Description: "Hostname",
 		Prompt:      wizard.TextInputPrompt,
 		Required:    true,
-		Setter:      func(v any) { opts.Hostname = v.(string) },
-		Resetter:    func() { opts.Hostname = "" },
-		IsSet:       func() bool { return opts.Hostname != "" },
-		Value:       func() any { return opts.Hostname },
+		DependsOn:   []string{"location"},
+		Default: func(c map[string]any) any {
+			loc, _ := c["location"].(string)
+			if loc == "" {
+				loc = "fin-01"
+			}
+			return cmdutil.GenerateHostname(loc)
+		},
+		Validate: func(v any) error {
+			return cmdutil.ValidateHostname(v.(string))
+		},
+		Setter:   func(v any) { opts.Hostname = v.(string) },
+		Resetter: func() { opts.Hostname = "" },
+		IsSet:    func() bool { return opts.Hostname != "" },
+		Value:    func() any { return opts.Hostname },
 	}
 }
 
@@ -949,9 +963,12 @@ func stepConfirmDeploy(getClient clientFunc, cache *apiCache, opts *createOption
 	}
 }
 
-// volumeHourlyPrice calculates hourly price: monthlyPerGB * size / 30 / 24, rounded up to 4 decimals.
+// hoursInMonth is 365*24/12 = 730, matching the web frontend.
+const hoursInMonth = 730
+
+// volumeHourlyPrice calculates hourly price: monthlyPerGB * size / 730, rounded up to 4 decimals.
 func volumeHourlyPrice(monthlyPerGB float64, sizeGB int) float64 {
-	return math.Ceil(monthlyPerGB*float64(sizeGB)/30.0/24.0*10000) / 10000
+	return math.Ceil(monthlyPerGB*float64(sizeGB)/hoursInMonth*10000) / 10000
 }
 
 func renderDeploymentSummary(opts *createOptions, cache *apiCache) {

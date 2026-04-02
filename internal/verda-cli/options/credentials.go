@@ -18,11 +18,11 @@ type SharedCredentials struct {
 
 // DefaultCredentialsFilePath returns the default shared credentials path.
 func DefaultCredentialsFilePath() (string, error) {
-	home, err := os.UserHomeDir()
+	dir, err := VerdaDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, defaultCredentialsPath), nil
+	return filepath.Join(dir, "credentials"), nil
 }
 
 // LoadSharedCredentialsForProfile loads credentials for a specific profile.

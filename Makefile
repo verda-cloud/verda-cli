@@ -1,6 +1,6 @@
 OUTPUT_DIR ?= bin
 
-.PHONY: all build clean lint lint.fix test hooks.install help
+.PHONY: all build clean lint lint.fix test fmt changelog hooks.install pre-commit help
 
 ## Build -------------------------------------------------------------------
 
@@ -23,13 +23,29 @@ lint.fix: ## Run golangci-lint with auto-fix
 	@golangci-lint run --fix ./...
 
 test: ## Run all tests
-	@go test ./...
+	@go test -count=1 ./...
+
+fmt: ## Format code with gofmt and goimports
+	@gofmt -w .
+	@goimports -w -local github/verda-cloud/verda-cli .
+	@go mod tidy
+
+## Release -----------------------------------------------------------------
+
+changelog: ## Generate CHANGELOG.md (requires VERSION, e.g. make changelog VERSION=v1.0.0)
+ifndef VERSION
+	$(error VERSION is required. Usage: make changelog VERSION=v1.0.0)
+endif
+	@git-cliff --tag $(VERSION) -o CHANGELOG.md
 
 ## Git Hooks ---------------------------------------------------------------
 
 hooks.install: ## Configure git to use githooks/ as the hooks directory
 	@git config core.hooksPath githooks
 	@echo "Git hooks installed (githooks/)"
+
+pre-commit: ## Run all pre-commit checks manually
+	@pre-commit run --all-files
 
 ## Help --------------------------------------------------------------------
 

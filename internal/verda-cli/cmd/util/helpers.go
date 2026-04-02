@@ -1,6 +1,7 @@
 package util
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -32,6 +33,18 @@ func DefaultSubCommandRun(out io.Writer) func(c *cobra.Command, args []string) {
 		RequireNoArguments(c, args)
 		_ = c.Help()
 	}
+}
+
+// DebugJSON writes a labeled JSON dump to w when debug is true.
+func DebugJSON(w io.Writer, debug bool, label string, v any) {
+	if !debug {
+		return
+	}
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	_, _ = fmt.Fprintf(w, "DEBUG: %s\n", label)
+	_ = enc.Encode(v)
+	_, _ = fmt.Fprintln(w)
 }
 
 // RequireNoArguments prints a usage error and exits if extra arguments are present.

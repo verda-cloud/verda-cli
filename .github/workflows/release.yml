@@ -1,0 +1,79 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (e.g. v1.0.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate version format
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Error: Version must match vX.Y.Z (e.g. v1.0.0)"
+            exit 1
+          fi
+
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          token: ${{ secrets.RELEASE_TOKEN }}
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.25"
+          cache: true
+
+      - name: Install git-cliff
+        run: pip install git-cliff
+
+      - name: Install goreleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          install-only: true
+
+      - name: Generate changelog
+        run: make changelog VERSION=${{ github.event.inputs.version }}
+
+      - name: Commit, tag, and push release branch
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          BRANCH="release/${VERSION}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git remote set-url origin https://x-access-token:${{ secrets.RELEASE_TOKEN }}@github.com/${{ github.repository }}
+          git checkout -b "${BRANCH}"
+          git add -A
+          git commit -m "chore(release): ${VERSION}"
+          git tag "${VERSION}"
+          git push origin "${BRANCH}" --tags
+
+      - name: Build and release with goreleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+
+      - name: Create PR to merge release into main
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          gh pr create \
+            --base main \
+            --head "release/${VERSION}" \
+            --title "chore(release): ${VERSION}" \
+            --body "Automated release PR for ${VERSION}. Merges changelog and version updates into main."
