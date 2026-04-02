@@ -16,7 +16,7 @@ func TestWriteActiveProfile(t *testing.T) {
 		t.Fatalf("writeActiveProfile() returned error: %v", err)
 	}
 
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // test file path
 	if err != nil {
 		t.Fatalf("os.ReadFile() returned error: %v", err)
 	}
