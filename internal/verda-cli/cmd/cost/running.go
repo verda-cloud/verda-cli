@@ -105,7 +105,7 @@ func runRunning(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStrea
 		var volHourly float64
 		var volCount int
 
-		volumeIDs := uniqueVolumeIDs(inst)
+		volumeIDs := cmdutil.UniqueVolumeIDs(inst)
 		for _, volID := range volumeIDs {
 			vol, err := client.Volumes.GetVolume(ctx, volID)
 			if err != nil {
@@ -152,22 +152,6 @@ func runRunning(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStrea
 
 	renderRunning(ioStreams.Out, &summary)
 	return nil
-}
-
-func uniqueVolumeIDs(inst *verda.Instance) []string {
-	seen := make(map[string]bool)
-	var ids []string
-	if inst.OSVolumeID != nil && *inst.OSVolumeID != "" {
-		ids = append(ids, *inst.OSVolumeID)
-		seen[*inst.OSVolumeID] = true
-	}
-	for _, id := range inst.VolumeIDs {
-		if !seen[id] {
-			ids = append(ids, id)
-			seen[id] = true
-		}
-	}
-	return ids
 }
 
 func renderRunning(w interface{ Write([]byte) (int, error) }, s *RunningCostSummary) {

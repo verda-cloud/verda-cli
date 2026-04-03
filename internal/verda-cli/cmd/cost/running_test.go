@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
+
+	cmdutil "github/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
 
 func strPtr(s string) *string { return &s }
@@ -16,7 +18,7 @@ func TestUniqueVolumeIDs(t *testing.T) {
 		VolumeIDs:  []string{"vol-os", "vol-data", "vol-data"},
 	}
 
-	ids := uniqueVolumeIDs(inst)
+	ids := cmdutil.UniqueVolumeIDs(inst)
 	if len(ids) != 2 {
 		t.Fatalf("expected 2 unique IDs, got %d: %v", len(ids), ids)
 	}
@@ -32,7 +34,7 @@ func TestUniqueVolumeIDsNoOS(t *testing.T) {
 		VolumeIDs: []string{"vol-1", "vol-2"},
 	}
 
-	ids := uniqueVolumeIDs(inst)
+	ids := cmdutil.UniqueVolumeIDs(inst)
 	if len(ids) != 2 {
 		t.Fatalf("expected 2 IDs, got %d", len(ids))
 	}
@@ -42,7 +44,7 @@ func TestUniqueVolumeIDsEmpty(t *testing.T) {
 	t.Parallel()
 
 	inst := &verda.Instance{}
-	ids := uniqueVolumeIDs(inst)
+	ids := cmdutil.UniqueVolumeIDs(inst)
 	if len(ids) != 0 {
 		t.Fatalf("expected 0 IDs, got %d", len(ids))
 	}
@@ -57,7 +59,7 @@ func TestUniqueVolumeIDsEmptyOSString(t *testing.T) {
 		VolumeIDs:  []string{"vol-1"},
 	}
 
-	ids := uniqueVolumeIDs(inst)
+	ids := cmdutil.UniqueVolumeIDs(inst)
 	if len(ids) != 1 {
 		t.Fatalf("expected 1 ID (empty OS skipped), got %d: %v", len(ids), ids)
 	}
