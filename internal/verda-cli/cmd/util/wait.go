@@ -73,9 +73,8 @@ func Poll(ctx context.Context, w io.Writer, interval time.Duration, opts WaitOpt
 		case <-ctx.Done():
 			if w != nil {
 				_, _ = fmt.Fprintf(w, "\r\033[2K")
-				_, _ = fmt.Fprintf(w, "Timed out waiting (last status: %s)\n", lastStatus)
 			}
-			return lastStatus, nil
+			return lastStatus, fmt.Errorf("timed out waiting (last status: %s)", lastStatus)
 		case <-ticker.C:
 			frame++
 		case <-pollTicker.C:

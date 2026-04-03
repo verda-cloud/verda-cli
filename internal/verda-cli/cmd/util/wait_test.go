@@ -3,6 +3,7 @@ package util
 import (
 	"bytes"
 	"context"
+	"strings"
 	"testing"
 	"time"
 )
@@ -87,15 +88,15 @@ func TestPollRespectsTimeout(t *testing.T) {
 	var buf bytes.Buffer
 	opts := WaitOptions{Wait: true, Timeout: 200 * time.Millisecond}
 
-	status, err := Poll(context.Background(), &buf, 50*time.Millisecond, opts, func(ctx context.Context) (string, bool, error) {
+	_, err := Poll(context.Background(), &buf, 50*time.Millisecond, opts, func(ctx context.Context) (string, bool, error) {
 		return "provisioning", false, nil
 	})
 
-	if err != nil {
-		t.Fatalf("Poll() error: %v", err)
+	if err == nil {
+		t.Fatal("expected error on timeout")
 	}
-	if status != "provisioning" {
-		t.Fatalf("expected last status 'provisioning', got %q", status)
+	if !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("expected timeout error, got: %v", err)
 	}
 }
 
