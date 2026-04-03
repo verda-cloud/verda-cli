@@ -21,7 +21,7 @@ func NewCmdVersion(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Comman
 			if wrote, err := cmdutil.WriteStructured(ioStreams.Out, f.OutputFormat(), info); wrote {
 				return err
 			}
-			_, _ = fmt.Fprintln(ioStreams.Out, info.Text())
+			_, _ = fmt.Fprintf(ioStreams.Out, "  Version:   %s\n  Platform:  %s\n", info.GitVersion, info.Platform)
 			return nil
 		},
 	}
