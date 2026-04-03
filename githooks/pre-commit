@@ -32,4 +32,24 @@ if [ -n "$PKGS" ]; then
 	echo "$PKGS" | xargs go test -short -count=1
 fi
 
+# --- Auto-update per-subcommand knowledge docs ----------------------------
+if [ "${SKIP_DOC_UPDATE:-}" = "1" ]; then
+	printf "  ⏭️  skipping command knowledge doc update (SKIP_DOC_UPDATE=1)\n"
+else
+	CHANGED_CMD_DIRS=$(git diff --cached --name-only -- 'internal/verda-cli/cmd/' \
+		| grep -v 'cmd/util/' | grep -v 'cmd/cmd\.go' | grep -v 'cmd/helper\.go' \
+		| sed 's|internal/verda-cli/cmd/\([^/]*\)/.*|\1|' | sort -u || true)
+	if [ -n "$CHANGED_CMD_DIRS" ] && command -v claude &>/dev/null; then
+		printf "  📝 updating command knowledge docs ...\n"
+		claude -p "/update-command-knowledge" \
+			--model sonnet \
+			--dangerously-skip-permissions \
+			--max-budget-usd 0.50 \
+			--print 2>/dev/null || printf "  ⚠️  doc update failed (non-blocking)\n"
+		# Stage any updated docs
+		git diff --name-only -- 'internal/verda-cli/cmd/*/README.md' 'internal/verda-cli/cmd/*/CLAUDE.md' \
+			| xargs -r git add 2>/dev/null || true
+	fi
+fi
+
 printf "pre-commit: ok.\n"

@@ -43,6 +43,17 @@ go mod tidy                             # Sync dependencies
 - Instance `price_per_hour` from API is the TOTAL price (not per-GPU). Derive per-unit by dividing.
 - Volume pricing is `price_per_month_per_gb`. Hourly = `ceil(monthly_per_gb * size / 30 / 24 * 10000) / 10000`
 
+## Per-Command Knowledge
+
+Each subcommand directory has its own docs:
+- `README.md` — Human-readable: usage, examples, flags, architecture
+- `CLAUDE.md` — AI context: gotchas, domain logic, relationships
+
+These are auto-maintained by a pre-commit hook. See `.ai/skills/update-command-knowledge.md`.
+
+When modifying a command, the hook will auto-update its docs on commit.
+For manual update: `claude -p "/update-command-knowledge --all" --model sonnet --dangerously-skip-permissions`
+
 ## Credentials
 
 - AWS-style INI file at `~/.verda/credentials` with `verda_` prefixed keys

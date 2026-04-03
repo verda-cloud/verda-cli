@@ -5,8 +5,9 @@ This document provides instructions for AI coding agents (Claude Code, Codex, et
 ## Before You Start
 
 1. Read `CLAUDE.md` for project overview, build commands, and architecture
-2. Read `.ai/skills/new-command.md` when creating or modifying CLI commands
-3. Run `go build ./...` and `go test ./...` to verify your changes compile and pass
+2. Read the `CLAUDE.md` in the specific subcommand directory you're working on (e.g., `cmd/vm/CLAUDE.md`)
+3. Read `.ai/skills/new-command.md` when creating or modifying CLI commands
+4. Run `go build ./...` and `go test ./...` to verify your changes compile and pass
 
 ## Skills
 
@@ -15,6 +16,7 @@ Skills are structured guides in `.ai/skills/` that document patterns and checkli
 | Skill | When to Use |
 |-------|-------------|
 | [new-command.md](.ai/skills/new-command.md) | Adding a new subcommand or modifying an existing one |
+| [update-command-knowledge.md](.ai/skills/update-command-knowledge.md) | Auto-updating per-command README.md and CLAUDE.md docs |
 
 ## Key Rules
 
