@@ -9,6 +9,25 @@ import (
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
 )
 
+// formatImageLabel returns a display string for the image field.
+// Prefers the image slug; appends the OS name if it differs and is non-empty.
+func formatImageLabel(slug, osName string) string {
+	if slug == "" {
+		return osName
+	}
+	if osName == "" || osName == slug {
+		return slug
+	}
+	return slug + " (" + osName + ")"
+}
+
+// cleanGPUDescription strips the leading "Nx " count prefix from the API GPU
+// description when it matches the GPU count, avoiding duplication like "1x 1x H100".
+func cleanGPUDescription(gpuCount int, desc string) string {
+	prefix := fmt.Sprintf("%dx ", gpuCount)
+	return strings.TrimPrefix(desc, prefix)
+}
+
 // statusColor returns a lipgloss color for the instance status.
 func statusColor(status string) color.Color {
 	switch status {
@@ -41,16 +60,16 @@ func renderInstanceCard(inst *verda.Instance, volumes ...verda.Volume) string {
 		{"Instance ID", inst.ID},
 		{"Location", inst.Location},
 		{"Instance Type", inst.InstanceType},
-		{"Image", inst.OSName},
+		{"Image", formatImageLabel(inst.Image, inst.OSName)},
 		{"Contract", inst.Contract},
-		{"Pricing", inst.Pricing},
 		{"Price", fmt.Sprintf("$%.3f/hr", float64(inst.PricePerHour))},
 	}
 
 	if inst.GPU.NumberOfGPUs > 0 {
+		gpuDesc := cleanGPUDescription(inst.GPU.NumberOfGPUs, inst.GPU.Description)
 		lines = append(lines, struct{ label, value string }{
 			"Compute", fmt.Sprintf("%dx %s, %dGB VRAM, %dGB RAM",
-				inst.GPU.NumberOfGPUs, inst.GPU.Description,
+				inst.GPU.NumberOfGPUs, gpuDesc,
 				inst.GPUMemory.SizeInGigabytes, inst.Memory.SizeInGigabytes),
 		})
 	} else {
@@ -75,13 +94,13 @@ func renderInstanceCard(inst *verda.Instance, volumes ...verda.Volume) string {
 		_, _ = fmt.Fprintf(&b, "\n  %s\n", bold.Render("Storage"))
 		for i := range volumes {
 			v := &volumes[i]
-			volStatus := "Attached"
+			volLabel := v.Status
 			if v.IsOSVolume {
-				volStatus = "Main OS"
+				volLabel = v.Status + " (OS)"
 			}
 			_, _ = fmt.Fprintf(&b, "    %s  %s\n", dim.Render("Name:    "), v.Name)
 			_, _ = fmt.Fprintf(&b, "    %s  %s\n", dim.Render("ID:      "), v.ID)
-			_, _ = fmt.Fprintf(&b, "    %s  %s\n", dim.Render("Status:  "), volStatus)
+			_, _ = fmt.Fprintf(&b, "    %s  %s\n", dim.Render("Status:  "), volLabel)
 			_, _ = fmt.Fprintf(&b, "    %s  %dGB\n", dim.Render("Size:    "), v.Size)
 			_, _ = fmt.Fprintf(&b, "    %s  %s\n", dim.Render("Type:    "), v.Type)
 			_, _ = fmt.Fprintf(&b, "    %s  %s\n", dim.Render("Location:"), v.Location)
