@@ -160,7 +160,7 @@ func runSSH(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, 
 
 	_, _ = fmt.Fprintf(ioStreams.ErrOut, "Connecting to %s (%s)...\n", inst.Hostname, ip)
 
-	return syscall.Exec(sshPath, sshArgs, os.Environ())
+	return syscall.Exec(sshPath, sshArgs, os.Environ()) //nolint:gosec // Intentional: replace process with ssh using user-provided host and args.
 }
 
 // filterRunning returns only instances with status running.

@@ -55,11 +55,11 @@ func TestFilterByCategory(t *testing.T) {
 func TestFilterEmptyList(t *testing.T) {
 	t.Parallel()
 
-	var images []verda.Image
+	images := []verda.Image{}
 	var filtered []verda.Image
-	for i := range images {
-		if !images[i].IsCluster {
-			filtered = append(filtered, images[i])
+	for _, img := range images {
+		if !img.IsCluster {
+			filtered = append(filtered, img)
 		}
 	}
 

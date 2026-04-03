@@ -102,11 +102,11 @@ func TestFormatGB(t *testing.T) {
 func TestFilterEmpty(t *testing.T) {
 	t.Parallel()
 
-	var types []verda.InstanceTypeInfo
+	types := []verda.InstanceTypeInfo{}
 	var filtered []verda.InstanceTypeInfo
-	for i := range types {
-		if types[i].GPU.NumberOfGPUs > 0 {
-			filtered = append(filtered, types[i])
+	for _, t := range types {
+		if t.GPU.NumberOfGPUs > 0 {
+			filtered = append(filtered, t)
 		}
 	}
 
