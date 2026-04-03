@@ -7,7 +7,14 @@ import (
 	"github.com/verda-cloud/verdagostack/pkg/tui/bubbletea"
 
 	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/auth"
+	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/availability"
+	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/completion"
+	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/cost"
+	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/images"
+	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/instancetypes"
+	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/locations"
 	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/settings"
+	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/ssh"
 	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/sshkey"
 	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/startupscript"
 	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/update"
@@ -47,6 +54,11 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) *cobra.Command {
 	opts.AddFlags(cmd.PersistentFlags())
 	_ = viper.BindPFlags(cmd.PersistentFlags())
 
+	// Register completion values for the global --output flag.
+	_ = cmd.RegisterFlagCompletionFunc("output", func(_ *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
+		return []string{"json", "yaml", "table"}, cobra.ShellCompDirectiveNoFileComp
+	})
+
 	cobra.OnInitialize(func() {
 		initConfig(viper.GetString(clioptions.FlagConfig))
 	})
@@ -64,19 +76,31 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) *cobra.Command {
 			Message: "VM Commands:",
 			Commands: []*cobra.Command{
 				vm.NewCmdVM(f, ioStreams),
+				ssh.NewCmdSSH(f, ioStreams),
 			},
 		},
 		{
 			Message: "Resource Commands:",
 			Commands: []*cobra.Command{
+				availability.NewCmdAvailability(f, ioStreams),
+				images.NewCmdImages(f, ioStreams),
+				instancetypes.NewCmdInstanceTypes(f, ioStreams),
+				locations.NewCmdLocations(f, ioStreams),
 				sshkey.NewCmdSSHKey(f, ioStreams),
 				startupscript.NewCmdStartupScript(f, ioStreams),
 				volume.NewCmdVolume(f, ioStreams),
 			},
 		},
 		{
+			Message: "Info Commands:",
+			Commands: []*cobra.Command{
+				cost.NewCmdCost(f, ioStreams),
+			},
+		},
+		{
 			Message: "Other Commands:",
 			Commands: []*cobra.Command{
+				completion.NewCmdCompletion(ioStreams),
 				settings.NewCmdSettings(f, ioStreams),
 				update.NewCmdUpdate(f, ioStreams),
 				version.NewCmdVersion(f, ioStreams),

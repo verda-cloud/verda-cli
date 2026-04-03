@@ -34,6 +34,8 @@ type Factory interface {
 	Status() tui.Status
 	// Debug returns true if --debug is enabled.
 	Debug() bool
+	// OutputFormat returns the configured output format (table, json, yaml).
+	OutputFormat() string
 }
 
 type factoryImpl struct {
@@ -58,8 +60,14 @@ func (f *factoryImpl) ServerAddr() string           { return f.opts.Server }
 func (f *factoryImpl) HTTPClient() *http.Client     { return f.client }
 func (f *factoryImpl) Options() *clioptions.Options { return f.opts }
 func (f *factoryImpl) Prompter() tui.Prompter       { return f.prompter }
-func (f *factoryImpl) Status() tui.Status           { return f.status }
-func (f *factoryImpl) Debug() bool                  { return f.opts.Debug }
+func (f *factoryImpl) Status() tui.Status {
+	if f.opts.Output != "table" {
+		return nil
+	}
+	return f.status
+}
+func (f *factoryImpl) Debug() bool          { return f.opts.Debug }
+func (f *factoryImpl) OutputFormat() string { return f.opts.Output }
 
 // VerdaClient creates or reuses the shared Verda SDK client.
 func (f *factoryImpl) VerdaClient() (*verda.Client, error) {

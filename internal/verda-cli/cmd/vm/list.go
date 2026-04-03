@@ -12,7 +12,6 @@ import (
 
 type listOptions struct {
 	Status string
-	JSON   bool
 }
 
 // NewCmdList creates the vm list cobra command.
@@ -66,9 +65,19 @@ func runList(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams,
 
 	cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), fmt.Sprintf("API response: %d instance(s):", len(instances)), instances)
 
+	// Structured output: emit JSON/YAML and return.
+	if wrote, err := cmdutil.WriteStructured(ioStreams.Out, f.OutputFormat(), instances); wrote {
+		return err
+	}
+
 	if len(instances) == 0 {
 		_, _ = fmt.Fprintln(ioStreams.Out, "No instances found.")
 		return nil
+	}
+
+	// Non-interactive table when piped or redirected.
+	if !cmdutil.IsStdoutTerminal() {
+		return printInstanceTable(ioStreams, instances)
 	}
 
 	_, _ = fmt.Fprintf(ioStreams.ErrOut, "  %d instance(s) found\n\n", len(instances))
@@ -104,22 +113,7 @@ func runList(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams,
 
 // fetchInstanceVolumes fetches volume details for an instance's attached volumes.
 func fetchInstanceVolumes(ctx context.Context, client *verda.Client, inst *verda.Instance) []verda.Volume {
-	seen := make(map[string]bool)
-	var ids []string
-
-	// OS volume first.
-	if inst.OSVolumeID != nil && *inst.OSVolumeID != "" {
-		ids = append(ids, *inst.OSVolumeID)
-		seen[*inst.OSVolumeID] = true
-	}
-	// Then data volumes, deduplicating.
-	for _, id := range inst.VolumeIDs {
-		if !seen[id] {
-			ids = append(ids, id)
-			seen[id] = true
-		}
-	}
-
+	ids := cmdutil.UniqueVolumeIDs(inst)
 	volumes := make([]verda.Volume, 0, len(ids))
 	for _, id := range ids {
 		vol, err := client.Volumes.GetVolume(ctx, id)
@@ -129,6 +123,34 @@ func fetchInstanceVolumes(ctx context.Context, client *verda.Client, inst *verda
 		volumes = append(volumes, *vol)
 	}
 	return volumes
+}
+
+func printInstanceTable(ioStreams cmdutil.IOStreams, instances []verda.Instance) error {
+	// Find max hostname length for dynamic column width.
+	nameW := 20
+	for i := range instances {
+		if len(instances[i].Hostname) > nameW {
+			nameW = len(instances[i].Hostname)
+		}
+	}
+
+	_, _ = fmt.Fprintf(ioStreams.Out, "  %d instance(s) found\n\n", len(instances))
+	_, _ = fmt.Fprintf(ioStreams.Out, "  %-*s  %-13s  %-18s  %-8s  %s\n", nameW, "HOSTNAME", "STATUS", "TYPE", "LOCATION", "IP")
+	_, _ = fmt.Fprintf(ioStreams.Out, "  %-*s  %-13s  %-18s  %-8s  %s\n", nameW, "--------", "------", "----", "--------", "--")
+	for i := range instances {
+		ip := ""
+		if instances[i].IP != nil && *instances[i].IP != "" {
+			ip = *instances[i].IP
+		}
+		_, _ = fmt.Fprintf(ioStreams.Out, "  %-*s  %-13s  %-18s  %-8s  %s\n",
+			nameW,
+			instances[i].Hostname,
+			instances[i].Status,
+			instances[i].InstanceType,
+			instances[i].Location,
+			ip)
+	}
+	return nil
 }
 
 func formatInstanceRow(inst *verda.Instance) string {

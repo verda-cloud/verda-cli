@@ -49,7 +49,10 @@ Available Commands:{{range .Commands}}{{if (or .IsAvailableCommand (eq .Name "he
   {{rpad .Name .NamePadding }} {{.Short}}{{end}}{{end}}{{end}}{{if .HasAvailableLocalFlags}}
 
 Flags:
-{{.LocalFlags.FlagUsages | trimTrailingWhitespaces}}{{end}}{{if .HasAvailableSubCommands}}
+{{.LocalFlags.FlagUsages | trimTrailingWhitespaces}}{{end}}{{if .HasAvailableInheritedFlags}}
+
+Global Flags:
+{{.InheritedFlags.FlagUsages | trimTrailingWhitespaces}}{{end}}{{if .HasAvailableSubCommands}}
 
 Use "{{.CommandPath}} [command] --help" for more information about a command.{{end}}
 `

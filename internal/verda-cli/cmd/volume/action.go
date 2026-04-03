@@ -26,6 +26,7 @@ type volumeAction struct {
 // NewCmdAction creates the volume action command.
 func NewCmdAction(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 	var volumeID string
+	var waitOpts cmdutil.WaitOptions
 
 	cmd := &cobra.Command{
 		Use:   "action",
@@ -37,19 +38,21 @@ func NewCmdAction(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 		Example: cmdutil.Examples(`
 			verda volume action
 			verda vol action --id abc-123
+			verda vol action --id abc-123 --wait
 		`),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runVolumeAction(cmd, f, ioStreams, volumeID)
+			return runVolumeAction(cmd, f, ioStreams, volumeID, waitOpts)
 		},
 	}
 
 	cmd.Flags().StringVar(&volumeID, "id", "", "Volume ID to act on")
+	waitOpts.AddFlags(cmd.Flags(), false) // --wait defaults to false for volume action
 	return cmd
 }
 
 //nolint:gocyclo // Interactive CLI command with prompts, confirmation, and spinner — inherently complex.
-func runVolumeAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, volumeID string) error {
+func runVolumeAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, volumeID string, waitOpts cmdutil.WaitOptions) error {
 	client, err := f.VerdaClient()
 	if err != nil {
 		return err
@@ -144,6 +147,13 @@ func runVolumeAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IO
 	}
 
 	_, _ = fmt.Fprintf(ioStreams.Out, "Done: %s on %s (%s)\n", action.Label, vol.Name, vol.ID)
+
+	if waitOpts.Wait && action.Label != "Delete" {
+		_, err := cmdutil.PollVolumeStatus(ctx, ioStreams.ErrOut, client, vol.ID, waitOpts)
+		if err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -261,24 +271,4 @@ func selectVolume(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOSt
 		return "", nil
 	}
 	return volumes[idx].ID, nil
-}
-
-func renderVolumeSummary(w interface{ Write([]byte) (int, error) }, vol *verda.Volume) {
-	bold := lipgloss.NewStyle().Bold(true)
-	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-
-	status := vol.Status
-	if vol.IsOSVolume {
-		status = "Main OS"
-	}
-
-	_, _ = fmt.Fprintf(w, "\n%s  %s\n\n", bold.Render(vol.Name), dim.Render(status))
-	_, _ = fmt.Fprintf(w, "  %s  %s\n", dim.Render("ID:      "), vol.ID)
-	_, _ = fmt.Fprintf(w, "  %s  %dGB\n", dim.Render("Size:    "), vol.Size)
-	_, _ = fmt.Fprintf(w, "  %s  %s\n", dim.Render("Type:    "), vol.Type)
-	_, _ = fmt.Fprintf(w, "  %s  %s\n", dim.Render("Location:"), vol.Location)
-	if vol.InstanceID != nil && *vol.InstanceID != "" {
-		_, _ = fmt.Fprintf(w, "  %s  %s\n", dim.Render("Instance:"), *vol.InstanceID)
-	}
-	_, _ = fmt.Fprintln(w)
 }

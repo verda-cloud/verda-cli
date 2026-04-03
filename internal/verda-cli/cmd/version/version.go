@@ -16,8 +16,13 @@ func NewCmdVersion(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Comman
 		Use:   "version",
 		Short: "Print the version information",
 		Long:  cmdutil.LongDesc("Print the build and version information for verda."),
-		Run: func(cmd *cobra.Command, args []string) {
-			_, _ = fmt.Fprintln(ioStreams.Out, version.Get().ToJSON())
+		RunE: func(cmd *cobra.Command, args []string) error {
+			info := version.Get()
+			if wrote, err := cmdutil.WriteStructured(ioStreams.Out, f.OutputFormat(), info); wrote {
+				return err
+			}
+			_, _ = fmt.Fprintf(ioStreams.Out, "  Version:   %s\n  Platform:  %s\n", info.GitVersion, info.Platform)
+			return nil
 		},
 	}
 }

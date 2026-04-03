@@ -88,6 +88,7 @@ func availableActions(status string) []instanceAction {
 // NewCmdAction creates the vm action cobra command.
 func NewCmdAction(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 	var instanceID string
+	var waitOpts cmdutil.WaitOptions
 
 	cmd := &cobra.Command{
 		Use:   "action",
@@ -102,20 +103,24 @@ func NewCmdAction(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 
 			# Specify instance ID
 			verda vm action --id abc-123
+
+			# Run action and wait for completion
+			verda vm action --id abc-123 --wait
 		`),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runAction(cmd, f, ioStreams, instanceID)
+			return runAction(cmd, f, ioStreams, instanceID, waitOpts)
 		},
 	}
 
 	cmd.Flags().StringVar(&instanceID, "id", "", "Instance ID to act on")
+	waitOpts.AddFlags(cmd.Flags(), true) // --wait defaults to true to preserve existing behavior
 
 	return cmd
 }
 
 //nolint:gocyclo // Interactive CLI command with prompts, confirmation, and spinner — inherently complex.
-func runAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, instanceID string) error {
+func runAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, instanceID string, waitOpts cmdutil.WaitOptions) error {
 	client, err := f.VerdaClient()
 	if err != nil {
 		return err
@@ -213,8 +218,15 @@ func runAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 	}
 
 	// Poll until expected status or show immediate result.
-	if action.ExpectStatus != "" {
-		return pollInstanceStatus(ctx, ioStreams.ErrOut, client, inst.ID, action.ExpectStatus)
+	if action.ExpectStatus != "" && waitOpts.Wait {
+		result, err := cmdutil.PollInstanceStatus(ctx, ioStreams.ErrOut, client, inst.ID, waitOpts, action.ExpectStatus)
+		if err != nil {
+			return err
+		}
+		if result != nil {
+			_, _ = fmt.Fprint(ioStreams.Out, renderInstanceCard(result))
+		}
+		return nil
 	}
 
 	_, _ = fmt.Fprintf(ioStreams.Out, "Done: %s on %s (%s)\n", action.Label, inst.Hostname, inst.ID)

@@ -3,6 +3,8 @@ package util
 import (
 	"io"
 	"os"
+
+	"github.com/charmbracelet/x/term"
 )
 
 // IOStreams provides the standard names for iostreams, making it easy to
@@ -20,4 +22,9 @@ func NewStdIOStreams() IOStreams {
 		Out:    os.Stdout,
 		ErrOut: os.Stderr,
 	}
+}
+
+// IsStdoutTerminal returns true if stdout is a terminal (not piped/redirected).
+func IsStdoutTerminal() bool {
+	return term.IsTerminal(os.Stdout.Fd())
 }

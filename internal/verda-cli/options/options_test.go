@@ -3,6 +3,7 @@ package options
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -138,4 +139,91 @@ func makeLocalTempDir(t *testing.T) string {
 		_ = os.RemoveAll(dir)
 	})
 	return dir
+}
+
+func TestOptionsValidateOutputFormat(t *testing.T) {
+	t.Parallel()
+
+	valid := []string{"table", "json", "yaml"}
+	for _, format := range valid {
+		opts := &Options{
+			Server:      "https://api.verda.com/v1",
+			Timeout:     30,
+			Output:      format,
+			AuthOptions: &AuthOptions{},
+		}
+		if err := opts.Validate(); err != nil {
+			t.Errorf("Validate() with output=%q returned error: %v", format, err)
+		}
+	}
+}
+
+func TestOptionsValidateRejectsInvalidOutput(t *testing.T) {
+	t.Parallel()
+
+	opts := &Options{
+		Server:      "https://api.verda.com/v1",
+		Timeout:     30,
+		Output:      "xml",
+		AuthOptions: &AuthOptions{},
+	}
+
+	err := opts.Validate()
+	if err == nil {
+		t.Fatal("expected Validate() to reject output=xml")
+	}
+	if !strings.Contains(err.Error(), "xml") {
+		t.Fatalf("expected error to mention 'xml', got: %v", err)
+	}
+}
+
+func TestOptionsCompleteDefaultsOutputToTable(t *testing.T) {
+	t.Parallel()
+
+	path := writeCredentialsFile(t, `
+[default]
+verda_client_id = id
+verda_client_secret = secret
+`)
+
+	opts := &Options{
+		Server:  "https://api.verda.com/v1",
+		Timeout: 30,
+		AuthOptions: &AuthOptions{
+			CredentialsFile: path,
+			Profile:         "default",
+		},
+	}
+
+	opts.Complete()
+
+	if opts.Output != "table" {
+		t.Fatalf("expected Output to default to 'table', got %q", opts.Output)
+	}
+}
+
+func TestOptionsCompleteKeepsExplicitOutput(t *testing.T) {
+	t.Parallel()
+
+	path := writeCredentialsFile(t, `
+[default]
+verda_client_id = id
+verda_client_secret = secret
+`)
+
+	opts := &Options{
+		Server:  "https://api.verda.com/v1",
+		Timeout: 30,
+		Output:  "json",
+		AuthOptions: &AuthOptions{
+			CredentialsFile: path,
+			Profile:         "default",
+		},
+	}
+
+	opts.Complete()
+
+	if opts.Output != "json" {
+		t.Fatalf("expected Output to remain 'json', got %q", opts.Output)
+	}
 }
