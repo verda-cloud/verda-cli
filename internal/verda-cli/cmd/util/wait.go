@@ -105,15 +105,6 @@ func PollInstanceStatus(ctx context.Context, w io.Writer, client *verda.Client, 
 		target = expectStatus[0]
 	}
 
-	terminalStatuses := map[string]bool{
-		verda.StatusRunning:      true,
-		verda.StatusOffline:      true,
-		verda.StatusError:        true,
-		verda.StatusDiscontinued: true,
-		verda.StatusNotFound:     true,
-		verda.StatusNoCapacity:   true,
-	}
-
 	var lastInst *verda.Instance
 	pollFn := func(ctx context.Context) (string, bool, error) {
 		inst, err := client.Instances.GetByID(ctx, instanceID)
@@ -121,10 +112,11 @@ func PollInstanceStatus(ctx context.Context, w io.Writer, client *verda.Client, 
 			return "", false, fmt.Errorf("polling instance: %w", err)
 		}
 		lastInst = inst
+		msg := InstanceStatusMessage(inst.Status)
 		if target != "" {
-			return inst.Status, inst.Status == target || inst.Status == verda.StatusError || inst.Status == verda.StatusNotFound, nil
+			return msg, inst.Status == target || inst.Status == verda.StatusError || inst.Status == verda.StatusNotFound, nil
 		}
-		return inst.Status, terminalStatuses[inst.Status], nil
+		return msg, InstanceTerminalStatuses[inst.Status], nil
 	}
 
 	_, err := Poll(ctx, w, 5*time.Second, opts, pollFn)
@@ -138,11 +130,6 @@ func PollVolumeStatus(ctx context.Context, w io.Writer, client *verda.Client, vo
 		target = expectStatus[0]
 	}
 
-	terminalStatuses := map[string]bool{
-		"attached": true,
-		"detached": true,
-	}
-
 	var lastVol *verda.Volume
 	pollFn := func(ctx context.Context) (string, bool, error) {
 		vol, err := client.Volumes.GetVolume(ctx, volumeID)
@@ -153,7 +140,7 @@ func PollVolumeStatus(ctx context.Context, w io.Writer, client *verda.Client, vo
 		if target != "" {
 			return vol.Status, vol.Status == target, nil
 		}
-		return vol.Status, terminalStatuses[vol.Status], nil
+		return vol.Status, VolumeTerminalStatuses[vol.Status], nil
 	}
 
 	_, err := Poll(ctx, w, 5*time.Second, opts, pollFn)

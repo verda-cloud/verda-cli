@@ -63,9 +63,9 @@ func NewCmdAvailability(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.C
 
 // availabilityResult is the structured output type.
 type availabilityResult struct {
-	LocationCode   string   `json:"location_code" yaml:"location_code"`
-	InstanceTypes  []string `json:"instance_types" yaml:"instance_types"`
-	Count          int      `json:"count" yaml:"count"`
+	LocationCode  string   `json:"location_code" yaml:"location_code"`
+	InstanceTypes []string `json:"instance_types" yaml:"instance_types"`
+	Count         int      `json:"count" yaml:"count"`
 }
 
 func runAvailability(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *availabilityOptions) error {

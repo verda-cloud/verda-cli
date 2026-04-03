@@ -180,7 +180,15 @@ func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 		_, _ = fmt.Fprintf(ioStreams.Out, "Created instance: %s (%s)\n", instance.Hostname, instance.ID)
 		return nil
 	}
-	return pollInstanceStatus(cmd.Context(), ioStreams.ErrOut, client, instance.ID)
+	inst, err := cmdutil.PollInstanceStatus(cmd.Context(), ioStreams.ErrOut, client, instance.ID, opts.Wait)
+	if err != nil {
+		return err
+	}
+	if inst != nil {
+		volumes := fetchInstanceVolumes(cmd.Context(), client, inst)
+		_, _ = fmt.Fprint(ioStreams.Out, renderInstanceCard(inst, volumes...))
+	}
+	return nil
 }
 
 func runWizard(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *createOptions) error {

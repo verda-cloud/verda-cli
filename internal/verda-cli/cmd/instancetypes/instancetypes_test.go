@@ -61,8 +61,8 @@ func TestCleanGPUDescription(t *testing.T) {
 		{8, "8x A100 SXM4 40GB", "8x A100 SXM4"},
 		{1, "1x Tesla V100 16GB", "1x Tesla V100"},
 		{4, "4x RTX PRO 6000 96GB", "4x RTX PRO 6000"},
-		{1, "H100 SXM5 80GB", "1x H100 SXM5"},         // no count prefix
-		{1, "RTX 6000 Ada 48GB", "1x RTX 6000 Ada"},    // no count prefix
+		{1, "H100 SXM5 80GB", "1x H100 SXM5"},       // no count prefix
+		{1, "RTX 6000 Ada 48GB", "1x RTX 6000 Ada"}, // no count prefix
 	}
 
 	for _, tt := range tests {

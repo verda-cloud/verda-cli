@@ -1,9 +1,13 @@
 package vm
 
 import (
+	"bytes"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
+
+	cmdutil "github/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
 
 func TestRenderInstanceCardWithVolumes(t *testing.T) {
@@ -86,5 +90,68 @@ func TestRenderInstanceCardRunningShowsSSH(t *testing.T) {
 	// Running instances with IP should show ssh hint.
 	if len(card) == 0 {
 		t.Fatal("empty card")
+	}
+}
+
+// TestVMDescribeAcceptsZeroArgs verifies that verda vm describe can be called
+// without arguments (for the interactive picker flow).
+func TestVMDescribeAcceptsZeroArgs(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	ioStreams := cmdutil.IOStreams{Out: &buf, ErrOut: &buf}
+	f := cmdutil.NewTestFactory(nil)
+
+	root := &cobra.Command{Use: "verda", SilenceUsage: true, SilenceErrors: true}
+	vmCmd := &cobra.Command{Use: "vm"}
+	vmCmd.AddCommand(NewCmdDescribe(f, ioStreams))
+	root.AddCommand(vmCmd)
+	root.SetArgs([]string{"vm", "describe"})
+
+	err := root.Execute()
+	// Should fail on VerdaClient, NOT on arg validation.
+	if err != nil && err.Error() == "accepts at most 1 arg(s), received 0" {
+		t.Fatal("vm describe should accept zero arguments for interactive mode")
+	}
+}
+
+// TestVMDescribeAcceptsOneArg verifies that verda vm describe <id> still works.
+func TestVMDescribeAcceptsOneArg(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	ioStreams := cmdutil.IOStreams{Out: &buf, ErrOut: &buf}
+	f := cmdutil.NewTestFactory(nil)
+
+	root := &cobra.Command{Use: "verda", SilenceUsage: true, SilenceErrors: true}
+	vmCmd := &cobra.Command{Use: "vm"}
+	vmCmd.AddCommand(NewCmdDescribe(f, ioStreams))
+	root.AddCommand(vmCmd)
+	root.SetArgs([]string{"vm", "describe", "inst-123"})
+
+	err := root.Execute()
+	// Should fail on VerdaClient, NOT on arg validation.
+	if err != nil && err.Error() == "accepts at most 1 arg(s), received 2" {
+		t.Fatal("vm describe should accept one argument")
+	}
+}
+
+// TestVMDescribeRejectsTwoArgs ensures extra positional args are rejected.
+func TestVMDescribeRejectsTwoArgs(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	ioStreams := cmdutil.IOStreams{Out: &buf, ErrOut: &buf}
+	f := cmdutil.NewTestFactory(nil)
+
+	root := &cobra.Command{Use: "verda", SilenceUsage: true, SilenceErrors: true}
+	vmCmd := &cobra.Command{Use: "vm"}
+	vmCmd.AddCommand(NewCmdDescribe(f, ioStreams))
+	root.AddCommand(vmCmd)
+	root.SetArgs([]string{"vm", "describe", "id1", "id2"})
+
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("expected error for two positional args")
 	}
 }

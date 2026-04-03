@@ -12,7 +12,6 @@ import (
 
 type listOptions struct {
 	Status string
-	JSON   bool
 }
 
 // NewCmdList creates the vm list cobra command.

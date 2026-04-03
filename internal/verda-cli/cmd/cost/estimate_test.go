@@ -134,13 +134,13 @@ func TestFindInstanceType(t *testing.T) {
 	}
 }
 
-func TestCostEstimateTotals(t *testing.T) {
+func TestEstimateTotals(t *testing.T) {
 	t.Parallel()
 
-	e := CostEstimate{
-		Instance: CostLineItem{Hourly: 0.44, Daily: 10.56, Monthly: 321.20},
-		OSVolume: &CostLineItem{Hourly: 0.0137, Daily: 0.3288, Monthly: 10.00},
-		Storage:  &CostLineItem{Hourly: 0.0685, Daily: 1.644, Monthly: 50.00},
+	e := Estimate{
+		Instance: LineItem{Hourly: 0.44, Daily: 10.56, Monthly: 321.20},
+		OSVolume: &LineItem{Hourly: 0.0137, Daily: 0.3288, Monthly: 10.00},
+		Storage:  &LineItem{Hourly: 0.0685, Daily: 1.644, Monthly: 50.00},
 	}
 
 	total := e.Instance.Hourly

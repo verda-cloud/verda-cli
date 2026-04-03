@@ -138,21 +138,21 @@ func renderTypes(w interface{ Write([]byte) (int, error) }, types []verda.Instan
 	if len(gpuTypes) > 0 {
 		_, _ = fmt.Fprintf(w, "\n  %s\n\n", bold.Render("GPU Instances"))
 		for i := range gpuTypes {
-			renderTypeRow(w, &gpuTypes[i], showSpot, price, dim)
+			renderTypeRow(w, &gpuTypes[i], showSpot, &price, &dim)
 		}
 	}
 
 	if len(cpuTypes) > 0 {
 		_, _ = fmt.Fprintf(w, "\n  %s\n\n", bold.Render("CPU Instances"))
 		for i := range cpuTypes {
-			renderTypeRow(w, &cpuTypes[i], showSpot, price, dim)
+			renderTypeRow(w, &cpuTypes[i], showSpot, &price, &dim)
 		}
 	}
 
 	_, _ = fmt.Fprintln(w)
 }
 
-func renderTypeRow(w interface{ Write([]byte) (int, error) }, t *verda.InstanceTypeInfo, showSpot bool, priceStyle, dimStyle lipgloss.Style) {
+func renderTypeRow(w interface{ Write([]byte) (int, error) }, t *verda.InstanceTypeInfo, showSpot bool, priceStyle, dimStyle *lipgloss.Style) {
 	compute := t.CPU.Description
 	if t.GPU.NumberOfGPUs > 0 {
 		compute = cleanGPUDescription(t)

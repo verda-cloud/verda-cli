@@ -24,9 +24,13 @@ func NewCmdDescribe(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Comma
 			verda vol show abc-123-def
 			verda volume describe abc-123-def -o json
 		`),
-		Args: cobra.ExactArgs(1),
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runDescribe(cmd, f, ioStreams, args[0])
+			var volumeID string
+			if len(args) > 0 {
+				volumeID = args[0]
+			}
+			return runDescribe(cmd, f, ioStreams, volumeID)
 		},
 	}
 	return cmd
@@ -36,6 +40,18 @@ func runDescribe(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStre
 	client, err := f.VerdaClient()
 	if err != nil {
 		return err
+	}
+
+	// Interactive picker when no ID specified.
+	if volumeID == "" {
+		selected, err := selectVolume(cmd.Context(), f, ioStreams, client)
+		if err != nil {
+			return err
+		}
+		if selected == "" {
+			return nil
+		}
+		volumeID = selected
 	}
 
 	ctx, cancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)

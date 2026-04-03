@@ -219,7 +219,14 @@ func runAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 
 	// Poll until expected status or show immediate result.
 	if action.ExpectStatus != "" && waitOpts.Wait {
-		return pollInstanceStatus(ctx, ioStreams.ErrOut, client, inst.ID, action.ExpectStatus)
+		result, err := cmdutil.PollInstanceStatus(ctx, ioStreams.ErrOut, client, inst.ID, waitOpts, action.ExpectStatus)
+		if err != nil {
+			return err
+		}
+		if result != nil {
+			_, _ = fmt.Fprint(ioStreams.Out, renderInstanceCard(result))
+		}
+		return nil
 	}
 
 	_, _ = fmt.Fprintf(ioStreams.Out, "Done: %s on %s (%s)\n", action.Label, inst.Hostname, inst.ID)

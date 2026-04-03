@@ -1,6 +1,7 @@
 # Build artifacts
 bin/
 _output/
+verda
 
 # Local smoke-test output (see test/run.sh)
 tmp/
@@ -363,3 +364,12 @@ vhs/
 
 # Live test script (contains local testing logic)
 scripts/live-test.sh
+
+# Claude Code local config (absolute paths, machine-specific)
+.claude/settings.json
+.claude/commands/
+.claude/topic-switch.json
+
+# AI working notes and implementation plans (not shipped)
+.ai/notes/
+docs/plans/

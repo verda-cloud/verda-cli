@@ -66,8 +66,8 @@ func (f *factoryImpl) Status() tui.Status {
 	}
 	return f.status
 }
-func (f *factoryImpl) Debug() bool                  { return f.opts.Debug }
-func (f *factoryImpl) OutputFormat() string          { return f.opts.Output }
+func (f *factoryImpl) Debug() bool          { return f.opts.Debug }
+func (f *factoryImpl) OutputFormat() string { return f.opts.Output }
 
 // VerdaClient creates or reuses the shared Verda SDK client.
 func (f *factoryImpl) VerdaClient() (*verda.Client, error) {

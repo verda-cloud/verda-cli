@@ -68,26 +68,26 @@ func newCmdEstimate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Comma
 	return cmd
 }
 
-// CostEstimate is the structured output for cost estimation.
-type CostEstimate struct {
-	InstanceType string          `json:"instance_type" yaml:"instance_type"`
-	Spot         bool            `json:"spot" yaml:"spot"`
-	Instance     CostLineItem    `json:"instance" yaml:"instance"`
-	OSVolume     *CostLineItem   `json:"os_volume,omitempty" yaml:"os_volume,omitempty"`
-	Storage      *CostLineItem   `json:"storage,omitempty" yaml:"storage,omitempty"`
-	Total        CostTotalItem   `json:"total" yaml:"total"`
+// Estimate is the structured output for cost estimation.
+type Estimate struct {
+	InstanceType string    `json:"instance_type" yaml:"instance_type"`
+	Spot         bool      `json:"spot" yaml:"spot"`
+	Instance     LineItem  `json:"instance" yaml:"instance"`
+	OSVolume     *LineItem `json:"os_volume,omitempty" yaml:"os_volume,omitempty"`
+	Storage      *LineItem `json:"storage,omitempty" yaml:"storage,omitempty"`
+	Total        TotalItem `json:"total" yaml:"total"`
 }
 
-// CostLineItem represents a single cost component.
-type CostLineItem struct {
+// LineItem represents a single cost component.
+type LineItem struct {
 	Description string  `json:"description" yaml:"description"`
 	Hourly      float64 `json:"hourly" yaml:"hourly"`
 	Daily       float64 `json:"daily" yaml:"daily"`
 	Monthly     float64 `json:"monthly" yaml:"monthly"`
 }
 
-// CostTotalItem represents the total cost.
-type CostTotalItem struct {
+// TotalItem represents the total cost.
+type TotalItem struct {
 	Hourly  float64 `json:"hourly" yaml:"hourly"`
 	Daily   float64 `json:"daily" yaml:"daily"`
 	Monthly float64 `json:"monthly" yaml:"monthly"`
@@ -127,10 +127,10 @@ func runEstimate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStre
 		instanceHourly = float64(instType.SpotPrice)
 	}
 
-	estimate := CostEstimate{
+	estimate := Estimate{
 		InstanceType: opts.InstanceType,
 		Spot:         opts.IsSpot,
-		Instance: CostLineItem{
+		Instance: LineItem{
 			Description: instanceDescription(instType),
 			Hourly:      instanceHourly,
 			Daily:       instanceHourly * 24,
@@ -193,14 +193,14 @@ func findInstanceType(types []verda.InstanceTypeInfo, name string) *verda.Instan
 	return nil
 }
 
-func volumeCostItem(volType string, sizeGB int, vtMap map[string]verda.VolumeType) CostLineItem {
+func volumeCostItem(volType string, sizeGB int, vtMap map[string]verda.VolumeType) LineItem {
 	var monthlyPerGB float64
 	if vt, ok := vtMap[volType]; ok {
 		monthlyPerGB = vt.Price.PricePerMonthPerGB
 	}
 	hourly := math.Ceil(monthlyPerGB*float64(sizeGB)/hoursInMonth*10000) / 10000
 	monthly := monthlyPerGB * float64(sizeGB)
-	return CostLineItem{
+	return LineItem{
 		Description: fmt.Sprintf("%dGB %s", sizeGB, volType),
 		Hourly:      hourly,
 		Daily:       hourly * 24,
@@ -218,7 +218,7 @@ func instanceDescription(info *verda.InstanceTypeInfo) string {
 		info.CPU.NumberOfCores, info.Memory.SizeInGigabytes)
 }
 
-func renderEstimate(w interface{ Write([]byte) (int, error) }, e *CostEstimate) {
+func renderEstimate(w interface{ Write([]byte) (int, error) }, e *Estimate) {
 	bold := lipgloss.NewStyle().Bold(true)
 	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 	price := lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
@@ -238,12 +238,12 @@ func renderEstimate(w interface{ Write([]byte) (int, error) }, e *CostEstimate) 
 	_, _ = fmt.Fprintf(w, "  %-30s %10s %10s %12s\n", "", "Hourly", "Daily", "Monthly")
 	_, _ = fmt.Fprintf(w, "  %s\n", sep)
 
-	renderLine(w, "Instance", e.Instance, price)
+	renderLine(w, "Instance", e.Instance, &price)
 	if e.OSVolume != nil {
-		renderLine(w, "OS Volume", *e.OSVolume, price)
+		renderLine(w, "OS Volume", *e.OSVolume, &price)
 	}
 	if e.Storage != nil {
-		renderLine(w, "Storage", *e.Storage, price)
+		renderLine(w, "Storage", *e.Storage, &price)
 	}
 
 	_, _ = fmt.Fprintf(w, "  %s\n", sep)
@@ -255,7 +255,7 @@ func renderEstimate(w interface{ Write([]byte) (int, error) }, e *CostEstimate) 
 	_, _ = fmt.Fprintf(w, "  %s\n\n", sep)
 }
 
-func renderLine(w interface{ Write([]byte) (int, error) }, label string, item CostLineItem, priceStyle lipgloss.Style) {
+func renderLine(w interface{ Write([]byte) (int, error) }, label string, item LineItem, priceStyle *lipgloss.Style) {
 	_, _ = fmt.Fprintf(w, "  %-30s %s %s %s\n",
 		label,
 		priceStyle.Render(fmt.Sprintf("%10s", formatPrice(item.Hourly))),

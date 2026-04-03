@@ -51,7 +51,7 @@ type RunningInstanceCost struct {
 // RunningCostSummary is the structured output.
 type RunningCostSummary struct {
 	Instances []RunningInstanceCost `json:"instances" yaml:"instances"`
-	Total     CostTotalItem         `json:"total" yaml:"total"`
+	Total     TotalItem             `json:"total" yaml:"total"`
 }
 
 func runRunning(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams) error {
@@ -165,7 +165,8 @@ func renderRunning(w interface{ Write([]byte) (int, error) }, s *RunningCostSumm
 		dim.Render(fmt.Sprintf("(%d)", len(s.Instances))))
 	_, _ = fmt.Fprintf(w, "  %s\n\n", sep)
 
-	for _, inst := range s.Instances {
+	for i := range s.Instances {
+		inst := &s.Instances[i]
 		_, _ = fmt.Fprintf(w, "  %s  %s  %s\n",
 			bold.Render(fmt.Sprintf("%-25s", inst.Hostname)),
 			dim.Render(inst.InstanceType),

@@ -48,18 +48,23 @@ func NewCmdSSH(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 			# Pass extra ssh arguments
 			verda ssh gpu-runner -- -L 8080:localhost:8080
 		`),
-		Args:                  cobra.MinimumNArgs(1),
-		DisableFlagParsing:    false,
+		Args:               cobra.MaximumNArgs(1),
+		DisableFlagParsing: false,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			var target string
 			var extraArgs []string
-			if dash := cmd.Flags().ArgsLenAtDash(); dash >= 0 && dash < len(args) {
-				extraArgs = args[dash:]
-				args = args[:dash]
+
+			if len(args) > 0 {
+				if dash := cmd.Flags().ArgsLenAtDash(); dash >= 0 && dash < len(args) {
+					extraArgs = args[dash:]
+					args = args[:dash]
+				}
+				if len(args) > 0 {
+					target = args[0]
+				}
 			}
-			if len(args) == 0 {
-				return cmdutil.UsageErrorf(cmd, "requires an instance ID or hostname")
-			}
-			return runSSH(cmd, f, ioStreams, opts, args[0], extraArgs)
+
+			return runSSH(cmd, f, ioStreams, opts, target, extraArgs)
 		},
 	}
 
@@ -89,6 +94,39 @@ func runSSH(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, 
 	}
 	if err != nil {
 		return err
+	}
+
+	// Interactive picker when no target is provided.
+	if target == "" {
+		running := filterRunning(instances)
+		if len(running) == 0 {
+			_, _ = fmt.Fprintln(ioStreams.ErrOut, "No running instances found.")
+			return nil
+		}
+
+		labels := make([]string, 0, len(running)+1)
+		for i := range running {
+			ip := ""
+			if running[i].IP != nil && *running[i].IP != "" {
+				ip = *running[i].IP
+			}
+			labels = append(labels, fmt.Sprintf("%-20s  %-18s  %s  %s",
+				running[i].Hostname,
+				running[i].InstanceType,
+				running[i].Location,
+				ip,
+			))
+		}
+		labels = append(labels, "Cancel")
+
+		idx, err := f.Prompter().Select(cmd.Context(), "Select instance to SSH into", labels)
+		if err != nil {
+			return nil // User pressed Esc/Ctrl+C during prompt.
+		}
+		if idx == len(running) {
+			return nil // Cancel selected.
+		}
+		target = running[idx].Hostname
 	}
 
 	inst := resolveInstance(instances, target)
@@ -125,6 +163,17 @@ func runSSH(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, 
 	return syscall.Exec(sshPath, sshArgs, os.Environ())
 }
 
+// filterRunning returns only instances with status running.
+func filterRunning(instances []verda.Instance) []verda.Instance {
+	var running []verda.Instance
+	for i := range instances {
+		if instances[i].Status == verda.StatusRunning {
+			running = append(running, instances[i])
+		}
+	}
+	return running
+}
+
 // resolveInstance finds an instance by exact ID match first, then by hostname.
 func resolveInstance(instances []verda.Instance, target string) *verda.Instance {
 	// Exact ID match.
@@ -134,9 +183,8 @@ func resolveInstance(instances []verda.Instance, target string) *verda.Instance 
 		}
 	}
 	// Hostname match (case-insensitive).
-	targetLower := strings.ToLower(target)
 	for i := range instances {
-		if strings.ToLower(instances[i].Hostname) == targetLower {
+		if strings.EqualFold(instances[i].Hostname, target) {
 			return &instances[i]
 		}
 	}

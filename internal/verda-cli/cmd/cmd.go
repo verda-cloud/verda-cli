@@ -54,6 +54,11 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) *cobra.Command {
 	opts.AddFlags(cmd.PersistentFlags())
 	_ = viper.BindPFlags(cmd.PersistentFlags())
 
+	// Register completion values for the global --output flag.
+	_ = cmd.RegisterFlagCompletionFunc("output", func(_ *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
+		return []string{"json", "yaml", "table"}, cobra.ShellCompDirectiveNoFileComp
+	})
+
 	cobra.OnInitialize(func() {
 		initConfig(viper.GetString(clioptions.FlagConfig))
 	})

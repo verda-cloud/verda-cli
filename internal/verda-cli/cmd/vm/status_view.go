@@ -1,50 +1,13 @@
 package vm
 
 import (
-	"context"
 	"fmt"
 	"image/color"
-	"io"
 	"strings"
-	"time"
 
 	"charm.land/lipgloss/v2"
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
 )
-
-const (
-	pollInterval = 5 * time.Second
-	pollTimeout  = 5 * time.Minute
-)
-
-var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
-
-var terminalStatuses = map[string]bool{
-	verda.StatusRunning:      true,
-	verda.StatusOffline:      true,
-	verda.StatusError:        true,
-	verda.StatusDiscontinued: true,
-	verda.StatusNotFound:     true,
-	verda.StatusNoCapacity:   true,
-}
-
-// statusMessage returns a human-friendly message for the instance status.
-func statusMessage(status string) string {
-	switch status {
-	case verda.StatusNew:
-		return "Creating instance..."
-	case verda.StatusOrdered:
-		return "Instance ordered..."
-	case verda.StatusProvisioning:
-		return "Provisioning instance..."
-	case verda.StatusValidating:
-		return "Validating instance..."
-	case verda.StatusPending:
-		return "Waiting for capacity..."
-	default:
-		return "Waiting..."
-	}
-}
 
 // statusColor returns a lipgloss color for the instance status.
 func statusColor(status string) color.Color {
@@ -135,88 +98,4 @@ func renderInstanceCard(inst *verda.Instance, volumes ...verda.Volume) string {
 
 	_, _ = fmt.Fprintln(&b)
 	return b.String()
-}
-
-// formatElapsed formats a duration as a human-friendly string.
-func formatElapsed(d time.Duration) string {
-	s := int(d.Seconds())
-	if s < 60 {
-		return fmt.Sprintf("%ds", s)
-	}
-	return fmt.Sprintf("%dm %ds", s/60, s%60)
-}
-
-// pollInstanceStatus polls the instance showing an animated status line.
-// If expectStatus is non-empty, polls until that specific status is reached.
-// If empty, polls until any terminal status (running, offline, error, etc.).
-func pollInstanceStatus(ctx context.Context, w io.Writer, client *verda.Client, instanceID string, expectStatus ...string) error {
-	var target string
-	if len(expectStatus) > 0 {
-		target = expectStatus[0]
-	}
-
-	ctx, cancel := context.WithTimeout(ctx, pollTimeout)
-	defer cancel()
-
-	accentStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("5"))
-	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-
-	var lastInst *verda.Instance
-	startTime := time.Now()
-	frame := 0
-
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
-
-	pollTicker := time.NewTicker(pollInterval)
-	defer pollTicker.Stop()
-
-	// Initial fetch.
-	inst, err := client.Instances.GetByID(ctx, instanceID)
-	if err != nil {
-		return fmt.Errorf("polling instance status: %w", err)
-	}
-	lastInst = inst
-
-	isDone := func(status string) bool {
-		if target != "" {
-			return status == target || status == verda.StatusError || status == verda.StatusNotFound
-		}
-		return terminalStatuses[status]
-	}
-
-	for {
-		if isDone(lastInst.Status) {
-			_, _ = fmt.Fprintf(w, "\r\033[2K")
-			_, _ = fmt.Fprint(w, renderInstanceCard(lastInst))
-			return nil
-		}
-
-		// Render animated single-line status.
-		spinner := spinnerFrames[frame%len(spinnerFrames)]
-		elapsed := formatElapsed(time.Since(startTime))
-		msg := statusMessage(lastInst.Status)
-		line := fmt.Sprintf("\r\033[2K%s %s %s",
-			accentStyle.Render(spinner),
-			msg,
-			dimStyle.Render(elapsed))
-		_, _ = fmt.Fprint(w, line)
-
-		select {
-		case <-ctx.Done():
-			_, _ = fmt.Fprintf(w, "\r\033[2K")
-			_, _ = fmt.Fprintf(w, "\nTimed out waiting for status change (last: %s). Use `verda vm list` to check.\n", lastInst.Status)
-			return nil
-		case <-ticker.C:
-			frame++
-		case <-pollTicker.C:
-			frame++
-			inst, err := client.Instances.GetByID(ctx, instanceID)
-			if err != nil {
-				_, _ = fmt.Fprintln(w)
-				return fmt.Errorf("polling instance status: %w", err)
-			}
-			lastInst = inst
-		}
-	}
 }
