@@ -139,6 +139,13 @@ func runUpdate(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStrea
 	}
 
 	if err := replaceBinary(exe, binary); err != nil {
+		if errors.Is(err, os.ErrPermission) {
+			hint := "sudo verda update"
+			if runtime.GOOS == osWindows {
+				hint = "running the command in an elevated (Administrator) terminal"
+			}
+			return fmt.Errorf("permission denied writing to %s\n\nTry: %s", filepath.Dir(exe), hint)
+		}
 		return fmt.Errorf("replacing binary: %w", err)
 	}
 
