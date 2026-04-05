@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write
 
 jobs:
   release:
@@ -60,12 +61,92 @@ jobs:
           git tag "${VERSION}"
           git push origin "${BRANCH}" --tags
 
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
       - name: Build and release with goreleaser
         uses: goreleaser/goreleaser-action@v6
         with:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+
+      - name: Generate binary checksums
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          # Strip leading 'v' for goreleaser dist paths
+          VER="${VERSION#v}"
+          SUMFILE="dist/verda_${VER}_binary_SHA256SUMS"
+
+          # Find raw binaries produced by goreleaser and checksum them
+          for dir in dist/verda_*/; do
+            # Skip archive directories (contain .tar.gz or .zip artifacts)
+            [ -d "$dir" ] || continue
+            BIN=""
+            if [ -f "${dir}verda" ]; then
+              BIN="${dir}verda"
+            elif [ -f "${dir}verda.exe" ]; then
+              BIN="${dir}verda.exe"
+            else
+              continue
+            fi
+            # Compute checksum with path relative to dist/
+            RELPATH="${BIN#dist/}"
+            HASH=$(sha256sum "$BIN" | awk '{print $1}')
+            echo "${HASH}  ${RELPATH}" >> "$SUMFILE"
+          done
+
+          # Dedup in case build and archive staging dirs both matched
+          sort -u -o "$SUMFILE" "$SUMFILE"
+
+          if [ ! -s "$SUMFILE" ]; then
+            echo "Error: no binary checksums generated"
+            exit 1
+          fi
+
+          echo "--- Binary checksums ---"
+          cat "$SUMFILE"
+
+      - name: Sign checksum files with cosign
+        # Keyless signing via GitHub OIDC. The certificate identity will be:
+        #   https://github.com/verda-cloud/verda-cli/.github/workflows/release.yml@refs/heads/release/<ver>
+        #
+        # To verify manually:
+        #   cosign verify-blob \
+        #     --signature verda_<VER>_SHA256SUMS.sig \
+        #     --certificate verda_<VER>_SHA256SUMS.pem \
+        #     --certificate-identity-regexp "^https://github\.com/verda-cloud/verda-cli/\.github/workflows/release\.yml@refs/.*$" \
+        #     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+        #     verda_<VER>_SHA256SUMS
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          VER="${VERSION#v}"
+
+          # Sign the archive checksums (produced by goreleaser)
+          cosign sign-blob --yes \
+            --output-signature "dist/verda_${VER}_SHA256SUMS.sig" \
+            --output-certificate "dist/verda_${VER}_SHA256SUMS.pem" \
+            "dist/verda_${VER}_SHA256SUMS"
+
+          # Sign the binary checksums
+          cosign sign-blob --yes \
+            --output-signature "dist/verda_${VER}_binary_SHA256SUMS.sig" \
+            --output-certificate "dist/verda_${VER}_binary_SHA256SUMS.pem" \
+            "dist/verda_${VER}_binary_SHA256SUMS"
+
+      - name: Upload signing artifacts to release
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          VER="${VERSION#v}"
+
+          gh release upload "${VERSION}" \
+            "dist/verda_${VER}_binary_SHA256SUMS" \
+            "dist/verda_${VER}_binary_SHA256SUMS.sig" \
+            "dist/verda_${VER}_binary_SHA256SUMS.pem" \
+            "dist/verda_${VER}_SHA256SUMS.sig" \
+            "dist/verda_${VER}_SHA256SUMS.pem"
 
       - name: Create PR to merge release into main
         env:
