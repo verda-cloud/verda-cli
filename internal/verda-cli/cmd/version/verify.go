@@ -91,15 +91,23 @@ func parseChecksumLine(line string) (hexStr, key string, ok bool) {
 // findMatchingChecksum finds the expected hash for the given OS/arch from the
 // checksum file body.
 func findMatchingChecksum(body, goos, goarch string) (string, error) {
-	// The key format is: verda_<os>_<arch>/verda[.exe]
-	prefix := fmt.Sprintf("verda_%s_%s/", goos, goarch)
+	// GoReleaser dist directories include arch variant suffixes, e.g.:
+	//   verda_darwin_arm64_v8.0/verda
+	//   verda_linux_amd64_v1/verda
+	// Match "verda_<os>_<arch>" followed by "/" or "_" (variant suffix).
+	prefix := fmt.Sprintf("verda_%s_%s", goos, goarch)
 
 	for _, line := range strings.Split(body, "\n") {
 		hexStr, key, ok := parseChecksumLine(line)
 		if !ok {
 			continue
 		}
-		if strings.HasPrefix(key, prefix) {
+		if !strings.HasPrefix(key, prefix) {
+			continue
+		}
+		// After the os_arch prefix, expect "/" or "_" (variant like _v8.0/)
+		rest := key[len(prefix):]
+		if rest != "" && (rest[0] == '/' || rest[0] == '_') {
 			return hexStr, nil
 		}
 	}

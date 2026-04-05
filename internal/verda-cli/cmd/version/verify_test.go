@@ -84,9 +84,10 @@ func TestParseChecksumLine(t *testing.T) {
 func TestFindMatchingChecksum(t *testing.T) {
 	t.Parallel()
 
-	body := `aaa111  verda_linux_amd64/verda
-bbb222  verda_darwin_arm64/verda
-ccc333  verda_windows_amd64/verda.exe
+	// GoReleaser dist directories include arch variant suffixes
+	body := `aaa111  verda_linux_amd64_v1/verda
+bbb222  verda_darwin_arm64_v8.0/verda
+ccc333  verda_windows_amd64_v1/verda.exe
 `
 
 	tests := []struct {
@@ -256,7 +257,7 @@ func TestVerifyBinaryMatch(t *testing.T) {
 
 	goos := runtime.GOOS
 	goarch := runtime.GOARCH
-	checksumBody := fmt.Sprintf("%s  verda_%s_%s/verda\n", expectedHash, goos, goarch)
+	checksumBody := fmt.Sprintf("%s  verda_%s_%s_v1/verda\n", expectedHash, goos, goarch)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = fmt.Fprint(w, checksumBody)
