@@ -14,10 +14,19 @@
 
 ## Checklist
 
-- [ ] Code follows the project conventions (see `.ai/skills/new-command.md`)
-- [ ] `go build ./...` passes
-- [ ] `go test ./...` passes
-- [ ] `--debug` output included for API-calling commands
-- [ ] Destructive actions have confirmation prompts
+- [ ] I have performed a self-review of my own code
+- [ ] I have added tests that prove my fix is effective or that my feature works
+- [ ] New and existing unit tests pass locally (`make test`)
+- [ ] Pre-commit checks pass (`make pre-commit`)
+- [ ] My changes generate no new warnings or errors
 
-> **Note:** The CHANGELOG is auto-generated from conventional commit messages at release time. Do not edit CHANGELOG.md manually.
+## Related Issues
+
+<!-- Link any related issues: Closes #123, Related to #456 -->
+
+## Additional Context
+
+<!-- Screenshots, benchmarks, or other context (optional) -->
+
+> **Note:** Use [conventional commit](https://www.conventionalcommits.org/) messages (e.g. `feat:`, `fix:`, `chore:`).
+> The CHANGELOG is auto-generated from conventional commit messages at release time.
