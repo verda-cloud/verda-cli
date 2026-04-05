@@ -149,7 +149,7 @@ func TestHashFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "testfile")
 	content := []byte("hello world\n")
-	if err := os.WriteFile(path, content, 0644); err != nil {
+	if err := os.WriteFile(path, content, 0600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -207,7 +207,7 @@ func TestFetchChecksums(t *testing.T) {
 
 	checksumBody := "abc123  verda_linux_amd64/verda\n"
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, checksumBody)
+		_, _ = fmt.Fprint(w, checksumBody)
 	}))
 	defer srv.Close()
 
@@ -243,7 +243,7 @@ func TestVerifyBinaryMatch(t *testing.T) {
 	dir := t.TempDir()
 	binPath := filepath.Join(dir, "verda")
 	content := []byte("fake binary content")
-	if err := os.WriteFile(binPath, content, 0755); err != nil {
+	if err := os.WriteFile(binPath, content, 0600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -255,7 +255,7 @@ func TestVerifyBinaryMatch(t *testing.T) {
 	checksumBody := fmt.Sprintf("%s  verda_%s_%s/verda\n", expectedHash, goos, goarch)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, checksumBody)
+		_, _ = fmt.Fprint(w, checksumBody)
 	}))
 	defer srv.Close()
 
@@ -279,7 +279,7 @@ func TestVerifyBinaryMismatch(t *testing.T) {
 
 	dir := t.TempDir()
 	binPath := filepath.Join(dir, "verda")
-	if err := os.WriteFile(binPath, []byte("tampered binary"), 0755); err != nil {
+	if err := os.WriteFile(binPath, []byte("tampered binary"), 0600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -288,7 +288,7 @@ func TestVerifyBinaryMismatch(t *testing.T) {
 	checksumBody := fmt.Sprintf("%s  verda_%s_%s/verda\n", "0000000000000000000000000000000000000000000000000000000000000000", goos, goarch)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, checksumBody)
+		_, _ = fmt.Fprint(w, checksumBody)
 	}))
 	defer srv.Close()
 

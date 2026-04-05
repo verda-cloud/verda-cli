@@ -59,7 +59,7 @@ func fetchChecksums(client *http.Client, url string) (string, error) {
 
 // hashFile computes the SHA256 hex digest of the file at path.
 func hashFile(path string) (string, error) {
-	f, err := os.Open(path)
+	f, err := os.Open(path) //nolint:gosec // path is from os.Executable, not user input
 	if err != nil {
 		return "", fmt.Errorf("opening binary: %w", err)
 	}
