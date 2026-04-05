@@ -27,9 +27,10 @@ type VerifyResult struct {
 // checksumURL returns the GitHub release URL for the checksums file.
 func checksumURL(ver string) string {
 	bare := strings.TrimPrefix(ver, "v")
+	tag := "v" + bare // GitHub release tags always have v prefix
 	return fmt.Sprintf(
 		"https://github.com/verda-cloud/verda-cli/releases/download/%s/verda_%s_binary_SHA256SUMS",
-		ver, bare,
+		tag, bare,
 	)
 }
 
@@ -133,8 +134,9 @@ func verifyBinary(client *http.Client, binPath, url, goos, goarch string) (*Veri
 // runVerify is the top-level verify logic, writing output to out and warnings
 // to errOut. It uses the provided HTTP client for fetching checksums.
 func runVerify(out, errOut io.Writer, outputFormat string, client *http.Client, ver, goos, goarch string) error {
-	if ver == "v0.0.0-dev" {
-		_, _ = fmt.Fprintln(errOut, "Warning: cannot verify a development build (v0.0.0-dev)")
+	bare := strings.TrimPrefix(ver, "v")
+	if bare == "0.0.0-dev" || bare == "" {
+		_, _ = fmt.Fprintf(errOut, "Warning: cannot verify a development build (%s)\n", ver)
 		return errors.New("cannot verify development build")
 	}
 

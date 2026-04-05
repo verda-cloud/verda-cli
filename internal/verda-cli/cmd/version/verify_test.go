@@ -189,6 +189,10 @@ func TestChecksumURL(t *testing.T) {
 			version: "v0.5.0",
 			want:    "https://github.com/verda-cloud/verda-cli/releases/download/v0.5.0/verda_0.5.0_binary_SHA256SUMS",
 		},
+		{
+			version: "1.3.0",
+			want:    "https://github.com/verda-cloud/verda-cli/releases/download/v1.3.0/verda_1.3.0_binary_SHA256SUMS",
+		},
 	}
 
 	for _, tt := range tests {
@@ -304,13 +308,26 @@ func TestVerifyBinaryMismatch(t *testing.T) {
 func TestRunVerifyDevBuild(t *testing.T) {
 	t.Parallel()
 
-	var outBuf, errBuf bytes.Buffer
-
-	err := runVerify(&outBuf, &errBuf, "", nil, "v0.0.0-dev", "", "")
-	if err == nil {
-		t.Fatal("expected error for dev build")
+	tests := []struct {
+		name    string
+		version string
+	}{
+		{"with v prefix", "v0.0.0-dev"},
+		{"without v prefix", "0.0.0-dev"},
+		{"empty", ""},
 	}
-	if !strings.Contains(errBuf.String(), "development build") {
-		t.Errorf("expected warning about development build, got: %q", errBuf.String())
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var outBuf, errBuf bytes.Buffer
+			err := runVerify(&outBuf, &errBuf, "", nil, tt.version, "", "")
+			if err == nil {
+				t.Fatal("expected error for dev build")
+			}
+			if !strings.Contains(errBuf.String(), "development build") {
+				t.Errorf("expected warning about development build, got: %q", errBuf.String())
+			}
+		})
 	}
 }

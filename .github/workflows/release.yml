@@ -46,7 +46,11 @@ jobs:
           install-only: true
 
       - name: Generate changelog
-        run: make changelog VERSION=${{ github.event.inputs.version }}
+        run: |
+          # Full changelog for CHANGELOG.md (committed to repo)
+          make changelog VERSION=${{ github.event.inputs.version }}
+          # Release notes for this version only (passed to goreleaser)
+          git-cliff --tag ${{ github.event.inputs.version }} --latest --strip header -o RELEASE_NOTES.md
 
       - name: Commit, tag, and push release branch
         run: |
@@ -67,7 +71,7 @@ jobs:
       - name: Build and release with goreleaser
         uses: goreleaser/goreleaser-action@v6
         with:
-          args: release --clean
+          args: release --clean --release-notes RELEASE_NOTES.md
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
 

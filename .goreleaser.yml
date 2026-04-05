@@ -31,3 +31,6 @@ archives:
 
 checksum:
   name_template: verda_{{ .Version }}_SHA256SUMS
+
+changelog:
+  disable: true
