@@ -8,6 +8,7 @@ import (
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
 	"github.com/verda-cloud/verdagostack/pkg/tui"
 	_ "github.com/verda-cloud/verdagostack/pkg/tui/bubbletea" // registers bubbletea TUI backend
+	"github.com/verda-cloud/verdagostack/pkg/version"
 
 	clioptions "github/verda-cloud/verda-cli/internal/verda-cli/options"
 )
@@ -46,11 +47,32 @@ type factoryImpl struct {
 	verda    *verda.Client
 }
 
+// userAgentString returns a User-Agent header value like "verda-cli/v1.2.3".
+func userAgentString() string {
+	return "verda-cli/" + version.Get().GitVersion
+}
+
+// userAgentTransport wraps an http.RoundTripper to inject a User-Agent header.
+type userAgentTransport struct {
+	base      http.RoundTripper
+	userAgent string
+}
+
+func (t *userAgentTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.Header.Get("User-Agent") == "" {
+		req.Header.Set("User-Agent", t.userAgent)
+	}
+	return t.base.RoundTrip(req)
+}
+
 // NewFactory creates a Factory from the given Options.
 func NewFactory(opts *clioptions.Options) Factory {
 	return &factoryImpl{
-		opts:     opts,
-		client:   &http.Client{Timeout: opts.Timeout},
+		opts: opts,
+		client: &http.Client{
+			Timeout:   opts.Timeout,
+			Transport: &userAgentTransport{base: http.DefaultTransport, userAgent: userAgentString()},
+		},
 		prompter: tui.Default(),
 		status:   tui.DefaultStatus(),
 	}
@@ -88,7 +110,7 @@ func (f *factoryImpl) VerdaClient() (*verda.Client, error) {
 		verda.WithClientID(auth.ClientID),
 		verda.WithClientSecret(auth.ClientSecret),
 		verda.WithHTTPClient(f.client),
-		verda.WithUserAgent("verda"),
+		verda.WithUserAgent(userAgentString()),
 	}
 	if auth.BearerToken != "" {
 		options = append(options, verda.WithAuthBearerToken(auth.BearerToken))
