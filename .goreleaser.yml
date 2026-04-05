@@ -32,5 +32,5 @@ archives:
 checksum:
   name_template: verda_{{ .Version }}_SHA256SUMS
 
-changelog:
-  disable: true
+# Release notes are provided by git-cliff via --release-notes flag.
+# Do NOT set changelog.disable: true — it also ignores --release-notes.
