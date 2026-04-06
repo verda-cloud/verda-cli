@@ -36,7 +36,12 @@ func (s *Server) registerVolumeTools() {
 
 //nolint:gocritic // hugeParam: handler signature defined by mcp-go.
 func (s *Server) handleListVolumes(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	volumes, err := s.client.Volumes.ListVolumes(ctx)
+	client, err := s.verdaClient()
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	volumes, err := client.Volumes.ListVolumes(ctx)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -45,6 +50,11 @@ func (s *Server) handleListVolumes(ctx context.Context, _ mcp.CallToolRequest) (
 
 //nolint:gocritic // hugeParam: handler signature defined by mcp-go.
 func (s *Server) handleCreateVolume(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	client, err := s.verdaClient()
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
 	name, err := requiredString(args(req), "name")
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
@@ -65,7 +75,7 @@ func (s *Server) handleCreateVolume(ctx context.Context, req mcp.CallToolRequest
 		location = verda.LocationFIN01
 	}
 
-	volID, err := s.client.Volumes.CreateVolume(ctx, verda.VolumeCreateRequest{
+	volID, err := client.Volumes.CreateVolume(ctx, verda.VolumeCreateRequest{
 		Name:         name,
 		Size:         sizeGB,
 		Type:         volType,
@@ -87,7 +97,12 @@ func (s *Server) handleCreateVolume(ctx context.Context, req mcp.CallToolRequest
 
 //nolint:gocritic // hugeParam: handler signature defined by mcp-go.
 func (s *Server) handleListVolumesInTrash(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	volumes, err := s.client.Volumes.GetVolumesInTrash(ctx)
+	client, err := s.verdaClient()
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	volumes, err := client.Volumes.GetVolumesInTrash(ctx)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}

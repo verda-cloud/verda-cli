@@ -38,7 +38,12 @@ func (s *Server) registerCostTools() {
 
 //nolint:gocritic // hugeParam: handler signature defined by mcp-go.
 func (s *Server) handleGetBalance(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	balance, err := s.client.Balance.Get(ctx)
+	client, err := s.verdaClient()
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	balance, err := client.Balance.Get(ctx)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -47,6 +52,11 @@ func (s *Server) handleGetBalance(ctx context.Context, _ mcp.CallToolRequest) (*
 
 //nolint:gocritic // hugeParam: handler signature defined by mcp-go.
 func (s *Server) handleEstimateCost(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	client, err := s.verdaClient()
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
 	instanceType, err := requiredString(args(req), "instance_type")
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
@@ -62,7 +72,7 @@ func (s *Server) handleEstimateCost(ctx context.Context, req mcp.CallToolRequest
 	}
 
 	// Get instance type pricing.
-	info, err := s.client.InstanceTypes.GetByInstanceType(ctx, instanceType, spot, location, "")
+	info, err := client.InstanceTypes.GetByInstanceType(ctx, instanceType, spot, location, "")
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -75,7 +85,7 @@ func (s *Server) handleEstimateCost(ctx context.Context, req mcp.CallToolRequest
 	// Get volume pricing.
 	var osVolumeHourly, storageHourly float64
 	if osVolumeGB > 0 || storageGB > 0 {
-		volTypes, err := s.client.VolumeTypes.GetAllVolumeTypes(ctx)
+		volTypes, err := client.VolumeTypes.GetAllVolumeTypes(ctx)
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
@@ -111,7 +121,12 @@ func (s *Server) handleEstimateCost(ctx context.Context, req mcp.CallToolRequest
 
 //nolint:gocritic // hugeParam: handler signature defined by mcp-go.
 func (s *Server) handleGetRunningCosts(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	instances, err := s.client.Instances.Get(ctx, "running")
+	client, err := s.verdaClient()
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	instances, err := client.Instances.Get(ctx, "running")
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}

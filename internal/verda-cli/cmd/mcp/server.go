@@ -12,15 +12,29 @@ import (
 	pkgversion "github.com/verda-cloud/verdagostack/pkg/version"
 )
 
+// clientFunc is a function that returns a Verda client on demand.
+type clientFunc func() (*verda.Client, error)
+
 // Server wraps the MCP protocol server and Verda SDK client.
 type Server struct {
 	client    *verda.Client
+	getClient clientFunc
 	mcpServer *server.MCPServer
 }
 
 // NewServer creates a new MCP server backed by the given Verda client.
 func NewServer(client *verda.Client) *Server {
-	s := &Server{client: client}
+	return newServer(func() (*verda.Client, error) { return client, nil })
+}
+
+// NewLazyServer creates an MCP server that defers client creation to the
+// first tool call. This allows the MCP handshake to complete instantly.
+func NewLazyServer(getClient clientFunc) *Server {
+	return newServer(getClient)
+}
+
+func newServer(getClient clientFunc) *Server {
+	s := &Server{getClient: getClient}
 
 	ver := pkgversion.Get().GitVersion
 	s.mcpServer = server.NewMCPServer(
@@ -35,6 +49,19 @@ func NewServer(client *verda.Client) *Server {
 	s.registerVolumeTools()
 
 	return s
+}
+
+// verdaClient returns the Verda SDK client, creating it on first call.
+func (s *Server) verdaClient() (*verda.Client, error) {
+	if s.client != nil {
+		return s.client, nil
+	}
+	c, err := s.getClient()
+	if err != nil {
+		return nil, err
+	}
+	s.client = c
+	return c, nil
 }
 
 // ServeStdio starts the MCP server on stdin/stdout.

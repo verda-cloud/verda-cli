@@ -59,8 +59,13 @@ func (s *Server) registerVMTools() {
 
 //nolint:gocritic // hugeParam: handler signature defined by mcp-go.
 func (s *Server) handleListVMs(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	client, err := s.verdaClient()
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
 	status := optionalString(args(req), "status")
-	instances, err := s.client.Instances.Get(ctx, status)
+	instances, err := client.Instances.Get(ctx, status)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -69,11 +74,16 @@ func (s *Server) handleListVMs(ctx context.Context, req mcp.CallToolRequest) (*m
 
 //nolint:gocritic // hugeParam: handler signature defined by mcp-go.
 func (s *Server) handleDescribeVM(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	client, err := s.verdaClient()
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
 	id, err := requiredString(args(req), "id")
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
-	inst, err := s.client.Instances.GetByID(ctx, id)
+	inst, err := client.Instances.GetByID(ctx, id)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -82,6 +92,11 @@ func (s *Server) handleDescribeVM(ctx context.Context, req mcp.CallToolRequest) 
 
 //nolint:gocritic // hugeParam: handler signature defined by mcp-go.
 func (s *Server) handleCreateVM(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	client, err := s.verdaClient()
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
 	instanceType, err := requiredString(args(req), "instance_type")
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
@@ -144,7 +159,7 @@ func (s *Server) handleCreateVM(ctx context.Context, req mcp.CallToolRequest) (*
 		createReq.Contract = "SPOT"
 	}
 
-	inst, err := s.client.Instances.Create(ctx, createReq)
+	inst, err := client.Instances.Create(ctx, createReq)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -174,6 +189,11 @@ func (s *Server) handleCreateVM(ctx context.Context, req mcp.CallToolRequest) (*
 
 //nolint:gocritic // hugeParam: handler signature defined by mcp-go.
 func (s *Server) handleVMAction(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	client, err := s.verdaClient()
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
 	id, err := requiredString(args(req), "id")
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
@@ -185,15 +205,15 @@ func (s *Server) handleVMAction(ctx context.Context, req mcp.CallToolRequest) (*
 
 	switch action {
 	case "start":
-		err = s.client.Instances.Start(ctx, id)
+		err = client.Instances.Start(ctx, id)
 	case "shutdown":
-		err = s.client.Instances.Shutdown(ctx, id)
+		err = client.Instances.Shutdown(ctx, id)
 	case "force_shutdown":
-		err = s.client.Instances.ForceShutdown(ctx, id)
+		err = client.Instances.ForceShutdown(ctx, id)
 	case "hibernate":
-		err = s.client.Instances.Hibernate(ctx, id)
+		err = client.Instances.Hibernate(ctx, id)
 	case "delete":
-		err = s.client.Instances.Delete(ctx, []string{id}, nil, false)
+		err = client.Instances.Delete(ctx, []string{id}, nil, false)
 	default:
 		return mcp.NewToolResultError(fmt.Sprintf("unknown action %q: use start, shutdown, force_shutdown, hibernate, or delete", action)), nil
 	}
@@ -212,9 +232,14 @@ func (s *Server) handleVMAction(ctx context.Context, req mcp.CallToolRequest) (*
 
 // pollInstance polls until the instance reaches the expected status or timeout.
 func (s *Server) pollInstance(ctx context.Context, id, expectStatus string, timeout time.Duration) (*verda.Instance, error) {
+	client, err := s.verdaClient()
+	if err != nil {
+		return nil, err
+	}
+
 	deadline := time.Now().Add(timeout)
 	for {
-		inst, err := s.client.Instances.GetByID(ctx, id)
+		inst, err := client.Instances.GetByID(ctx, id)
 		if err != nil {
 			return nil, err
 		}

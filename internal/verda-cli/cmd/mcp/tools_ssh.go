@@ -38,7 +38,12 @@ func (s *Server) registerSSHTools() {
 
 //nolint:gocritic // hugeParam: handler signature defined by mcp-go.
 func (s *Server) handleListSSHKeys(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	keys, err := s.client.SSHKeys.GetAllSSHKeys(ctx)
+	client, err := s.verdaClient()
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	keys, err := client.SSHKeys.GetAllSSHKeys(ctx)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -47,6 +52,11 @@ func (s *Server) handleListSSHKeys(ctx context.Context, _ mcp.CallToolRequest) (
 
 //nolint:gocritic // hugeParam: handler signature defined by mcp-go.
 func (s *Server) handleAddSSHKey(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	client, err := s.verdaClient()
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
 	name, err := requiredString(args(req), "name")
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
@@ -56,7 +66,7 @@ func (s *Server) handleAddSSHKey(ctx context.Context, req mcp.CallToolRequest) (
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	key, err := s.client.SSHKeys.AddSSHKey(ctx, &verda.CreateSSHKeyRequest{
+	key, err := client.SSHKeys.AddSSHKey(ctx, &verda.CreateSSHKeyRequest{
 		Name:      name,
 		PublicKey: publicKey,
 	})
@@ -68,6 +78,10 @@ func (s *Server) handleAddSSHKey(ctx context.Context, req mcp.CallToolRequest) (
 
 //nolint:gocritic // hugeParam: handler signature defined by mcp-go.
 func (s *Server) handleGetSSHCommand(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if _, err := s.verdaClient(); err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
 	idOrHostname, err := requiredString(args(req), "id_or_hostname")
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
@@ -105,14 +119,19 @@ func (s *Server) handleGetSSHCommand(ctx context.Context, req mcp.CallToolReques
 
 // resolveInstance finds an instance by ID or hostname.
 func (s *Server) resolveInstance(ctx context.Context, idOrHostname string) (*verda.Instance, error) {
+	client, err := s.verdaClient()
+	if err != nil {
+		return nil, err
+	}
+
 	// Try by ID first.
-	inst, err := s.client.Instances.GetByID(ctx, idOrHostname)
+	inst, err := client.Instances.GetByID(ctx, idOrHostname)
 	if err == nil {
 		return inst, nil
 	}
 
 	// Fall back to searching by hostname.
-	instances, err := s.client.Instances.Get(ctx, "")
+	instances, err := client.Instances.Get(ctx, "")
 	if err != nil {
 		return nil, err
 	}

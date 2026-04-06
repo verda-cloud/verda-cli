@@ -43,11 +43,9 @@ func NewCmdServe(f cmdutil.Factory, _ cmdutil.IOStreams) *cobra.Command {
 			  }
 		`),
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			client, err := f.VerdaClient()
-			if err != nil {
-				return err
-			}
-			server := NewServer(client)
+			// Defer client creation to the first tool call so that the
+			// MCP handshake completes instantly and clients don't time out.
+			server := NewLazyServer(f.VerdaClient)
 			return server.ServeStdio(cmd.Context())
 		},
 	}
