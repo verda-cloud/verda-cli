@@ -25,7 +25,7 @@ func TestCostBalance(t *testing.T) {
 func TestCostEstimate(t *testing.T) {
 	requireProfile(t, "test")
 
-	r := runWithProfile(t, "test", "cost", "estimate", "--type", "1V100.6V")
+	r := runWithProfile(t, "test", "cost", "estimate", "--type", "1A6000.10V")
 	if r.ExitCode != 0 {
 		t.Fatalf("expected exit 0, got %d: %s", r.ExitCode, r.Stderr)
 	}
@@ -34,7 +34,7 @@ func TestCostEstimate(t *testing.T) {
 func TestCostEstimate_WithStorage(t *testing.T) {
 	requireProfile(t, "test")
 
-	r := runWithProfile(t, "test", "cost", "estimate", "--type", "1V100.6V", "--os-volume", "100", "--storage", "500")
+	r := runWithProfile(t, "test", "cost", "estimate", "--type", "1A6000.10V", "--os-volume", "100", "--storage", "500")
 	if r.ExitCode != 0 {
 		t.Fatalf("expected exit 0, got %d: %s", r.ExitCode, r.Stderr)
 	}

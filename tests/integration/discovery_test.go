@@ -136,7 +136,7 @@ func TestImages(t *testing.T) {
 func TestImages_ByType(t *testing.T) {
 	requireProfile(t, "test")
 
-	r := runWithProfile(t, "test", "images", "--type", "1V100.6V")
+	r := runWithProfile(t, "test", "images", "--type", "1A6000.10V")
 	if r.ExitCode != 0 {
 		t.Fatalf("expected exit 0, got %d: %s", r.ExitCode, r.Stderr)
 	}

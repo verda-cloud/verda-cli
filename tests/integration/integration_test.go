@@ -120,11 +120,12 @@ type agentErrorEnvelope struct {
 }
 
 // requireProfile skips the test if the given profile is not configured.
+// Uses a fast locations call to verify both credentials and API connectivity.
 func requireProfile(t *testing.T, profile string) {
 	t.Helper()
-	r := runCLI(t, "--auth.profile", profile, "auth", "show")
+	r := runCLI(t, "--auth.profile", profile, "-o", "json", "locations")
 	if r.ExitCode != 0 {
-		t.Skipf("profile %q not configured, skipping: %s", profile, r.Stderr)
+		t.Skipf("profile %q not working (exit %d), skipping: %s", profile, r.ExitCode, r.Stderr)
 	}
 }
 

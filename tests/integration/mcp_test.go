@@ -4,8 +4,8 @@ package integration
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
-	"fmt"
 	"io"
 	"os/exec"
 	"testing"
@@ -17,6 +17,7 @@ type mcpClient struct {
 	cmd    *exec.Cmd
 	stdin  io.WriteCloser
 	stdout *bufio.Reader
+	stderr *bytes.Buffer
 	t      *testing.T
 	nextID int
 }
@@ -38,7 +39,8 @@ func startMCP(t *testing.T, profile string) *mcpClient {
 	if err != nil {
 		t.Fatalf("stdout pipe: %v", err)
 	}
-	cmd.Stderr = nil // discard stderr
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start mcp: %v", err)
@@ -53,6 +55,7 @@ func startMCP(t *testing.T, profile string) *mcpClient {
 		cmd:    cmd,
 		stdin:  stdin,
 		stdout: bufio.NewReader(stdout),
+		stderr: &stderr,
 		t:      t,
 		nextID: 1,
 	}
@@ -74,25 +77,36 @@ func (c *mcpClient) send(method string, params any) map[string]any {
 	b = append(b, '\n')
 
 	if _, err := c.stdin.Write(b); err != nil {
-		c.t.Fatalf("write request: %v", err)
+		c.t.Fatalf("write request: %v\nstderr: %s", err, c.stderr.String())
 	}
 
 	// Read response with timeout
 	done := make(chan string, 1)
+	errCh := make(chan error, 1)
 	go func() {
-		line, _ := c.stdout.ReadString('\n')
+		line, err := c.stdout.ReadString('\n')
+		if err != nil {
+			errCh <- err
+			return
+		}
 		done <- line
 	}()
 
 	select {
 	case line := <-done:
+		if line == "" {
+			c.t.Fatalf("empty response from MCP server\nstderr: %s", c.stderr.String())
+		}
 		var resp map[string]any
 		if err := json.Unmarshal([]byte(line), &resp); err != nil {
-			c.t.Fatalf("unmarshal response: %v\nraw: %s", err, line)
+			c.t.Fatalf("unmarshal response: %v\nraw: %s\nstderr: %s", err, line, c.stderr.String())
 		}
 		return resp
+	case err := <-errCh:
+		c.t.Fatalf("read error: %v\nstderr: %s", err, c.stderr.String())
+		return nil
 	case <-time.After(30 * time.Second):
-		c.t.Fatal("timeout waiting for MCP response")
+		c.t.Fatalf("timeout waiting for MCP response\nstderr: %s", c.stderr.String())
 		return nil
 	}
 }
@@ -106,14 +120,21 @@ func (c *mcpClient) callTool(name string, args map[string]any) map[string]any {
 	})
 }
 
-func TestMCP_Handshake(t *testing.T) {
-	c := startMCP(t, "test")
-
-	resp := c.send("initialize", map[string]any{
+// initialize performs the MCP handshake.
+func (c *mcpClient) initialize() map[string]any {
+	c.t.Helper()
+	return c.send("initialize", map[string]any{
 		"protocolVersion": "2024-11-05",
 		"capabilities":    map[string]any{},
-		"clientInfo":      map[string]any{"name": "test", "version": "1.0"},
+		"clientInfo":      map[string]any{"name": "integration-test", "version": "1.0"},
 	})
+}
+
+// --- Tests ---
+
+func TestMCP_Handshake(t *testing.T) {
+	c := startMCP(t, "test")
+	resp := c.initialize()
 
 	result, ok := resp["result"].(map[string]any)
 	if !ok {
@@ -133,12 +154,7 @@ func TestMCP_Handshake(t *testing.T) {
 func TestMCP_HandshakeSpeed(t *testing.T) {
 	start := time.Now()
 	c := startMCP(t, "test")
-
-	c.send("initialize", map[string]any{
-		"protocolVersion": "2024-11-05",
-		"capabilities":    map[string]any{},
-		"clientInfo":      map[string]any{"name": "test", "version": "1.0"},
-	})
+	c.initialize()
 	elapsed := time.Since(start)
 
 	// Handshake should complete in under 5 seconds (generous for CI)
@@ -150,12 +166,7 @@ func TestMCP_HandshakeSpeed(t *testing.T) {
 
 func TestMCP_ToolsList(t *testing.T) {
 	c := startMCP(t, "test")
-
-	c.send("initialize", map[string]any{
-		"protocolVersion": "2024-11-05",
-		"capabilities":    map[string]any{},
-		"clientInfo":      map[string]any{"name": "test", "version": "1.0"},
-	})
+	c.initialize()
 
 	resp := c.send("tools/list", map[string]any{})
 
@@ -196,35 +207,12 @@ func TestMCP_ToolsList(t *testing.T) {
 func TestMCP_ListLocations(t *testing.T) {
 	requireProfile(t, "test")
 	c := startMCP(t, "test")
-
-	c.send("initialize", map[string]any{
-		"protocolVersion": "2024-11-05",
-		"capabilities":    map[string]any{},
-		"clientInfo":      map[string]any{"name": "test", "version": "1.0"},
-	})
+	c.initialize()
 
 	resp := c.callTool("list_locations", map[string]any{})
+	assertToolSuccess(t, resp)
 
-	result, ok := resp["result"].(map[string]any)
-	if !ok {
-		t.Fatalf("expected result, got %v", resp)
-	}
-	if isError, _ := result["isError"].(bool); isError {
-		content, _ := result["content"].([]any)
-		t.Fatalf("tool returned error: %v", content)
-	}
-
-	// Parse the text content as JSON
-	content, _ := result["content"].([]any)
-	if len(content) == 0 {
-		t.Fatal("empty content")
-	}
-	textContent, ok := content[0].(map[string]any)
-	if !ok {
-		t.Fatal("expected text content")
-	}
-	text, _ := textContent["text"].(string)
-
+	text := extractToolText(t, resp)
 	var locations []map[string]any
 	if err := json.Unmarshal([]byte(text), &locations); err != nil {
 		t.Fatalf("failed to parse locations JSON: %v", err)
@@ -235,148 +223,47 @@ func TestMCP_ListLocations(t *testing.T) {
 	t.Logf("MCP list_locations returned %d locations", len(locations))
 }
 
+func TestMCP_ListInstanceTypes(t *testing.T) {
+	requireProfile(t, "test")
+	c := startMCP(t, "test")
+	c.initialize()
+
+	resp := c.callTool("list_instance_types", map[string]any{"gpu_only": true})
+	assertToolSuccess(t, resp)
+
+	text := extractToolText(t, resp)
+	var types []map[string]any
+	if err := json.Unmarshal([]byte(text), &types); err != nil {
+		t.Fatalf("failed to parse instance types JSON: %v", err)
+	}
+	if len(types) == 0 {
+		t.Fatal("expected at least one GPU instance type")
+	}
+	t.Logf("MCP list_instance_types (gpu_only) returned %d types", len(types))
+}
+
 func TestMCP_GetBalance(t *testing.T) {
 	requireProfile(t, "test")
 	c := startMCP(t, "test")
-
-	c.send("initialize", map[string]any{
-		"protocolVersion": "2024-11-05",
-		"capabilities":    map[string]any{},
-		"clientInfo":      map[string]any{"name": "test", "version": "1.0"},
-	})
+	c.initialize()
 
 	resp := c.callTool("get_balance", map[string]any{})
-
-	result, ok := resp["result"].(map[string]any)
-	if !ok {
-		t.Fatalf("expected result, got %v", resp)
-	}
-	if isError, _ := result["isError"].(bool); isError {
-		content, _ := result["content"].([]any)
-		t.Fatalf("tool returned error: %v", content)
-	}
-	t.Logf("MCP get_balance OK")
-}
-
-func TestMCP_AuthError_NoCredentials(t *testing.T) {
-	c := startMCP(t, "test-empty")
-
-	c.send("initialize", map[string]any{
-		"protocolVersion": "2024-11-05",
-		"capabilities":    map[string]any{},
-		"clientInfo":      map[string]any{"name": "test", "version": "1.0"},
-	})
-
-	resp := c.callTool("list_locations", map[string]any{})
-
-	result, ok := resp["result"].(map[string]any)
-	if !ok {
-		t.Fatalf("expected result, got %v", resp)
-	}
-
-	// Should return an error
-	isError, _ := result["isError"].(bool)
-	if !isError {
-		t.Fatal("expected isError=true for missing credentials")
-	}
-
-	content, _ := result["content"].([]any)
-	if len(content) > 0 {
-		textContent, _ := content[0].(map[string]any)
-		text, _ := textContent["text"].(string)
-		t.Logf("error message: %s", text)
-	}
-}
-
-func TestMCP_AuthError_InvalidCredentials(t *testing.T) {
-	c := startMCP(t, "test-invalid")
-
-	c.send("initialize", map[string]any{
-		"protocolVersion": "2024-11-05",
-		"capabilities":    map[string]any{},
-		"clientInfo":      map[string]any{"name": "test", "version": "1.0"},
-	})
-
-	resp := c.callTool("list_locations", map[string]any{})
-
-	result, ok := resp["result"].(map[string]any)
-	if !ok {
-		t.Fatalf("expected result, got %v", resp)
-	}
-
-	// Should return an error
-	isError, _ := result["isError"].(bool)
-	if !isError {
-		t.Fatal("expected isError=true for invalid credentials")
-	}
-
-	content, _ := result["content"].([]any)
-	if len(content) > 0 {
-		textContent, _ := content[0].(map[string]any)
-		text, _ := textContent["text"].(string)
-		t.Logf("error message: %s", text)
-		if text == "" {
-			t.Error("expected non-empty error message")
-		}
-	}
-}
-
-func TestMCP_DescribeVM_InvalidID(t *testing.T) {
-	requireProfile(t, "test")
-	c := startMCP(t, "test")
-
-	c.send("initialize", map[string]any{
-		"protocolVersion": "2024-11-05",
-		"capabilities":    map[string]any{},
-		"clientInfo":      map[string]any{"name": "test", "version": "1.0"},
-	})
-
-	resp := c.callTool("describe_vm", map[string]any{"id": "nonexistent-id-xyz"})
-
-	result, ok := resp["result"].(map[string]any)
-	if !ok {
-		t.Fatalf("expected result, got %v", resp)
-	}
-
-	isError, _ := result["isError"].(bool)
-	if !isError {
-		t.Fatal("expected isError=true for invalid instance ID")
-	}
-	t.Log("MCP describe_vm correctly returned error for invalid ID")
+	assertToolSuccess(t, resp)
+	t.Log("MCP get_balance OK")
 }
 
 func TestMCP_EstimateCost(t *testing.T) {
 	requireProfile(t, "test")
 	c := startMCP(t, "test")
-
-	c.send("initialize", map[string]any{
-		"protocolVersion": "2024-11-05",
-		"capabilities":    map[string]any{},
-		"clientInfo":      map[string]any{"name": "test", "version": "1.0"},
-	})
+	c.initialize()
 
 	resp := c.callTool("estimate_cost", map[string]any{
-		"instance_type": "1V100.6V",
+		"instance_type": "1A6000.10V",
 		"os_volume_gb":  100,
 	})
+	assertToolSuccess(t, resp)
 
-	result, ok := resp["result"].(map[string]any)
-	if !ok {
-		t.Fatalf("expected result, got %v", resp)
-	}
-	if isError, _ := result["isError"].(bool); isError {
-		content, _ := result["content"].([]any)
-		t.Fatalf("tool returned error: %v", content)
-	}
-
-	// Parse the estimate from content
-	content, _ := result["content"].([]any)
-	if len(content) == 0 {
-		t.Fatal("empty content")
-	}
-	textContent, _ := content[0].(map[string]any)
-	text, _ := textContent["text"].(string)
-
+	text := extractToolText(t, resp)
 	var estimate map[string]any
 	if err := json.Unmarshal([]byte(text), &estimate); err != nil {
 		t.Fatalf("failed to parse estimate: %v", err)
@@ -397,33 +284,113 @@ func TestMCP_EstimateCost(t *testing.T) {
 func TestMCP_EstimateCost_MissingRequired(t *testing.T) {
 	requireProfile(t, "test")
 	c := startMCP(t, "test")
+	c.initialize()
 
-	c.send("initialize", map[string]any{
-		"protocolVersion": "2024-11-05",
-		"capabilities":    map[string]any{},
-		"clientInfo":      map[string]any{"name": "test", "version": "1.0"},
-	})
-
-	// Call without required instance_type
 	resp := c.callTool("estimate_cost", map[string]any{})
+	assertToolError(t, resp)
+}
 
+func TestMCP_ListVMs(t *testing.T) {
+	requireProfile(t, "test")
+	c := startMCP(t, "test")
+	c.initialize()
+
+	resp := c.callTool("list_vms", map[string]any{})
+	assertToolSuccess(t, resp)
+	t.Log("MCP list_vms OK")
+}
+
+func TestMCP_DescribeVM_InvalidID(t *testing.T) {
+	requireProfile(t, "test")
+	c := startMCP(t, "test")
+	c.initialize()
+
+	resp := c.callTool("describe_vm", map[string]any{"id": "nonexistent-id-xyz"})
+	assertToolError(t, resp)
+	t.Log("MCP describe_vm correctly returned error for invalid ID")
+}
+
+func TestMCP_ListSSHKeys(t *testing.T) {
+	requireProfile(t, "test")
+	c := startMCP(t, "test")
+	c.initialize()
+
+	resp := c.callTool("list_ssh_keys", map[string]any{})
+	assertToolSuccess(t, resp)
+	t.Log("MCP list_ssh_keys OK")
+}
+
+func TestMCP_ListVolumes(t *testing.T) {
+	requireProfile(t, "test")
+	c := startMCP(t, "test")
+	c.initialize()
+
+	resp := c.callTool("list_volumes", map[string]any{})
+	assertToolSuccess(t, resp)
+	t.Log("MCP list_volumes OK")
+}
+
+func TestMCP_AuthError_NoCredentials(t *testing.T) {
+	c := startMCP(t, "test-empty")
+	c.initialize()
+
+	resp := c.callTool("list_locations", map[string]any{})
+	assertToolError(t, resp)
+
+	text := extractToolText(t, resp)
+	t.Logf("error for no credentials: %s", text)
+}
+
+func TestMCP_AuthError_InvalidCredentials(t *testing.T) {
+	c := startMCP(t, "test-invalid")
+	c.initialize()
+
+	resp := c.callTool("list_locations", map[string]any{})
+	assertToolError(t, resp)
+
+	text := extractToolText(t, resp)
+	if text == "" {
+		t.Error("expected non-empty error message")
+	}
+	t.Logf("error for invalid credentials: %s", text)
+}
+
+// --- Helpers ---
+
+// assertToolSuccess verifies a tool call returned successfully.
+func assertToolSuccess(t *testing.T, resp map[string]any) {
+	t.Helper()
 	result, ok := resp["result"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected result, got %v", resp)
 	}
-
-	isError, _ := result["isError"].(bool)
-	if !isError {
-		t.Fatal("expected error when instance_type is missing")
+	if isError, _ := result["isError"].(bool); isError {
+		content, _ := result["content"].([]any)
+		t.Fatalf("tool returned error: %v", content)
 	}
+}
 
+// assertToolError verifies a tool call returned an error.
+func assertToolError(t *testing.T, resp map[string]any) {
+	t.Helper()
+	result, ok := resp["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected result, got %v", resp)
+	}
+	if isError, _ := result["isError"].(bool); !isError {
+		t.Fatal("expected isError=true")
+	}
+}
+
+// extractToolText extracts the text content from a tool result.
+func extractToolText(t *testing.T, resp map[string]any) string {
+	t.Helper()
+	result, _ := resp["result"].(map[string]any)
 	content, _ := result["content"].([]any)
-	if len(content) > 0 {
-		textContent, _ := content[0].(map[string]any)
-		text, _ := textContent["text"].(string)
-		fmt.Println(text)
-		if text == "" {
-			t.Error("expected error message about missing instance_type")
-		}
+	if len(content) == 0 {
+		return ""
 	}
+	textContent, _ := content[0].(map[string]any)
+	text, _ := textContent["text"].(string)
+	return text
 }
