@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"os"
 
@@ -12,11 +11,13 @@ import (
 func main() {
 	root := cmd.NewRootCommand(cmdutil.NewStdIOStreams())
 	if err := root.Execute(); err != nil {
-		var ae *cmdutil.AgentError
-		if errors.As(err, &ae) {
+		// In agent mode, always emit structured JSON errors.
+		ae := cmdutil.ClassifyError(err)
+		if ae != nil {
 			cmdutil.WriteAgentError(os.Stderr, ae)
 			os.Exit(ae.ExitCode)
 		}
+		// Normal mode: plain text error.
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
