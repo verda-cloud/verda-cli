@@ -39,6 +39,12 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			// Skip heavy credential resolution for MCP serve — it defers
+			// auth to the first tool call so the handshake is instant.
+			if cmd.Name() == "serve" && cmd.Parent() != nil && cmd.Parent().Name() == "mcp" {
+				log.Init(opts.Log)
+				return nil
+			}
 			opts.Complete()
 			if err := opts.Validate(); err != nil {
 				return err
