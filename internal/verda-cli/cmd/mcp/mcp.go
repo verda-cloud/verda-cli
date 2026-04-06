@@ -4,7 +4,6 @@ import (
 	"github.com/spf13/cobra"
 
 	cmdutil "github/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
-	verdamcp "github/verda-cloud/verda-cli/internal/verda-cli/mcp"
 )
 
 // NewCmdMCP creates the parent `verda mcp` command.
@@ -48,7 +47,7 @@ func NewCmdServe(f cmdutil.Factory, _ cmdutil.IOStreams) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			server := verdamcp.NewServer(client)
+			server := NewServer(client)
 			return server.ServeStdio(cmd.Context())
 		},
 	}
