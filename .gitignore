@@ -3,6 +3,9 @@ bin/
 _output/
 verda
 
+# Git worktrees
+.worktrees/
+
 # Local smoke-test output (see test/run.sh)
 tmp/
 
