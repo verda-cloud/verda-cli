@@ -6,6 +6,7 @@ verda
 # Git worktrees
 .worktrees/
 
+
 # Local smoke-test output (see test/run.sh)
 tmp/
 
@@ -243,6 +244,8 @@ cscope.po.out
 
 # Other names that would make sense
 *tests
+!tests/
+!tests/**
 *testsdir
 *testsfile
 *testsfiles
