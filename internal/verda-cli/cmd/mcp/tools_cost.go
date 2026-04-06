@@ -2,9 +2,11 @@ package mcp
 
 import (
 	"context"
+	"fmt"
 	"math"
 
 	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
 )
 
 func (s *Server) registerCostTools() {
@@ -63,7 +65,6 @@ func (s *Server) handleEstimateCost(ctx context.Context, req mcp.CallToolRequest
 	}
 
 	spot := optionalBool(args(req), "spot")
-	location := optionalString(args(req), "location")
 	osVolumeGB := optionalInt(args(req), "os_volume_gb")
 	storageGB := optionalInt(args(req), "storage_gb")
 	storageType := optionalString(args(req), "storage_type")
@@ -71,10 +72,20 @@ func (s *Server) handleEstimateCost(ctx context.Context, req mcp.CallToolRequest
 		storageType = "NVMe"
 	}
 
-	// Get instance type pricing.
-	info, err := client.InstanceTypes.GetByInstanceType(ctx, instanceType, spot, location, "")
+	// Get instance type pricing by fetching all types and filtering.
+	allTypes, err := client.InstanceTypes.Get(ctx, "")
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
+	}
+	var info *verda.InstanceTypeInfo
+	for i := range allTypes {
+		if allTypes[i].InstanceType == instanceType {
+			info = &allTypes[i]
+			break
+		}
+	}
+	if info == nil {
+		return mcp.NewToolResultError(fmt.Sprintf("instance type %q not found", instanceType)), nil
 	}
 
 	instanceHourly := info.PricePerHour.Float64()
