@@ -134,6 +134,11 @@ func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 		return err
 	}
 
+	// In agent mode, report missing required flags as a structured error.
+	if missing := missingCreateFlags(opts); f.AgentMode() && len(missing) > 0 {
+		return cmdutil.NewMissingFlagsError(missing)
+	}
+
 	// If any required field is missing, run the interactive wizard.
 	if opts.InstanceType == "" || opts.Image == "" || opts.Hostname == "" {
 		if err := runWizard(cmd.Context(), f, ioStreams, opts); err != nil {
@@ -189,6 +194,23 @@ func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 		_, _ = fmt.Fprint(ioStreams.Out, renderInstanceCard(inst, volumes...))
 	}
 	return nil
+}
+
+func missingCreateFlags(opts *createOptions) []string {
+	var missing []string
+	if opts.Kind == "" {
+		missing = append(missing, "--kind")
+	}
+	if opts.InstanceType == "" {
+		missing = append(missing, "--instance-type")
+	}
+	if opts.Image == "" {
+		missing = append(missing, "--os")
+	}
+	if opts.Hostname == "" {
+		missing = append(missing, "--hostname")
+	}
+	return missing
 }
 
 func runWizard(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *createOptions) error {

@@ -13,6 +13,7 @@ import (
 	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/images"
 	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/instancetypes"
 	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/locations"
+	mcpcmd "github/verda-cloud/verda-cli/internal/verda-cli/cmd/mcp"
 	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/settings"
 	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/ssh"
 	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/sshkey"
@@ -95,6 +96,12 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) *cobra.Command {
 			Message: "Info Commands:",
 			Commands: []*cobra.Command{
 				cost.NewCmdCost(f, ioStreams),
+			},
+		},
+		{
+			Message: "AI Agent Commands:",
+			Commands: []*cobra.Command{
+				mcpcmd.NewCmdMCP(f, ioStreams),
 			},
 		},
 		{

@@ -1,0 +1,125 @@
+package mcp
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
+)
+
+func (s *Server) registerSSHTools() {
+	s.mcpServer.AddTool(
+		mcp.NewTool("list_ssh_keys",
+			mcp.WithDescription("List all SSH keys in the Verda Cloud account"),
+		),
+		s.handleListSSHKeys,
+	)
+
+	s.mcpServer.AddTool(
+		mcp.NewTool("add_ssh_key",
+			mcp.WithDescription("Add a new SSH public key to the Verda Cloud account"),
+			mcp.WithString("name", mcp.Required(), mcp.Description("Name for the SSH key")),
+			mcp.WithString("public_key", mcp.Required(), mcp.Description("SSH public key content (e.g. ssh-ed25519 AAAA...)")),
+		),
+		s.handleAddSSHKey,
+	)
+
+	s.mcpServer.AddTool(
+		mcp.NewTool("get_ssh_command",
+			mcp.WithDescription("Get the SSH command to connect to a VM instance"),
+			mcp.WithString("id_or_hostname", mcp.Required(), mcp.Description("Instance ID or hostname")),
+			mcp.WithString("user", mcp.Description("SSH user (default root)")),
+			mcp.WithString("key_path", mcp.Description("Path to SSH identity file")),
+		),
+		s.handleGetSSHCommand,
+	)
+}
+
+//nolint:gocritic // hugeParam: handler signature defined by mcp-go.
+func (s *Server) handleListSSHKeys(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	keys, err := s.client.SSHKeys.GetAllSSHKeys(ctx)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	return jsonResult(keys)
+}
+
+//nolint:gocritic // hugeParam: handler signature defined by mcp-go.
+func (s *Server) handleAddSSHKey(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	name, err := requiredString(args(req), "name")
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	publicKey, err := requiredString(args(req), "public_key")
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	key, err := s.client.SSHKeys.AddSSHKey(ctx, &verda.CreateSSHKeyRequest{
+		Name:      name,
+		PublicKey: publicKey,
+	})
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	return jsonResult(key)
+}
+
+//nolint:gocritic // hugeParam: handler signature defined by mcp-go.
+func (s *Server) handleGetSSHCommand(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	idOrHostname, err := requiredString(args(req), "id_or_hostname")
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	user := optionalString(args(req), "user")
+	if user == "" {
+		user = "root"
+	}
+	keyPath := optionalString(args(req), "key_path")
+
+	// Try to resolve the instance to get the IP.
+	inst, err := s.resolveInstance(ctx, idOrHostname)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	if inst.IP == nil || *inst.IP == "" {
+		return mcp.NewToolResultError(fmt.Sprintf("instance %q has no IP address (status: %s)", inst.Hostname, inst.Status)), nil
+	}
+
+	cmd := fmt.Sprintf("ssh %s@%s", user, *inst.IP)
+	if keyPath != "" {
+		cmd = fmt.Sprintf("ssh -i %s %s@%s", keyPath, user, *inst.IP)
+	}
+
+	result := map[string]string{
+		"command":  cmd,
+		"host":     *inst.IP,
+		"user":     user,
+		"hostname": inst.Hostname,
+		"status":   inst.Status,
+	}
+	return jsonResult(result)
+}
+
+// resolveInstance finds an instance by ID or hostname.
+func (s *Server) resolveInstance(ctx context.Context, idOrHostname string) (*verda.Instance, error) {
+	// Try by ID first.
+	inst, err := s.client.Instances.GetByID(ctx, idOrHostname)
+	if err == nil {
+		return inst, nil
+	}
+
+	// Fall back to searching by hostname.
+	instances, err := s.client.Instances.Get(ctx, "")
+	if err != nil {
+		return nil, err
+	}
+	for i := range instances {
+		if instances[i].Hostname == idOrHostname {
+			return &instances[i], nil
+		}
+	}
+	return nil, fmt.Errorf("instance %q not found", idOrHostname)
+}

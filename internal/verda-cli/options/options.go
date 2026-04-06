@@ -27,6 +27,7 @@ type Options struct {
 	Timeout time.Duration
 	Debug   bool
 	Output  string
+	Agent   bool
 
 	Log         *log.Options
 	AuthOptions *AuthOptions
@@ -64,6 +65,7 @@ func (o *Options) AddFlags(fs *pflag.FlagSet) {
 	fs.DurationVar(&o.Timeout, "timeout", o.Timeout, "Default HTTP request timeout")
 	fs.BoolVar(&o.Debug, "debug", false, "Enable debug output")
 	fs.StringVarP(&o.Output, "output", "o", o.Output, "Output format: table, json, yaml")
+	fs.BoolVar(&o.Agent, "agent", false, "Agent mode: JSON output, no interactive prompts, structured errors")
 	o.AuthOptions.AddFlags(fs)
 	o.Log.AddFlags(fs)
 
@@ -110,6 +112,15 @@ func (o *Options) Complete() {
 	}
 	if o.Output == "" {
 		o.Output = "table"
+	}
+	if !o.Agent {
+		o.Agent = viper.GetBool("agent")
+	}
+	if !o.Agent {
+		o.Agent = os.Getenv("VERDA_AGENT") == "1" || os.Getenv("VERDA_AGENT") == "true"
+	}
+	if o.Agent {
+		o.Output = "json"
 	}
 	a := o.AuthOptions
 	if a.ClientID == "" {
