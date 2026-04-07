@@ -12,22 +12,46 @@ import (
 )
 
 // NewCmdUse creates the auth use command.
-func NewCmdUse(_ cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
+func NewCmdUse(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 	var credentialsFile string
 
 	cmd := &cobra.Command{
-		Use:   "use PROFILE",
+		Use:   "use [PROFILE]",
 		Short: "Switch the active auth profile",
 		Long: cmdutil.LongDesc(`
 			Set the default auth profile in ~/.verda/config.yaml.
+
+			If no profile name is given, an interactive list of available
+			profiles is shown.
 		`),
-		Args: cobra.ExactArgs(1),
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			profile := args[0]
 			path, err := resolveCredentialsFile(credentialsFile)
 			if err != nil {
 				return err
 			}
+
+			var profile string
+			if len(args) > 0 {
+				profile = args[0]
+			} else {
+				// Interactive: list profiles and let user pick.
+				profiles, err := options.ListProfiles(path)
+				if err != nil {
+					return err
+				}
+				if len(profiles) == 0 {
+					return fmt.Errorf("no profiles found in %s — run 'verda auth login' first", path)
+				}
+
+				idx, err := f.Prompter().Select(cmd.Context(), "Select profile", profiles)
+				if err != nil {
+					return nil //nolint:nilerr // User pressed Esc/Ctrl+C.
+				}
+				profile = profiles[idx]
+			}
+
+			// Validate that the profile exists in the credentials file.
 			if _, err := options.LoadSharedCredentialsForProfile(path, profile); err != nil {
 				return err
 			}

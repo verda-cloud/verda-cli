@@ -135,6 +135,13 @@ func NewNotFoundError(resource, id string) *AgentError {
 	}
 }
 
+// IsAgentError returns true if the error is (or wraps) an *AgentError.
+// Use this to decide whether to emit structured JSON output.
+func IsAgentError(err error) bool {
+	var ae *AgentError
+	return errors.As(err, &ae)
+}
+
 // ClassifyError inspects err and returns a structured AgentError if the
 // error can be classified. Returns nil if the error is nil or if agent
 // mode is not active (detected by checking for an existing AgentError).

@@ -123,30 +123,8 @@ func (o *Options) Complete() {
 		o.Output = "json"
 	}
 	a := o.AuthOptions
-	if a.ClientID == "" {
-		a.ClientID = viper.GetString("auth.client-id")
-	}
-	if a.ClientID == "" {
-		a.ClientID = os.Getenv("VERDA_CLIENT_ID")
-	}
-	if a.ClientSecret == "" {
-		a.ClientSecret = viper.GetString("auth.client-secret")
-	}
-	if a.ClientSecret == "" {
-		a.ClientSecret = os.Getenv("VERDA_CLIENT_SECRET")
-	}
-	if a.BearerToken == "" {
-		a.BearerToken = viper.GetString("auth.token")
-	}
-	if a.Profile == "" {
-		a.Profile = viper.GetString("auth.profile")
-	}
-	if a.Profile == "" {
-		a.Profile = os.Getenv("VERDA_PROFILE")
-	}
-	if a.Profile == "" {
-		a.Profile = defaultCredentialsProfile
-	}
+
+	// --- 1. Resolve credentials file first (needed by profile resolution). ---
 	if a.CredentialsFile == "" {
 		a.CredentialsFile = viper.GetString("auth.credentials-file")
 	}
@@ -159,24 +137,66 @@ func (o *Options) Complete() {
 		}
 	}
 
+	// --- 2. Resolve profile. Track whether it was explicitly set. ---
+	// Priority: flag > env var > config file > auto-detect.
+	// Only flag and env var count as "explicit" (runtime override that
+	// should force-load credentials from that profile).
+	explicitProfile := a.Profile != "" // set via --auth.profile flag
+	if a.Profile == "" {
+		if p := os.Getenv("VERDA_PROFILE"); p != "" {
+			a.Profile = p
+			explicitProfile = true
+		}
+	}
+	if a.Profile == "" {
+		a.Profile = viper.GetString("auth.profile") // config file (saved default)
+	}
+	if a.Profile == "" {
+		a.Profile = resolveDefaultProfile(a.CredentialsFile)
+	}
+
+	// --- 3. Resolve inline credentials (flags / env). ---
+	// Track which fields were set explicitly so they win over profile values.
+	flagClientID := a.ClientID != ""
+	if a.ClientID == "" {
+		a.ClientID = viper.GetString("auth.client-id")
+	}
+	if a.ClientID == "" {
+		a.ClientID = os.Getenv("VERDA_CLIENT_ID")
+	}
+	flagClientSecret := a.ClientSecret != ""
+	if a.ClientSecret == "" {
+		a.ClientSecret = viper.GetString("auth.client-secret")
+	}
+	if a.ClientSecret == "" {
+		a.ClientSecret = os.Getenv("VERDA_CLIENT_SECRET")
+	}
+	flagToken := a.BearerToken != ""
+	if a.BearerToken == "" {
+		a.BearerToken = viper.GetString("auth.token")
+	}
+
+	// --- 4. Load from credentials file. ---
+	// When the profile was explicitly chosen, its credentials override any
+	// auto-resolved values — but explicit flags/env always win.
 	missingRequired := a.ClientID == "" || a.ClientSecret == ""
-	if missingRequired || a.BearerToken == "" {
+	if explicitProfile || missingRequired || a.BearerToken == "" {
 		shared, err := loadSharedCredentials(a.CredentialsFile, a.Profile)
 		switch {
 		case err == nil:
-			if o.Server == defaultBaseURL && shared.BaseURL != "" {
+			if shared.BaseURL != "" && (explicitProfile || o.Server == defaultBaseURL) {
 				o.Server = shared.BaseURL
 			}
-			if a.ClientID == "" {
+			if shared.ClientID != "" && (explicitProfile && !flagClientID || a.ClientID == "") {
 				a.ClientID = shared.ClientID
 			}
-			if a.ClientSecret == "" {
+			if shared.ClientSecret != "" && (explicitProfile && !flagClientSecret || a.ClientSecret == "") {
 				a.ClientSecret = shared.ClientSecret
 			}
-			if a.BearerToken == "" {
+			if shared.BearerToken != "" && (explicitProfile && !flagToken || a.BearerToken == "") {
 				a.BearerToken = shared.BearerToken
 			}
-		case missingRequired && !os.IsNotExist(err):
+		case (explicitProfile || missingRequired) && !os.IsNotExist(err):
 			a.resolveErr = err
 		}
 	}
@@ -199,4 +219,30 @@ func (o *Options) Validate() error {
 		return fmt.Errorf("--output must be one of: table, json, yaml (got %q)", o.Output)
 	}
 	return nil
+}
+
+// resolveDefaultProfile picks the best profile when none is explicitly set.
+// It prefers "default" if it exists, otherwise uses the sole profile if there
+// is exactly one, and falls back to "default" as a last resort.
+func resolveDefaultProfile(credentialsFile string) string {
+	profiles, err := ListProfiles(credentialsFile)
+	if err != nil || len(profiles) == 0 {
+		return defaultCredentialsProfile
+	}
+
+	// If "default" profile exists, use it.
+	for _, p := range profiles {
+		if p == defaultCredentialsProfile {
+			return defaultCredentialsProfile
+		}
+	}
+
+	// If there's exactly one profile, use it automatically.
+	if len(profiles) == 1 {
+		return profiles[0]
+	}
+
+	// Multiple profiles, none named "default" — fall back and let the
+	// validation error guide the user to 'verda auth use'.
+	return defaultCredentialsProfile
 }
