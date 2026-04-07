@@ -38,7 +38,7 @@ func (s *Server) registerVMTools() {
 			mcp.WithString("location", mcp.Description("Location code. If omitted, automatically picks a location that has stock for the requested instance type.")),
 			mcp.WithString("description", mcp.Description("Human-readable description")),
 			mcp.WithNumber("os_volume_size_gb", mcp.Required(), mcp.Description("OS volume size in GiB (e.g. 50, 100, 200)")),
-			mcp.WithArray("ssh_key_ids", mcp.Required(), mcp.Description("SSH key IDs or names to inject. Names are resolved automatically (e.g. 'meng'). Use list_ssh_keys to find available keys and ask the user which one to use.")),
+			mcp.WithArray("ssh_key_ids", mcp.Description("SSH key IDs or names. Names are resolved automatically (e.g. 'meng'). If omitted, all account SSH keys are attached.")),
 			mcp.WithString("startup_script_id", mcp.Description("Startup script ID")),
 			mcp.WithBoolean("spot", mcp.Description("Request a spot instance")),
 			mcp.WithNumber("storage_size_gb", mcp.Description("Additional storage size in GiB")),
@@ -200,7 +200,7 @@ func (s *Server) handleDescribeVM(ctx context.Context, req mcp.CallToolRequest) 
 	return jsonResult(inst)
 }
 
-//nolint:gocritic // hugeParam: handler signature defined by mcp-go.
+//nolint:gocritic,gocyclo // hugeParam + complexity from auto-resolving location/SSH keys.
 func (s *Server) handleCreateVM(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	client, err := s.verdaClient()
 	if err != nil {
@@ -241,7 +241,13 @@ func (s *Server) handleCreateVM(ctx context.Context, req mcp.CallToolRequest) (*
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 	if len(sshKeyIDs) == 0 {
-		return mcp.NewToolResultError("ssh_key_ids is required. Use list_ssh_keys to find available keys and ask the user which one to use."), nil
+		// Attach all account SSH keys as default.
+		keys, kerr := client.SSHKeys.GetAllSSHKeys(ctx)
+		if kerr == nil {
+			for i := range keys {
+				sshKeyIDs = append(sshKeyIDs, keys[i].ID)
+			}
+		}
 	}
 
 	createReq := verda.CreateInstanceRequest{
