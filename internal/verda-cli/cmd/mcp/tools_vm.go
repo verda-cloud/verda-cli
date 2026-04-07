@@ -240,13 +240,17 @@ func (s *Server) handleCreateVM(ctx context.Context, req mcp.CallToolRequest) (*
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
+	var sshKeysNote string
 	if len(sshKeyIDs) == 0 {
 		// Attach all account SSH keys as default.
 		keys, kerr := client.SSHKeys.GetAllSSHKeys(ctx)
-		if kerr == nil {
+		if kerr == nil && len(keys) > 0 {
+			names := make([]string, 0, len(keys))
 			for i := range keys {
 				sshKeyIDs = append(sshKeyIDs, keys[i].ID)
+				names = append(names, keys[i].Name)
 			}
+			sshKeysNote = fmt.Sprintf("No SSH key specified — attached all %d account keys: %s", len(keys), strings.Join(names, ", "))
 		}
 	}
 
@@ -315,7 +319,11 @@ func (s *Server) handleCreateVM(ctx context.Context, req mcp.CallToolRequest) (*
 		}
 	}
 
-	return jsonResult(inst)
+	result := map[string]any{"instance": inst}
+	if sshKeysNote != "" {
+		result["note"] = sshKeysNote
+	}
+	return jsonResult(result)
 }
 
 //nolint:gocritic // hugeParam: handler signature defined by mcp-go.
