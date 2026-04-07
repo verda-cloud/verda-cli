@@ -14,9 +14,9 @@ import (
 func NewCmdMCP(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "mcp",
-		Short: "MCP server for AI agent integration",
+		Short: "MCP server for AI agent integration (beta)",
 		Long: cmdutil.LongDesc(`
-			Model Context Protocol (MCP) server that exposes Verda Cloud
+			[Beta] Model Context Protocol (MCP) server that exposes Verda Cloud
 			operations as structured tools for AI agents.
 
 			Requires valid credentials — run "verda auth login" first.

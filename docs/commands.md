@@ -154,7 +154,7 @@ verda vm action --id abc-123 --wait
 verda volume create --name data --size 500 --wait
 ```
 
-## Agent Mode
+## Agent Mode (Beta)
 
 The `--agent` flag optimizes CLI behavior for AI agents and scripts:
 

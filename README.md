@@ -90,9 +90,9 @@ verda vm create \
 verda ssh gpu-runner
 ```
 
-## AI Agent Integration (MCP)
+## AI Agent Integration (MCP) — Beta
 
-The Verda CLI includes a built-in [MCP](https://modelcontextprotocol.io/) server that lets AI agents (Claude Code, Cursor, etc.) manage your infrastructure through natural language.
+The Verda CLI includes a built-in [MCP](https://modelcontextprotocol.io/) server that lets AI agents (Claude Code, Cursor, etc.) manage your infrastructure through natural language. This feature is in **beta** — feedback welcome.
 
 ### Setup
 
