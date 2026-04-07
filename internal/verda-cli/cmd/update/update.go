@@ -158,14 +158,22 @@ func runUpdate(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStrea
 
 	_, _ = fmt.Fprintf(ioStreams.Out, "Updated to %s\n", target)
 
-	// Warn if old binary exists in a system path.
+	// Migrate: if the currently running binary is outside ~/.verda/bin/,
+	// copy the new binary there and advise the user to clean up.
 	oldExe, _ := resolveExecutable()
 	if oldExe != "" && oldExe != dst {
+		// Also replace the old binary so the user gets the new version
+		// regardless of which path their shell resolves first.
+		if err := replaceBinary(oldExe, binary); err != nil {
+			_, _ = fmt.Fprintf(ioStreams.ErrOut,
+				"\nWarning: could not update old binary at %s: %v\n", oldExe, err)
+		}
+
 		_, _ = fmt.Fprintf(ioStreams.ErrOut,
-			"\nNote: old binary still exists at %s\n"+
-				"  Remove it to avoid conflicts: sudo rm %s\n"+
-				"  Ensure %s is in your PATH.\n",
-			oldExe, oldExe, binDir)
+			"\nNote: verda is now installed at %s\n"+
+				"  Add it to your PATH:  export PATH=\"%s:$PATH\"\n"+
+				"  Then remove the old binary:  sudo rm %s\n",
+			dst, binDir, oldExe)
 	}
 
 	return nil
