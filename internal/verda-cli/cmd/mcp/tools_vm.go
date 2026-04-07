@@ -35,10 +35,10 @@ func (s *Server) registerVMTools() {
 			mcp.WithString("instance_type", mcp.Required(), mcp.Description("Instance type, e.g. 1V100.6V or CPU.4V.16G")),
 			mcp.WithString("image", mcp.Required(), mcp.Description("OS image slug, e.g. ubuntu-24.04-cuda-12.8-open-docker")),
 			mcp.WithString("hostname", mcp.Required(), mcp.Description("Hostname for the new VM")),
-			mcp.WithString("location", mcp.Description("Location code (default FIN-01)")),
+			mcp.WithString("location", mcp.Description("Location code. If omitted, automatically picks a location that has stock for the requested instance type.")),
 			mcp.WithString("description", mcp.Description("Human-readable description")),
 			mcp.WithNumber("os_volume_size_gb", mcp.Description("OS volume size in GiB")),
-			mcp.WithArray("ssh_key_ids", mcp.Description("SSH key IDs or names to inject. Names are resolved to IDs automatically (e.g. 'meng' or 'meng@datacrunch.io').")),
+			mcp.WithArray("ssh_key_ids", mcp.Description("SSH key IDs or names. Names are resolved automatically (e.g. 'meng'). If omitted, uses the most recent SSH key in the account.")),
 			mcp.WithString("startup_script_id", mcp.Description("Startup script ID")),
 			mcp.WithBoolean("spot", mcp.Description("Request a spot instance")),
 			mcp.WithNumber("storage_size_gb", mcp.Description("Additional storage size in GiB")),
@@ -200,7 +200,7 @@ func (s *Server) handleDescribeVM(ctx context.Context, req mcp.CallToolRequest) 
 	return jsonResult(inst)
 }
 
-//nolint:gocritic // hugeParam: handler signature defined by mcp-go.
+//nolint:gocritic,gocyclo // hugeParam: handler signature defined by mcp-go; complexity from auto-resolving location/SSH keys.
 func (s *Server) handleCreateVM(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	client, err := s.verdaClient()
 	if err != nil {
@@ -222,18 +222,29 @@ func (s *Server) handleCreateVM(ctx context.Context, req mcp.CallToolRequest) (*
 
 	location := optionalString(args(req), "location")
 	if location == "" {
-		location = verda.LocationFIN01
+		// Auto-pick a location that has stock for this instance type.
+		loc, err := s.findAvailableLocation(ctx, client, instanceType, optionalBool(args(req), "spot"))
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		location = loc
 	}
 	description := optionalString(args(req), "description")
 	if description == "" {
 		description = hostname
 	}
 
-	// Resolve SSH key names to IDs.
+	// Resolve SSH key names to IDs, or use the most recent key as default.
 	sshKeyInputs := optionalStringSlice(args(req), "ssh_key_ids")
 	sshKeyIDs, err := s.resolveSSHKeyIDs(ctx, client, sshKeyInputs)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
+	}
+	if len(sshKeyIDs) == 0 {
+		defaultKey, err := s.defaultSSHKeyID(ctx, client)
+		if err == nil && defaultKey != "" {
+			sshKeyIDs = []string{defaultKey}
+		}
 	}
 
 	createReq := verda.CreateInstanceRequest{
@@ -345,6 +356,22 @@ func (s *Server) handleVMAction(ctx context.Context, req mcp.CallToolRequest) (*
 		"status": "completed",
 	}
 	return jsonResult(result)
+}
+
+// findAvailableLocation finds a location that has stock for the given instance type.
+func (s *Server) findAvailableLocation(ctx context.Context, client *verda.Client, instanceType string, spot bool) (string, error) {
+	avail, err := client.InstanceAvailability.GetAllAvailabilities(ctx, spot, "")
+	if err != nil {
+		return "", fmt.Errorf("checking availability: %w", err)
+	}
+	for _, la := range avail {
+		for _, t := range la.Availabilities {
+			if strings.EqualFold(t, instanceType) {
+				return la.LocationCode, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("instance type %q is not available in any location", instanceType)
 }
 
 // pollInstance polls until the instance reaches the expected status or timeout.
