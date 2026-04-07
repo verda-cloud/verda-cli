@@ -241,9 +241,21 @@ func (s *Server) handleCreateVM(ctx context.Context, req mcp.CallToolRequest) (*
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 	if len(sshKeyIDs) == 0 {
-		defaultKey, err := s.defaultSSHKeyID(ctx, client)
-		if err == nil && defaultKey != "" {
-			sshKeyIDs = []string{defaultKey}
+		// Return available keys so the agent can ask the user which one to use.
+		keys, kerr := client.SSHKeys.GetAllSSHKeys(ctx)
+		if kerr == nil && len(keys) > 0 {
+			keyList := make([]map[string]string, 0, len(keys))
+			for i := range keys {
+				keyList = append(keyList, map[string]string{
+					"id":   keys[i].ID,
+					"name": keys[i].Name,
+				})
+			}
+			return jsonResult(map[string]any{
+				"error":          "ssh_key_required",
+				"message":        "No SSH key specified. Please choose one from the available keys.",
+				"available_keys": keyList,
+			})
 		}
 	}
 

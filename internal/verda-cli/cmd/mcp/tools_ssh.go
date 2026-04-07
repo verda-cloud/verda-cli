@@ -199,17 +199,3 @@ func (s *Server) resolveSSHKeyIDs(ctx context.Context, client *verda.Client, inp
 	}
 	return resolved, nil
 }
-
-// defaultSSHKeyID returns the most recently created SSH key ID.
-// Returns empty string if no keys exist.
-func (s *Server) defaultSSHKeyID(ctx context.Context, client *verda.Client) (string, error) {
-	keys, err := client.SSHKeys.GetAllSSHKeys(ctx)
-	if err != nil {
-		return "", err
-	}
-	if len(keys) == 0 {
-		return "", nil
-	}
-	// Keys are returned in order; pick the last one (most recent).
-	return keys[len(keys)-1].ID, nil
-}
