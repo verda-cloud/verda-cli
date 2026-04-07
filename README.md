@@ -23,14 +23,14 @@ VERDA_INSTALL_DIR=~/.local/bin curl -sSL https://raw.githubusercontent.com/verda
 ### Homebrew (macOS / Linux)
 
 ```bash
-brew install verda-cloud/tap/verda
+brew install verda-cloud/tap/verda-cli
 ```
 
 ### Scoop (Windows)
 
 ```powershell
 scoop bucket add verda https://github.com/verda-cloud/homebrew-tap
-scoop install verda
+scoop install verda-cli
 ```
 
 ### Linux packages (deb / rpm / apk)
