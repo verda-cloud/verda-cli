@@ -37,6 +37,8 @@ type Factory interface {
 	Debug() bool
 	// OutputFormat returns the configured output format (table, json, yaml).
 	OutputFormat() string
+	// AgentMode returns true if --agent mode is enabled.
+	AgentMode() bool
 }
 
 type factoryImpl struct {
@@ -67,7 +69,7 @@ func (t *userAgentTransport) RoundTrip(req *http.Request) (*http.Response, error
 
 // NewFactory creates a Factory from the given Options.
 func NewFactory(opts *clioptions.Options) Factory {
-	return &factoryImpl{
+	f := &factoryImpl{
 		opts: opts,
 		client: &http.Client{
 			Timeout:   opts.Timeout,
@@ -76,6 +78,11 @@ func NewFactory(opts *clioptions.Options) Factory {
 		prompter: tui.Default(),
 		status:   tui.DefaultStatus(),
 	}
+	if opts.Agent {
+		f.prompter = &agentPrompter{}
+		f.status = nil
+	}
+	return f
 }
 
 func (f *factoryImpl) ServerAddr() string           { return f.opts.Server }
@@ -90,6 +97,7 @@ func (f *factoryImpl) Status() tui.Status {
 }
 func (f *factoryImpl) Debug() bool          { return f.opts.Debug }
 func (f *factoryImpl) OutputFormat() string { return f.opts.Output }
+func (f *factoryImpl) AgentMode() bool      { return f.opts.Agent }
 
 // VerdaClient creates or reuses the shared Verda SDK client.
 func (f *factoryImpl) VerdaClient() (*verda.Client, error) {

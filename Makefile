@@ -1,6 +1,6 @@
 OUTPUT_DIR ?= bin
 
-.PHONY: all build clean lint lint.fix test fmt changelog hooks.install pre-commit help
+.PHONY: all build clean lint lint.fix test test.integration fmt changelog hooks.install pre-commit help
 
 ## Build -------------------------------------------------------------------
 
@@ -24,6 +24,10 @@ lint.fix: ## Run golangci-lint with auto-fix
 
 test: ## Run all tests
 	@go test -count=1 ./...
+
+test.integration: build ## Run integration tests (requires staging credentials in [test] profile)
+	@cp $(OUTPUT_DIR)/verda /usr/local/bin/verda-test
+	@VERDA_BIN=$(CURDIR)/$(OUTPUT_DIR)/verda go test -tags=integration -v -count=1 -timeout=5m ./tests/integration/
 
 fmt: ## Format code with gofmt and goimports
 	@gofmt -w .

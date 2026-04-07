@@ -13,6 +13,7 @@ import (
 	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/images"
 	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/instancetypes"
 	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/locations"
+	mcpcmd "github/verda-cloud/verda-cli/internal/verda-cli/cmd/mcp"
 	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/settings"
 	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/ssh"
 	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/sshkey"
@@ -26,8 +27,9 @@ import (
 )
 
 // NewRootCommand creates the root `verda` cobra command with all subcommands
-// organized into logical groups.
-func NewRootCommand(ioStreams cmdutil.IOStreams) *cobra.Command {
+// organized into logical groups. It also returns the resolved Options so
+// callers (e.g. main) can annotate errors with profile context.
+func NewRootCommand(ioStreams cmdutil.IOStreams) (*cobra.Command, *clioptions.Options) {
 	opts := clioptions.NewOptions()
 
 	cmd := &cobra.Command{
@@ -38,6 +40,14 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			// Skip heavy credential resolution for commands that don't need it:
+			// - mcp serve: defers auth to the first tool call
+			// - auth show: diagnostic command that should work even without valid credentials
+			// - auth use: switches profiles, doesn't need current credentials
+			if skipCredentialResolution(cmd) {
+				log.Init(opts.Log)
+				return nil
+			}
 			opts.Complete()
 			if err := opts.Validate(); err != nil {
 				return err
@@ -98,6 +108,12 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) *cobra.Command {
 			},
 		},
 		{
+			Message: "AI Agent Commands:",
+			Commands: []*cobra.Command{
+				mcpcmd.NewCmdMCP(f, ioStreams),
+			},
+		},
+		{
 			Message: "Other Commands:",
 			Commands: []*cobra.Command{
 				completion.NewCmdCompletion(ioStreams),
@@ -111,5 +127,24 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) *cobra.Command {
 	groups.Add(cmd)
 	cmdutil.SetUsageTemplate(cmd, groups)
 
-	return cmd
+	return cmd, opts
+}
+
+// skipCredentialResolution returns true for commands that should work
+// without valid credentials (diagnostics, profile switching, etc.).
+func skipCredentialResolution(cmd *cobra.Command) bool {
+	parent := cmd.Parent()
+	if parent == nil {
+		return false
+	}
+	pName := parent.Name()
+	switch {
+	case cmd.Name() == "serve" && pName == "mcp":
+		return true
+	case cmd.Name() == "show" && pName == "auth":
+		return true
+	case cmd.Name() == "use" && pName == "auth":
+		return true
+	}
+	return false
 }

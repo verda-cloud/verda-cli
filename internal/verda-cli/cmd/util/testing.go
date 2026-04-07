@@ -30,6 +30,9 @@ type TestFactory struct {
 	// DebugOverride enables debug output.
 	DebugOverride bool
 
+	// AgentModeOverride enables agent mode.
+	AgentModeOverride bool
+
 	// OptionsOverride sets custom options. If nil, sensible defaults are used.
 	OptionsOverride *clioptions.Options
 }
@@ -90,3 +93,5 @@ func (f *TestFactory) OutputFormat() string {
 	}
 	return "table"
 }
+
+func (f *TestFactory) AgentMode() bool { return f.AgentModeOverride }

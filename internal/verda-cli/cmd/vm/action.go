@@ -3,13 +3,25 @@ package vm
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"charm.land/lipgloss/v2"
 	"github.com/spf13/cobra"
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
+	"github.com/verda-cloud/verdagostack/pkg/tui"
 
 	cmdutil "github/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
+
+// actionNameMap maps CLI flag values to action labels.
+var actionNameMap = map[string]string{
+	"start":          "Start",
+	"shutdown":       "Shutdown",
+	"force_shutdown": "Force shutdown",
+	"force-shutdown": "Force shutdown",
+	"hibernate":      "Hibernate",
+	"delete":         "Delete instance",
+}
 
 // instanceAction defines a supported action with its display label and executor.
 type instanceAction struct {
@@ -85,10 +97,16 @@ func availableActions(status string) []instanceAction {
 	return result
 }
 
+type actionOptions struct {
+	InstanceID string
+	Action     string
+	Yes        bool
+	Wait       cmdutil.WaitOptions
+}
+
 // NewCmdAction creates the vm action cobra command.
 func NewCmdAction(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
-	var instanceID string
-	var waitOpts cmdutil.WaitOptions
+	opts := &actionOptions{}
 
 	cmd := &cobra.Command{
 		Use:   "action",
@@ -106,21 +124,41 @@ func NewCmdAction(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 
 			# Run action and wait for completion
 			verda vm action --id abc-123 --wait
+
+			# Non-interactive (agent mode)
+			verda --agent vm action --id abc-123 --action shutdown
+			verda --agent vm action --id abc-123 --action delete --yes
 		`),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runAction(cmd, f, ioStreams, instanceID, waitOpts)
+			return runAction(cmd, f, ioStreams, opts)
 		},
 	}
 
-	cmd.Flags().StringVar(&instanceID, "id", "", "Instance ID to act on")
-	waitOpts.AddFlags(cmd.Flags(), true) // --wait defaults to true to preserve existing behavior
+	cmd.Flags().StringVar(&opts.InstanceID, "id", "", "Instance ID to act on")
+	cmd.Flags().StringVar(&opts.Action, "action", "", "Action to perform: start, shutdown, force_shutdown, hibernate, delete")
+	cmd.Flags().BoolVar(&opts.Yes, "yes", false, "Skip confirmation for destructive actions (required in agent mode)")
+	opts.Wait.AddFlags(cmd.Flags(), true) // --wait defaults to true to preserve existing behavior
 
 	return cmd
 }
 
 //nolint:gocyclo // Interactive CLI command with prompts, confirmation, and spinner — inherently complex.
-func runAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, instanceID string, waitOpts cmdutil.WaitOptions) error {
+func runAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *actionOptions) error {
+	// In agent mode, --id and --action are required.
+	if f.AgentMode() {
+		var missing []string
+		if opts.InstanceID == "" {
+			missing = append(missing, "--id")
+		}
+		if opts.Action == "" {
+			missing = append(missing, "--action")
+		}
+		if len(missing) > 0 {
+			return cmdutil.NewMissingFlagsError(missing)
+		}
+	}
+
 	client, err := f.VerdaClient()
 	if err != nil {
 		return err
@@ -130,7 +168,7 @@ func runAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 	ctx := cmd.Context()
 
 	// Select instance if not provided.
-	if instanceID == "" {
+	if opts.InstanceID == "" {
 		selected, err := selectInstance(ctx, f, ioStreams, client)
 		if err != nil {
 			return err
@@ -138,57 +176,73 @@ func runAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 		if selected == "" {
 			return nil
 		}
-		instanceID = selected
+		opts.InstanceID = selected
 	}
 
 	// Fetch instance details.
-	inst, err := client.Instances.GetByID(ctx, instanceID)
+	inst, err := client.Instances.GetByID(ctx, opts.InstanceID)
 	if err != nil {
 		return fmt.Errorf("fetching instance: %w", err)
 	}
 
-	// Show instance summary.
-	_, _ = fmt.Fprint(ioStreams.Out, renderInstanceCard(inst))
-
 	// Filter actions by current status.
 	validActions := availableActions(inst.Status)
 	if len(validActions) == 0 {
+		if f.AgentMode() {
+			return &cmdutil.AgentError{
+				Code:     "NO_ACTIONS_AVAILABLE",
+				Message:  fmt.Sprintf("no actions available for status %q", inst.Status),
+				Details:  map[string]any{"status": inst.Status},
+				ExitCode: cmdutil.ExitBadArgs,
+			}
+		}
 		_, _ = fmt.Fprintf(ioStreams.ErrOut, "No actions available for status %q.\n", inst.Status)
 		return nil
 	}
 
-	actionLabels := make([]string, 0, len(validActions)+1)
-	for _, a := range validActions {
-		actionLabels = append(actionLabels, a.Label)
-	}
-	actionLabels = append(actionLabels, "Cancel")
+	var action instanceAction
 
-	actionIdx, err := prompter.Select(ctx, "Select action", actionLabels)
-	if err != nil {
-		return nil
-	}
-	if actionIdx == len(validActions) { // Cancel
-		return nil
-	}
+	if opts.Action != "" {
+		var resolveErr error
+		action, resolveErr = resolveAction(opts.Action, validActions)
+		if resolveErr != nil {
+			return resolveErr
+		}
+	} else {
+		// Interactive: show instance summary and prompt for action.
+		_, _ = fmt.Fprint(ioStreams.Out, renderInstanceCard(inst))
 
-	action := validActions[actionIdx]
+		actionLabels := make([]string, 0, len(validActions)+1)
+		for _, a := range validActions {
+			actionLabels = append(actionLabels, a.Label)
+		}
+		actionLabels = append(actionLabels, "Cancel")
+
+		actionIdx, err := prompter.Select(ctx, "Select action", actionLabels)
+		if err != nil {
+			return nil
+		}
+		if actionIdx == len(validActions) { // Cancel
+			return nil
+		}
+		action = validActions[actionIdx]
+	}
 
 	// Special handling for delete — needs volume selection sub-flow.
 	if action.Execute == nil {
+		if f.AgentMode() {
+			return runDeleteAgent(ctx, f, ioStreams, client, inst, opts.Yes)
+		}
 		return runDeleteFlow(ctx, f, ioStreams, client, inst)
 	}
 
 	// Confirm with context message and warning.
-	if action.ConfirmMsg != "" || action.WarningMsg != "" {
-		warnStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Bold(true)
-		if action.ConfirmMsg != "" {
-			_, _ = fmt.Fprintf(ioStreams.ErrOut, "\n  %s\n", action.ConfirmMsg)
-		}
-		if action.WarningMsg != "" {
-			_, _ = fmt.Fprintf(ioStreams.ErrOut, "\n  %s\n", warnStyle.Render(action.WarningMsg))
-		}
-		_, _ = fmt.Fprintln(ioStreams.ErrOut)
-		confirmed, err := prompter.Confirm(ctx, fmt.Sprintf("Would you like to continue? (%s on %s)", action.Label, inst.Hostname))
+	isDestructive := action.ConfirmMsg != "" || action.WarningMsg != ""
+	if isDestructive && f.AgentMode() && !opts.Yes {
+		return cmdutil.NewConfirmationRequiredError(opts.Action)
+	}
+	if isDestructive && !f.AgentMode() {
+		confirmed, err := confirmDestructive(ctx, ioStreams, prompter, &action, inst)
 		if err != nil || !confirmed {
 			_, _ = fmt.Fprintln(ioStreams.ErrOut, "Canceled.")
 			return nil
@@ -217,9 +271,20 @@ func runAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 		return err
 	}
 
+	// Structured output for agent mode.
+	if f.AgentMode() {
+		result := map[string]string{
+			"id":     inst.ID,
+			"action": opts.Action,
+			"status": "completed",
+		}
+		_, _ = cmdutil.WriteStructured(ioStreams.Out, f.OutputFormat(), result)
+		return nil
+	}
+
 	// Poll until expected status or show immediate result.
-	if action.ExpectStatus != "" && waitOpts.Wait {
-		result, err := cmdutil.PollInstanceStatus(ctx, ioStreams.ErrOut, client, inst.ID, waitOpts, action.ExpectStatus)
+	if action.ExpectStatus != "" && opts.Wait.Wait {
+		result, err := cmdutil.PollInstanceStatus(ctx, ioStreams.ErrOut, client, inst.ID, opts.Wait, action.ExpectStatus)
 		if err != nil {
 			return err
 		}
@@ -230,6 +295,37 @@ func runAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 	}
 
 	_, _ = fmt.Fprintf(ioStreams.Out, "Done: %s on %s (%s)\n", action.Label, inst.Hostname, inst.ID)
+	return nil
+}
+
+// runDeleteAgent handles delete in agent mode: requires --yes, deletes all volumes.
+func runDeleteAgent(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client *verda.Client, inst *verda.Instance, yes bool) error {
+	if !yes {
+		return cmdutil.NewConfirmationRequiredError("delete")
+	}
+
+	// In agent mode, delete the instance and all attached volumes.
+	volumes := fetchInstanceVolumes(ctx, client, inst)
+	volumeIDs := make([]string, 0, len(volumes))
+	for i := range volumes {
+		volumeIDs = append(volumeIDs, volumes[i].ID)
+	}
+
+	deleteCtx, cancel := context.WithTimeout(ctx, f.Options().Timeout)
+	defer cancel()
+
+	err := client.Instances.Delete(deleteCtx, []string{inst.ID}, volumeIDs, false)
+	if err != nil {
+		return err
+	}
+
+	result := map[string]any{
+		"id":              inst.ID,
+		"action":          "delete",
+		"status":          "completed",
+		"volumes_deleted": len(volumeIDs),
+	}
+	_, _ = cmdutil.WriteStructured(ioStreams.Out, f.OutputFormat(), result)
 	return nil
 }
 
@@ -348,4 +444,31 @@ func runDeleteFlow(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOS
 		_, _ = fmt.Fprintf(ioStreams.Out, "Deleted %d volume(s)\n", len(volumeIDs))
 	}
 	return nil
+}
+
+// resolveAction maps a CLI --action flag value to an instanceAction from the valid set.
+func resolveAction(actionName string, validActions []instanceAction) (instanceAction, error) {
+	label, ok := actionNameMap[strings.ToLower(actionName)]
+	if !ok {
+		return instanceAction{}, fmt.Errorf("unknown --action %q: valid actions are start, shutdown, force_shutdown, hibernate, delete", actionName)
+	}
+	for _, a := range validActions {
+		if a.Label == label {
+			return a, nil
+		}
+	}
+	return instanceAction{}, fmt.Errorf("action %q is not valid for current instance status", actionName)
+}
+
+// confirmDestructive shows warning/confirm messages and prompts the user.
+func confirmDestructive(ctx context.Context, ioStreams cmdutil.IOStreams, prompter tui.Prompter, action *instanceAction, inst *verda.Instance) (bool, error) {
+	warnStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Bold(true)
+	if action.ConfirmMsg != "" {
+		_, _ = fmt.Fprintf(ioStreams.ErrOut, "\n  %s\n", action.ConfirmMsg)
+	}
+	if action.WarningMsg != "" {
+		_, _ = fmt.Fprintf(ioStreams.ErrOut, "\n  %s\n", warnStyle.Render(action.WarningMsg))
+	}
+	_, _ = fmt.Fprintln(ioStreams.ErrOut)
+	return prompter.Confirm(ctx, fmt.Sprintf("Would you like to continue? (%s on %s)", action.Label, inst.Hostname))
 }
