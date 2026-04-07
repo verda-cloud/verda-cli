@@ -159,21 +159,30 @@ func runUpdate(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStrea
 	_, _ = fmt.Fprintf(ioStreams.Out, "Updated to %s\n", target)
 
 	// Migrate: if the currently running binary is outside ~/.verda/bin/,
-	// copy the new binary there and advise the user to clean up.
+	// handle the old location based on how it was installed.
 	oldExe, _ := resolveExecutable()
 	if oldExe != "" && oldExe != dst {
-		// Also replace the old binary so the user gets the new version
-		// regardless of which path their shell resolves first.
-		if err := replaceBinary(oldExe, binary); err != nil {
+		if isManagedByPackageManager(oldExe) {
+			// Installed via Homebrew, apt, rpm, etc. — don't touch it.
+			// Let the package manager handle upgrades for that path.
 			_, _ = fmt.Fprintf(ioStreams.ErrOut,
-				"\nWarning: could not update old binary at %s: %v\n", oldExe, err)
-		}
+				"\nNote: %s appears to be managed by a package manager.\n"+
+					"  Future updates via 'verda update' will install to %s.\n"+
+					"  Use your package manager to update or remove the old binary.\n",
+				oldExe, dst)
+		} else {
+			// Manual install (curl, manual download) — safe to replace in-place.
+			if err := replaceBinary(oldExe, binary); err != nil {
+				_, _ = fmt.Fprintf(ioStreams.ErrOut,
+					"\nWarning: could not update old binary at %s: %v\n", oldExe, err)
+			}
 
-		_, _ = fmt.Fprintf(ioStreams.ErrOut,
-			"\nNote: verda is now installed at %s\n"+
-				"  Add it to your PATH:  export PATH=\"%s:$PATH\"\n"+
-				"  Then remove the old binary:  sudo rm %s\n",
-			dst, binDir, oldExe)
+			_, _ = fmt.Fprintf(ioStreams.ErrOut,
+				"\nNote: verda is now installed at %s\n"+
+					"  Add it to your PATH:  export PATH=\"%s:$PATH\"\n"+
+					"  Then remove the old binary:  sudo rm %s\n",
+				dst, binDir, oldExe)
+		}
 	}
 
 	return nil
@@ -320,6 +329,28 @@ func readZipEntry(f *zip.File) ([]byte, error) {
 	}
 	defer rc.Close() //nolint:errcheck // best-effort close
 	return io.ReadAll(rc)
+}
+
+// isManagedByPackageManager returns true if the binary path looks like it was
+// installed by a package manager (Homebrew, apt/dpkg, rpm, apk, Scoop).
+func isManagedByPackageManager(exePath string) bool {
+	managedPrefixes := []string{
+		"/opt/homebrew/",     // Homebrew (Apple Silicon)
+		"/usr/local/Cellar/", // Homebrew (Intel Mac)
+		"/home/linuxbrew/",   // Homebrew (Linux)
+		"/usr/bin/",          // apt/dpkg, rpm, apk system packages
+		"/snap/",             // Snap packages
+	}
+	for _, prefix := range managedPrefixes {
+		if strings.HasPrefix(exePath, prefix) {
+			return true
+		}
+	}
+	// Scoop on Windows: ~/scoop/apps/
+	if runtime.GOOS == osWindows && strings.Contains(exePath, `\scoop\apps\`) {
+		return true
+	}
+	return false
 }
 
 // --- Binary replacement ---
