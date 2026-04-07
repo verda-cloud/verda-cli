@@ -48,7 +48,7 @@ func NewCmdSSH(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 			# Pass extra ssh arguments
 			verda ssh gpu-runner -- -L 8080:localhost:8080
 		`),
-		Args:               cobra.MaximumNArgs(1),
+		Args:               cobra.ArbitraryArgs, // extra args after "--" are passed to ssh
 		DisableFlagParsing: false,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var target string

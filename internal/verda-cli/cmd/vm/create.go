@@ -68,7 +68,7 @@ func NewCmdCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 			  --kind gpu \
 			  --instance-type 1V100.6V \
 			  --location FIN-01 \
-			  --os ubuntu-24.04-cuda-12.8-open-docker \
+			  --os ubuntu-24.04-cuda-13.0-open-docker \
 			  --os-volume-size 100 \
 			  --hostname gpu-runner \
 			  --description "GPU runner for batch jobs" \
