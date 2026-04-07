@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -47,6 +49,18 @@ func (s *Server) registerVMTools() {
 	)
 
 	s.mcpServer.AddTool(
+		mcp.NewTool("vm_availability",
+			mcp.WithDescription("Show available instance types with specs and pricing per location. Returns only instance types that are currently in stock. This is the best tool to answer 'what can I deploy?' — it combines availability, specs, and pricing in one call."),
+			mcp.WithString("location", mcp.Description("Filter by location code, e.g. FIN-01")),
+			mcp.WithString("instance_type", mcp.Description("Filter by specific instance type, e.g. 1A6000.10V")),
+			mcp.WithBoolean("gpu_only", mcp.Description("Show only GPU instance types")),
+			mcp.WithBoolean("cpu_only", mcp.Description("Show only CPU instance types")),
+			mcp.WithBoolean("spot", mcp.Description("Show spot pricing and availability")),
+		),
+		s.handleVMAvailability,
+	)
+
+	s.mcpServer.AddTool(
 		mcp.NewTool("vm_action",
 			mcp.WithDescription("Perform an action on a VM: start, shutdown, force_shutdown, hibernate, or delete. IMPORTANT: Always confirm with the user before destructive actions."),
 			mcp.WithString("id", mcp.Required(), mcp.Description("Instance ID")),
@@ -55,6 +69,102 @@ func (s *Server) registerVMTools() {
 		),
 		s.handleVMAction,
 	)
+}
+
+type availableInstance struct {
+	Location     string  `json:"location"`
+	InstanceType string  `json:"instance_type"`
+	GPU          string  `json:"gpu"`
+	VRAM         string  `json:"vram,omitempty"`
+	RAM          string  `json:"ram"`
+	CPUCores     int     `json:"cpu_cores"`
+	PricePerHour float64 `json:"price_per_hour"`
+	SpotPrice    float64 `json:"spot_price,omitempty"`
+}
+
+//nolint:gocritic // hugeParam: handler signature defined by mcp-go.
+func (s *Server) handleVMAvailability(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	client, err := s.verdaClient()
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	location := optionalString(args(req), "location")
+	instanceType := optionalString(args(req), "instance_type")
+	gpuOnly := optionalBool(args(req), "gpu_only")
+	cpuOnly := optionalBool(args(req), "cpu_only")
+	spot := optionalBool(args(req), "spot")
+
+	// Fetch instance types with pricing.
+	types, err := client.InstanceTypes.Get(ctx, "usd")
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	// Fetch availability per location.
+	avail, err := client.InstanceAvailability.GetAllAvailabilities(ctx, spot, location)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	// Index instance types by name.
+	typeMap := make(map[string]*verda.InstanceTypeInfo, len(types))
+	for i := range types {
+		typeMap[types[i].InstanceType] = &types[i]
+	}
+
+	// Build joined rows: one per (location, instance type) pair.
+	var rows []availableInstance
+	for _, la := range avail {
+		for _, instType := range la.Availabilities {
+			t, ok := typeMap[instType]
+			if !ok {
+				continue
+			}
+			if instanceType != "" && !strings.EqualFold(instType, instanceType) {
+				continue
+			}
+			isGPU := t.GPU.NumberOfGPUs > 0
+			if gpuOnly && !isGPU {
+				continue
+			}
+			if cpuOnly && isGPU {
+				continue
+			}
+
+			gpu := "—"
+			vram := ""
+			if isGPU {
+				gpu = fmt.Sprintf("%dx %s", t.GPU.NumberOfGPUs, t.GPU.Description)
+				vram = fmt.Sprintf("%dGB", t.GPUMemory.SizeInGigabytes)
+			}
+
+			rows = append(rows, availableInstance{
+				Location:     la.LocationCode,
+				InstanceType: instType,
+				GPU:          gpu,
+				VRAM:         vram,
+				RAM:          fmt.Sprintf("%dGB", t.Memory.SizeInGigabytes),
+				CPUCores:     t.CPU.NumberOfCores,
+				PricePerHour: float64(t.PricePerHour),
+				SpotPrice:    float64(t.SpotPrice),
+			})
+		}
+	}
+
+	// Sort by price ascending.
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].PricePerHour != rows[j].PricePerHour {
+			return rows[i].PricePerHour < rows[j].PricePerHour
+		}
+		return rows[i].Location < rows[j].Location
+	})
+
+	if len(rows) == 0 {
+		return mcp.NewToolResultText("No available instances found matching the criteria."), nil
+	}
+
+	return jsonResult(rows)
 }
 
 //nolint:gocritic // hugeParam: handler signature defined by mcp-go.

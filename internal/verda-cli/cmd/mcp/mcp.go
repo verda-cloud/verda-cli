@@ -1,6 +1,9 @@
 package mcp
 
 import (
+	"fmt"
+	"os"
+
 	"github.com/spf13/cobra"
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
 
@@ -44,16 +47,20 @@ func NewCmdServe(f cmdutil.Factory, _ cmdutil.IOStreams) *cobra.Command {
 			  }
 		`),
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			fmt.Fprintln(os.Stderr, "Verda MCP server starting...")
+
 			// Defer credential resolution and client creation to the
 			// first tool call so the MCP handshake completes instantly.
 			opts := f.Options()
 			server := NewLazyServer(func() (*verda.Client, error) {
+				fmt.Fprintln(os.Stderr, "Verda MCP: authenticating...")
 				opts.Complete()
 				if err := opts.Validate(); err != nil {
 					return nil, err
 				}
 				return f.VerdaClient()
 			})
+			fmt.Fprintln(os.Stderr, "Verda MCP server listening on stdio")
 			return server.ServeStdio(cmd.Context())
 		},
 	}

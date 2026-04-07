@@ -182,7 +182,7 @@ func TestMCP_ToolsList(t *testing.T) {
 	expectedTools := []string{
 		"list_locations", "list_instance_types", "check_availability", "list_images",
 		"get_balance", "estimate_cost", "get_running_costs",
-		"list_vms", "describe_vm", "create_vm", "vm_action",
+		"list_vms", "describe_vm", "create_vm", "vm_action", "vm_availability",
 		"list_ssh_keys", "add_ssh_key", "get_ssh_command",
 		"list_volumes", "create_volume", "list_volumes_in_trash",
 	}
@@ -288,6 +288,42 @@ func TestMCP_EstimateCost_MissingRequired(t *testing.T) {
 
 	resp := c.callTool("estimate_cost", map[string]any{})
 	assertToolError(t, resp)
+}
+
+func TestMCP_VMAvailability(t *testing.T) {
+	requireProfile(t, "test")
+	c := startMCP(t, "test")
+	c.initialize()
+
+	resp := c.callTool("vm_availability", map[string]any{"gpu_only": true})
+	assertToolSuccess(t, resp)
+
+	text := extractToolText(t, resp)
+	var rows []map[string]any
+	if err := json.Unmarshal([]byte(text), &rows); err != nil {
+		t.Fatalf("failed to parse availability JSON: %v", err)
+	}
+	t.Logf("MCP vm_availability (gpu_only) returned %d available instances", len(rows))
+
+	// Verify structure
+	if len(rows) > 0 {
+		row := rows[0]
+		for _, field := range []string{"location", "instance_type", "gpu", "ram", "price_per_hour"} {
+			if _, ok := row[field]; !ok {
+				t.Errorf("missing field %q in availability row", field)
+			}
+		}
+	}
+}
+
+func TestMCP_VMAvailability_ByLocation(t *testing.T) {
+	requireProfile(t, "test")
+	c := startMCP(t, "test")
+	c.initialize()
+
+	resp := c.callTool("vm_availability", map[string]any{"location": "FIN-01"})
+	assertToolSuccess(t, resp)
+	t.Log("MCP vm_availability by location OK")
 }
 
 func TestMCP_ListVMs(t *testing.T) {
