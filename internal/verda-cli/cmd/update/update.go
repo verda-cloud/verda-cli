@@ -43,6 +43,8 @@ func NewCmdUpdate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 			Update the Verda CLI binary in-place by downloading from GitHub Releases.
 			No Go installation required.
 
+			The binary is installed to ~/.verda/bin/ (no sudo required).
+
 			Without flags, updates to the latest version.
 			Use --version to install a specific version (upgrade or downgrade).
 			Use --list to show available versions.
