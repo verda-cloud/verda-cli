@@ -31,13 +31,13 @@ func (s *Server) registerVMTools() {
 
 	s.mcpServer.AddTool(
 		mcp.NewTool("create_vm",
-			mcp.WithDescription("Create a new Verda Cloud VM instance. Before calling, ensure you have: instance_type, image, hostname, ssh_key_ids (ask user to pick), and os_volume_size_gb. Use vm_availability to check stock and list_images for image options. Always show cost estimate and get user confirmation first."),
+			mcp.WithDescription("Create a new Verda Cloud VM instance. Required: instance_type, image, hostname. Optional: ssh_key_ids (if omitted, all account keys are attached), os_volume_size_gb (default 50), location (auto-picked if omitted). Use vm_availability to check stock and list_images for image options. Always show cost estimate and get user confirmation first."),
 			mcp.WithString("instance_type", mcp.Required(), mcp.Description("Instance type, e.g. 1V100.6V or CPU.4V.16G")),
 			mcp.WithString("image", mcp.Required(), mcp.Description("OS image slug, e.g. ubuntu-24.04-cuda-12.8-open-docker")),
 			mcp.WithString("hostname", mcp.Required(), mcp.Description("Hostname for the new VM")),
 			mcp.WithString("location", mcp.Description("Location code. If omitted, automatically picks a location that has stock for the requested instance type.")),
 			mcp.WithString("description", mcp.Description("Human-readable description")),
-			mcp.WithNumber("os_volume_size_gb", mcp.Required(), mcp.Description("OS volume size in GiB (e.g. 50, 100, 200)")),
+			mcp.WithNumber("os_volume_size_gb", mcp.Description("OS volume size in GiB (default 50)")),
 			mcp.WithArray("ssh_key_ids", mcp.Description("SSH key IDs or names. Names are resolved automatically (e.g. 'meng'). If omitted, all account SSH keys are attached.")),
 			mcp.WithString("startup_script_id", mcp.Description("Startup script ID")),
 			mcp.WithBoolean("spot", mcp.Description("Request a spot instance")),
@@ -268,11 +268,13 @@ func (s *Server) handleCreateVM(ctx context.Context, req mcp.CallToolRequest) (*
 		createReq.StartupScriptID = &scriptID
 	}
 
-	if osVolumeSize := optionalInt(args(req), "os_volume_size_gb"); osVolumeSize > 0 {
-		createReq.OSVolume = &verda.OSVolumeCreateRequest{
-			Name: hostname + "-os",
-			Size: osVolumeSize,
-		}
+	osVolumeSize := optionalInt(args(req), "os_volume_size_gb")
+	if osVolumeSize <= 0 {
+		osVolumeSize = 50
+	}
+	createReq.OSVolume = &verda.OSVolumeCreateRequest{
+		Name: hostname + "-os",
+		Size: osVolumeSize,
 	}
 
 	if storageSize := optionalInt(args(req), "storage_size_gb"); storageSize > 0 {
