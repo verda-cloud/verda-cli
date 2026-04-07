@@ -37,8 +37,8 @@ func (s *Server) registerVMTools() {
 			mcp.WithString("hostname", mcp.Required(), mcp.Description("Hostname for the new VM")),
 			mcp.WithString("location", mcp.Description("Location code. If omitted, automatically picks a location that has stock for the requested instance type.")),
 			mcp.WithString("description", mcp.Description("Human-readable description")),
-			mcp.WithNumber("os_volume_size_gb", mcp.Description("OS volume size in GiB")),
-			mcp.WithArray("ssh_key_ids", mcp.Description("SSH key IDs or names. Names are resolved automatically (e.g. 'meng'). If omitted, uses the most recent SSH key in the account.")),
+			mcp.WithNumber("os_volume_size_gb", mcp.Required(), mcp.Description("OS volume size in GiB (e.g. 50, 100, 200)")),
+			mcp.WithArray("ssh_key_ids", mcp.Required(), mcp.Description("SSH key IDs or names to inject. Names are resolved automatically (e.g. 'meng'). Use list_ssh_keys to find available keys and ask the user which one to use.")),
 			mcp.WithString("startup_script_id", mcp.Description("Startup script ID")),
 			mcp.WithBoolean("spot", mcp.Description("Request a spot instance")),
 			mcp.WithNumber("storage_size_gb", mcp.Description("Additional storage size in GiB")),
@@ -200,7 +200,7 @@ func (s *Server) handleDescribeVM(ctx context.Context, req mcp.CallToolRequest) 
 	return jsonResult(inst)
 }
 
-//nolint:gocritic,gocyclo // hugeParam: handler signature defined by mcp-go; complexity from auto-resolving location/SSH keys.
+//nolint:gocritic // hugeParam: handler signature defined by mcp-go.
 func (s *Server) handleCreateVM(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	client, err := s.verdaClient()
 	if err != nil {
@@ -241,19 +241,7 @@ func (s *Server) handleCreateVM(ctx context.Context, req mcp.CallToolRequest) (*
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 	if len(sshKeyIDs) == 0 {
-		// List key names so the agent can ask the user to pick one.
-		keys, kerr := client.SSHKeys.GetAllSSHKeys(ctx)
-		if kerr == nil && len(keys) > 0 {
-			names := make([]string, 0, len(keys))
-			for i := range keys {
-				names = append(names, keys[i].Name)
-			}
-			return mcp.NewToolResultError(fmt.Sprintf(
-				"SSH key is required. ASK THE USER which key to use. Available keys: %s. "+
-					"Then call create_vm again with the chosen key name in ssh_key_ids.",
-				strings.Join(names, ", "))), nil
-		}
-		return mcp.NewToolResultError("SSH key is required but no keys found in your account. Add one with add_ssh_key first."), nil
+		return mcp.NewToolResultError("ssh_key_ids is required. Use list_ssh_keys to find available keys and ask the user which one to use."), nil
 	}
 
 	createReq := verda.CreateInstanceRequest{
