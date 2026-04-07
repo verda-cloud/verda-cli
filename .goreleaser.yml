@@ -32,5 +32,63 @@ archives:
 checksum:
   name_template: verda_{{ .Version }}_SHA256SUMS
 
+brews:
+  - repository:
+      owner: verda-cloud
+      name: homebrew-tap
+    directory: Formula
+    homepage: https://github.com/verda-cloud/verda-cli
+    description: Verda CLI
+    license: Apache-2.0
+
+scoops:
+  - repository:
+      owner: verda-cloud
+      name: homebrew-tap
+    directory: bucket
+    homepage: https://github.com/verda-cloud/verda-cli
+    description: Verda CLI
+    license: Apache-2.0
+
+nfpms:
+  - id: verda
+    package_name: verda
+    homepage: https://github.com/verda-cloud/verda-cli
+    maintainer: Verda Cloud <support@verda.cloud>
+    description: Verda CLI
+    license: Apache-2.0
+    formats:
+      - deb
+      - rpm
+      - apk
+    bindir: /usr/bin
+
+# aurs:
+#   - name: verda-bin
+#     homepage: https://github.com/verda-cloud/verda-cli
+#     description: Verda CLI
+#     maintainers:
+#       - Verda Cloud <support@verda.cloud>
+#     license: Apache-2.0
+#     private_key: "{{ .Env.AUR_KEY }}"
+#     git_url: ssh://aur@aur.archlinux.org/verda-bin.git
+#     url_template: "https://github.com/verda-cloud/verda-cli/releases/download/{{ .Tag }}/{{ .ArtifactName }}"
+
+# winget:
+#   - name: verda
+#     publisher: verda-cloud
+#     publisher_url: https://verda.cloud
+#     short_description: Verda CLI
+#     license: Apache-2.0
+#     repository:
+#       owner: verda-cloud
+#       name: winget-pkgs
+#       pull_request:
+#         enabled: true
+#         base:
+#           owner: microsoft
+#           name: winget-pkgs
+#           branch: master
+
 # Release notes are provided by git-cliff via --release-notes flag.
 # Do NOT set changelog.disable: true — it also ignores --release-notes.
