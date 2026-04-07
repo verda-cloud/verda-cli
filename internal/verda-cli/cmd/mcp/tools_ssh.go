@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
@@ -11,7 +12,8 @@ import (
 func (s *Server) registerSSHTools() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("list_ssh_keys",
-			mcp.WithDescription("List all SSH keys in the Verda Cloud account"),
+			mcp.WithDescription("List SSH keys. Use 'search' to filter by name or email to quickly find a specific key instead of listing all."),
+			mcp.WithString("search", mcp.Description("Filter keys by name (case-insensitive substring match)")),
 		),
 		s.handleListSSHKeys,
 	)
@@ -37,7 +39,7 @@ func (s *Server) registerSSHTools() {
 }
 
 //nolint:gocritic // hugeParam: handler signature defined by mcp-go.
-func (s *Server) handleListSSHKeys(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func (s *Server) handleListSSHKeys(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	client, err := s.verdaClient()
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
@@ -47,6 +49,18 @@ func (s *Server) handleListSSHKeys(ctx context.Context, _ mcp.CallToolRequest) (
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
+
+	if search := optionalString(args(req), "search"); search != "" {
+		lower := strings.ToLower(search)
+		filtered := keys[:0]
+		for i := range keys {
+			if strings.Contains(strings.ToLower(keys[i].Name), lower) {
+				filtered = append(filtered, keys[i])
+			}
+		}
+		keys = filtered
+	}
+
 	return jsonResult(keys)
 }
 
@@ -141,4 +155,47 @@ func (s *Server) resolveInstance(ctx context.Context, idOrHostname string) (*ver
 		}
 	}
 	return nil, fmt.Errorf("instance %q not found", idOrHostname)
+}
+
+// resolveSSHKeyIDs takes a list of SSH key IDs or names and returns resolved IDs.
+// If an input looks like an existing ID it's kept as-is; otherwise it's matched
+// by name (case-insensitive substring).
+func (s *Server) resolveSSHKeyIDs(ctx context.Context, client *verda.Client, inputs []string) ([]string, error) {
+	if len(inputs) == 0 {
+		return nil, nil
+	}
+
+	keys, err := client.SSHKeys.GetAllSSHKeys(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("fetching SSH keys: %w", err)
+	}
+
+	// Build lookup maps.
+	byID := make(map[string]bool, len(keys))
+	for i := range keys {
+		byID[keys[i].ID] = true
+	}
+
+	var resolved []string
+	for _, input := range inputs {
+		// Already a valid ID.
+		if byID[input] {
+			resolved = append(resolved, input)
+			continue
+		}
+		// Search by name.
+		lower := strings.ToLower(input)
+		found := false
+		for i := range keys {
+			if strings.Contains(strings.ToLower(keys[i].Name), lower) {
+				resolved = append(resolved, keys[i].ID)
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil, fmt.Errorf("SSH key %q not found (searched by ID and name)", input)
+		}
+	}
+	return resolved, nil
 }
