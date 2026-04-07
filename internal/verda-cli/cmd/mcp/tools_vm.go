@@ -241,22 +241,19 @@ func (s *Server) handleCreateVM(ctx context.Context, req mcp.CallToolRequest) (*
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 	if len(sshKeyIDs) == 0 {
-		// Return available keys so the agent can ask the user which one to use.
+		// List key names so the agent can ask the user to pick one.
 		keys, kerr := client.SSHKeys.GetAllSSHKeys(ctx)
 		if kerr == nil && len(keys) > 0 {
-			keyList := make([]map[string]string, 0, len(keys))
+			names := make([]string, 0, len(keys))
 			for i := range keys {
-				keyList = append(keyList, map[string]string{
-					"id":   keys[i].ID,
-					"name": keys[i].Name,
-				})
+				names = append(names, keys[i].Name)
 			}
-			return jsonResult(map[string]any{
-				"error":          "ssh_key_required",
-				"message":        "No SSH key specified. Please choose one from the available keys.",
-				"available_keys": keyList,
-			})
+			return mcp.NewToolResultError(fmt.Sprintf(
+				"SSH key is required. ASK THE USER which key to use. Available keys: %s. "+
+					"Then call create_vm again with the chosen key name in ssh_key_ids.",
+				strings.Join(names, ", "))), nil
 		}
+		return mcp.NewToolResultError("SSH key is required but no keys found in your account. Add one with add_ssh_key first."), nil
 	}
 
 	createReq := verda.CreateInstanceRequest{
