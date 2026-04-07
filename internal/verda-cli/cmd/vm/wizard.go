@@ -745,7 +745,7 @@ func promptAddSSHKey(ctx context.Context, prompter tui.Prompter, client *verda.C
 		if err != nil || filePath == "" {
 			return nil, nil //nolint:nilerr // User canceled.
 		}
-		data, err := os.ReadFile(filePath)
+		data, err := os.ReadFile(filePath) //nolint:gosec // User-provided path from interactive prompt, validated by validateFilePath.
 		if err != nil {
 			_, _ = prompter.Confirm(ctx, fmt.Sprintf("Error: %v. Press Enter to continue.", err), tui.WithConfirmDefault(true))
 			return nil, nil
