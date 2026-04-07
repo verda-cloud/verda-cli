@@ -21,6 +21,7 @@ import (
 	"github.com/verda-cloud/verdagostack/pkg/version"
 
 	cmdutil "github/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
+	"github/verda-cloud/verda-cli/internal/verda-cli/options"
 )
 
 const (
@@ -78,6 +79,9 @@ func runList(ctx context.Context, ioStreams cmdutil.IOStreams) error {
 	}
 
 	current := version.Get().GitVersion
+	if !strings.HasPrefix(current, "v") {
+		current = "v" + current
+	}
 	_, _ = fmt.Fprintf(ioStreams.Out, "  Available versions (current: %s)\n\n", current)
 	for _, v := range versions {
 		marker := "  "
@@ -91,6 +95,9 @@ func runList(ctx context.Context, ioStreams cmdutil.IOStreams) error {
 
 func runUpdate(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, targetVersion string) error {
 	current := version.Get().GitVersion
+	if !strings.HasPrefix(current, "v") {
+		current = "v" + current
+	}
 
 	// Resolve target version.
 	target := targetVersion
@@ -132,24 +139,33 @@ func runUpdate(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStrea
 		return err
 	}
 
-	// Replace current executable.
-	exe, err := resolveExecutable()
+	// Determine install destination: always ~/.verda/bin/verda.
+	binDir, err := options.EnsureVerdaBinDir()
 	if err != nil {
-		return fmt.Errorf("resolving executable path: %w", err)
+		return fmt.Errorf("preparing install directory: %w", err)
 	}
+	binaryName := "verda"
+	if runtime.GOOS == osWindows {
+		binaryName = "verda.exe"
+	}
+	dst := filepath.Join(binDir, binaryName)
 
-	if err := replaceBinary(exe, binary); err != nil {
-		if errors.Is(err, os.ErrPermission) {
-			hint := "sudo verda update"
-			if runtime.GOOS == osWindows {
-				hint = "running the command in an elevated (Administrator) terminal"
-			}
-			return fmt.Errorf("permission denied writing to %s\n\nTry: %s", filepath.Dir(exe), hint)
-		}
+	if err := replaceBinary(dst, binary); err != nil {
 		return fmt.Errorf("replacing binary: %w", err)
 	}
 
 	_, _ = fmt.Fprintf(ioStreams.Out, "Updated to %s\n", target)
+
+	// Warn if old binary exists in a system path.
+	oldExe, _ := resolveExecutable()
+	if oldExe != "" && oldExe != dst {
+		_, _ = fmt.Fprintf(ioStreams.ErrOut,
+			"\nNote: old binary still exists at %s\n"+
+				"  Remove it to avoid conflicts: sudo rm %s\n"+
+				"  Ensure %s is in your PATH.\n",
+			oldExe, oldExe, binDir)
+	}
+
 	return nil
 }
 
