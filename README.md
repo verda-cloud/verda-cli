@@ -119,14 +119,15 @@ Add this to your agent's MCP config:
 Once configured, just talk to your agent:
 
 ```
-"What GPU VMs can I deploy in FIN-01?"
+"What GPU types are available right now?"
+"How much does an 8x H100 cost per hour?"
+"I need a cheap GPU for testing — what's the best option?"
 "Deploy a V100 GPU VM with 100GB OS volume"
-"What's my balance?"
-"Show my running VMs and their costs"
-"SSH into gpu-runner"
+"Show my running VMs and what they're costing me"
+"Shut down my training VM"
 ```
 
-The MCP server provides 18 tools covering discovery, cost estimation, VM lifecycle, SSH, and volume management. Credentials are shared with the CLI — run `verda auth login` first.
+Credentials are shared with the CLI — run `verda auth login` first.
 
 ### Agent Mode
 
