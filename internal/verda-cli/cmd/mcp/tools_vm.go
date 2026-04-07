@@ -31,7 +31,7 @@ func (s *Server) registerVMTools() {
 
 	s.mcpServer.AddTool(
 		mcp.NewTool("create_vm",
-			mcp.WithDescription("Create a new Verda Cloud VM instance. IMPORTANT: Always estimate cost and confirm with the user before calling this tool."),
+			mcp.WithDescription("Create a new Verda Cloud VM instance. Before calling, ensure you have: instance_type, image, hostname, ssh_key_ids (ask user to pick), and os_volume_size_gb. Use vm_availability to check stock and list_images for image options. Always show cost estimate and get user confirmation first."),
 			mcp.WithString("instance_type", mcp.Required(), mcp.Description("Instance type, e.g. 1V100.6V or CPU.4V.16G")),
 			mcp.WithString("image", mcp.Required(), mcp.Description("OS image slug, e.g. ubuntu-24.04-cuda-12.8-open-docker")),
 			mcp.WithString("hostname", mcp.Required(), mcp.Description("Hostname for the new VM")),
