@@ -306,7 +306,7 @@ func runDeleteAgent(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IO
 
 	// In agent mode, delete the instance and all attached volumes.
 	volumes := fetchInstanceVolumes(ctx, client, inst)
-	var volumeIDs []string
+	volumeIDs := make([]string, 0, len(volumes))
 	for i := range volumes {
 		volumeIDs = append(volumeIDs, volumes[i].ID)
 	}

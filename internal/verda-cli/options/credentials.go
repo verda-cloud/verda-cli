@@ -40,7 +40,7 @@ func ListProfiles(path string) ([]string, error) {
 		return nil, err
 	}
 
-	var profiles []string
+	profiles := make([]string, 0, len(cfg.Sections()))
 	for _, s := range cfg.Sections() {
 		name := s.Name()
 		if name == "DEFAULT" {
