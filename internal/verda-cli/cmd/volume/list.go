@@ -82,11 +82,15 @@ func runList(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams,
 	}
 
 	_, _ = fmt.Fprintf(ioStreams.Out, "  %d volume(s) found\n\n", len(volumes))
-	_, _ = fmt.Fprintf(ioStreams.Out, "  %-20s  %-36s  %6s  %-10s  %-10s  %s\n", "NAME", "ID", "SIZE", "TYPE", "STATUS", "LOCATION")
-	_, _ = fmt.Fprintf(ioStreams.Out, "  %-20s  %-36s  %6s  %-10s  %-10s  %s\n", "----", "--", "----", "----", "------", "--------")
+	_, _ = fmt.Fprintf(ioStreams.Out, "  %-36s  %-30s  %6s  %-10s  %-10s  %s\n", "ID", "NAME", "SIZE", "TYPE", "STATUS", "LOCATION")
+	_, _ = fmt.Fprintf(ioStreams.Out, "  %-36s  %-30s  %6s  %-10s  %-10s  %s\n", "--", "----", "----", "----", "------", "--------")
 	for i := range volumes {
-		_, _ = fmt.Fprintf(ioStreams.Out, "  %-20s  %-36s  %4dGB  %-10s  %-10s  %s\n",
-			volumes[i].Name, volumes[i].ID, volumes[i].Size, volumes[i].Type, volumes[i].Status, volumes[i].Location)
+		name := volumes[i].Name
+		if len(name) > 30 {
+			name = name[:27] + "..."
+		}
+		_, _ = fmt.Fprintf(ioStreams.Out, "  %-36s  %-30s  %4dGB  %-10s  %-10s  %s\n",
+			volumes[i].ID, name, volumes[i].Size, volumes[i].Type, volumes[i].Status, volumes[i].Location)
 	}
 	return nil
 }
