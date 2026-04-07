@@ -25,5 +25,10 @@ func NewCmdVM(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 		NewCmdAction(f, ioStreams),
 		NewCmdAvailability(f, ioStreams),
 	)
+
+	// Shortcut commands for common actions.
+	for _, def := range shortcuts {
+		cmd.AddCommand(newShortcutCmd(f, ioStreams, def))
+	}
 	return cmd
 }

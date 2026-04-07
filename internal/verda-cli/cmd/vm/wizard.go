@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -659,7 +660,7 @@ func stepSSHKeys(getClient clientFunc, opts *createOptions) wizard.Step {
 				for i, c := range choices {
 					labels[i] = c.Label
 				}
-				indices, err := prompter.MultiSelect(ctx, "SSH keys to inject", labels)
+				indices, err := prompter.MultiSelect(ctx, "SSH keys to inject", labels, tui.WithMinSelections(1))
 				if err != nil {
 					return nil, err
 				}
@@ -697,7 +698,7 @@ func stepSSHKeys(getClient clientFunc, opts *createOptions) wizard.Step {
 					return nil, err
 				}
 				if newKey != nil {
-					keys = append(keys, *newKey)
+					keys = append([]verda.SSHKey{*newKey}, keys...)
 					choices = buildSSHKeyChoices(keys)
 				}
 			}
@@ -727,10 +728,57 @@ func promptAddSSHKey(ctx context.Context, prompter tui.Prompter, client *verda.C
 	if err != nil || strings.TrimSpace(name) == "" {
 		return nil, nil //nolint:nilerr // User canceled or left input blank.
 	}
-	pubKey, err := prompter.TextInput(ctx, "Public key (paste)")
-	if err != nil || strings.TrimSpace(pubKey) == "" {
-		return nil, nil //nolint:nilerr // User canceled or left input blank.
+
+	// Ask for source: load from file or paste.
+	sourceIdx, err := prompter.Select(ctx, "Public key source", []string{
+		"Load from file",
+		"Paste content",
+	})
+	if err != nil {
+		return nil, nil //nolint:nilerr // User canceled.
 	}
+
+	var pubKey string
+	switch sourceIdx {
+	case 0: // Load from file
+		defaultPath := defaultSSHPubKeyPath()
+		pathOpts := []tui.TextInputOption{
+			tui.WithPlaceholder("~/.ssh/id_*.pub"),
+			tui.WithValidation(func(s string) error {
+				p := strings.TrimSpace(s)
+				if p == "" {
+					return errors.New("file path is required")
+				}
+				if _, err := os.Stat(p); err != nil {
+					return fmt.Errorf("file not found: %s", p)
+				}
+				return nil
+			}),
+		}
+		if defaultPath != "" {
+			pathOpts = append(pathOpts, tui.WithDefault(defaultPath))
+		}
+		path, err := prompter.TextInput(ctx, "Public key file path", pathOpts...)
+		if err != nil || strings.TrimSpace(path) == "" {
+			return nil, nil //nolint:nilerr // User canceled or left input blank.
+		}
+		data, err := os.ReadFile(strings.TrimSpace(path))
+		if err != nil {
+			_, _ = prompter.Confirm(ctx, fmt.Sprintf("Error: %v. Press Enter to continue.", err), tui.WithConfirmDefault(true))
+			return nil, nil
+		}
+		pubKey = string(data)
+	case 1: // Paste content
+		pubKey, err = prompter.TextInput(ctx, "Public key (paste)")
+		if err != nil || strings.TrimSpace(pubKey) == "" {
+			return nil, nil //nolint:nilerr // User canceled or left input blank.
+		}
+	}
+
+	if strings.TrimSpace(pubKey) == "" {
+		return nil, nil
+	}
+
 	created, err := client.SSHKeys.AddSSHKey(ctx, &verda.CreateSSHKeyRequest{
 		Name:      strings.TrimSpace(name),
 		PublicKey: strings.TrimSpace(pubKey),
@@ -741,6 +789,31 @@ func promptAddSSHKey(ctx context.Context, prompter tui.Prompter, client *verda.C
 		return nil, nil
 	}
 	return created, nil
+}
+
+// defaultSSHPubKeyPath returns the first .pub file found in ~/.ssh/, preferring
+// common key names (id_ed25519, id_rsa, id_ecdsa). Returns "" if none found.
+func defaultSSHPubKeyPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	sshDir := filepath.Join(home, ".ssh")
+
+	// Prefer well-known key types in order.
+	for _, name := range []string{"id_ed25519.pub", "id_rsa.pub", "id_ecdsa.pub"} {
+		p := filepath.Join(sshDir, name)
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+
+	// Fall back to any .pub file.
+	matches, _ := filepath.Glob(filepath.Join(sshDir, "*.pub"))
+	if len(matches) > 0 {
+		return matches[0]
+	}
+	return ""
 }
 
 // --- Step 10: Startup Script ---

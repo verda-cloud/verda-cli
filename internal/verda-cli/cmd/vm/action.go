@@ -169,7 +169,13 @@ func runAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 
 	// Select instance if not provided.
 	if opts.InstanceID == "" {
-		selected, err := selectInstance(ctx, f, ioStreams, client)
+		// When action is pre-set (shortcut commands), only show instances
+		// with statuses valid for that action.
+		var statusFilter []string
+		if opts.Action != "" {
+			statusFilter = validFromForAction(opts.Action)
+		}
+		selected, err := selectInstance(ctx, f, ioStreams, client, statusFilter...)
 		if err != nil {
 			return err
 		}
@@ -329,7 +335,7 @@ func runDeleteAgent(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IO
 	return nil
 }
 
-func selectInstance(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client *verda.Client) (string, error) {
+func selectInstance(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client *verda.Client, statusFilter ...string) (string, error) {
 	var sp interface{ Stop(string) }
 	if status := f.Status(); status != nil {
 		sp, _ = status.Spinner(ctx, "Loading instances...")
@@ -342,8 +348,26 @@ func selectInstance(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IO
 		return "", err
 	}
 
+	// Filter by status when the caller restricts to specific statuses.
+	if len(statusFilter) > 0 {
+		filtered := instances[:0]
+		for i := range instances {
+			for _, s := range statusFilter {
+				if instances[i].Status == s {
+					filtered = append(filtered, instances[i])
+					break
+				}
+			}
+		}
+		instances = filtered
+	}
+
 	if len(instances) == 0 {
-		_, _ = fmt.Fprintln(ioStreams.Out, "No instances found.")
+		if len(statusFilter) > 0 {
+			_, _ = fmt.Fprintf(ioStreams.Out, "No instances with status %s found.\n", strings.Join(statusFilter, ", "))
+		} else {
+			_, _ = fmt.Fprintln(ioStreams.Out, "No instances found.")
+		}
 		return "", nil
 	}
 
@@ -442,6 +466,21 @@ func runDeleteFlow(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOS
 	_, _ = fmt.Fprintf(ioStreams.Out, "Deleted: %s (%s)\n", inst.Hostname, inst.ID)
 	if len(volumeIDs) > 0 {
 		_, _ = fmt.Fprintf(ioStreams.Out, "Deleted %d volume(s)\n", len(volumeIDs))
+	}
+	return nil
+}
+
+// validFromForAction returns the ValidFrom statuses for a given action name.
+// Returns nil (no filter) if the action is unknown or has no status restriction (e.g. delete).
+func validFromForAction(actionName string) []string {
+	label, ok := actionNameMap[strings.ToLower(actionName)]
+	if !ok {
+		return nil
+	}
+	for _, a := range allActions {
+		if a.Label == label {
+			return a.ValidFrom
+		}
 	}
 	return nil
 }
