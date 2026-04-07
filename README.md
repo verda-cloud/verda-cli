@@ -20,6 +20,34 @@ Install to a custom directory:
 VERDA_INSTALL_DIR=~/.local/bin curl -sSL https://raw.githubusercontent.com/verda-cloud/verda-cli/main/scripts/install.sh | sh
 ```
 
+### Homebrew (macOS / Linux)
+
+```bash
+brew install verda-cloud/tap/verda
+```
+
+### Scoop (Windows)
+
+```powershell
+scoop bucket add verda https://github.com/verda-cloud/homebrew-tap
+scoop install verda
+```
+
+### Linux packages (deb / rpm / apk)
+
+Download `.deb`, `.rpm`, or `.apk` packages from [GitHub Releases](https://github.com/verda-cloud/verda-cli/releases):
+
+```bash
+# Debian / Ubuntu
+sudo dpkg -i verda_VERSION_linux_amd64.deb
+
+# RHEL / Fedora
+sudo rpm -i verda_VERSION_linux_amd64.rpm
+
+# Alpine
+sudo apk add --allow-untrusted verda_VERSION_linux_amd64.apk
+```
+
 ### Manual download
 
 Download the binary for your platform from [GitHub Releases](https://github.com/verda-cloud/verda-cli/releases):
@@ -79,7 +107,7 @@ verda vm create \
   --kind gpu \
   --instance-type 1V100.6V \
   --location FIN-01 \
-  --os ubuntu-24.04-cuda-12.8-open-docker \
+  --os ubuntu-24.04-cuda-13.0-open-docker \
   --os-volume-size 100 \
   --hostname gpu-runner
 ```
