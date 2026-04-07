@@ -3,14 +3,14 @@
 # Usage: curl -sSL https://raw.githubusercontent.com/verda-cloud/verda-cli/main/scripts/install.sh | sh
 #
 # Environment variables:
-#   VERDA_INSTALL_DIR  - Installation directory (default: /usr/local/bin)
+#   VERDA_INSTALL_DIR  - Installation directory (default: ~/.verda/bin)
 #   VERDA_VERSION      - Specific version to install (default: latest)
 
 set -e
 
 REPO="verda-cloud/verda-cli"
 BINARY="verda"
-INSTALL_DIR="${VERDA_INSTALL_DIR:-/usr/local/bin}"
+INSTALL_DIR="${VERDA_INSTALL_DIR:-$HOME/.verda/bin}"
 
 # Detect OS
 OS="$(uname -s)"
@@ -84,14 +84,50 @@ elif [ "$EXT" = "zip" ]; then
 fi
 
 # Install
-if [ -w "$INSTALL_DIR" ]; then
-  mv "$BINARY" "$INSTALL_DIR/$BINARY"
-else
-  echo "Elevating permissions to install to ${INSTALL_DIR}..."
-  sudo mv "$BINARY" "$INSTALL_DIR/$BINARY"
-fi
-
+mkdir -p "$INSTALL_DIR"
+mv "$BINARY" "$INSTALL_DIR/$BINARY"
 chmod +x "$INSTALL_DIR/$BINARY"
+
+# Ensure ~/.verda/bin is in PATH
+setup_path() {
+  case ":$PATH:" in
+    *":$INSTALL_DIR:"*) return ;; # already in PATH
+  esac
+
+  SHELL_NAME="$(basename "$SHELL")"
+  case "$SHELL_NAME" in
+    zsh)  RC_FILE="$HOME/.zshrc" ;;
+    bash)
+      if [ -f "$HOME/.bashrc" ]; then
+        RC_FILE="$HOME/.bashrc"
+      else
+        RC_FILE="$HOME/.bash_profile"
+      fi
+      ;;
+    fish) RC_FILE="$HOME/.config/fish/config.fish" ;;
+    *)    RC_FILE="$HOME/.profile" ;;
+  esac
+
+  PATH_LINE="export PATH=\"$INSTALL_DIR:\$PATH\""
+  if [ "$SHELL_NAME" = "fish" ]; then
+    PATH_LINE="set -gx PATH $INSTALL_DIR \$PATH"
+  fi
+
+  if [ -f "$RC_FILE" ] && grep -qF "$INSTALL_DIR" "$RC_FILE" 2>/dev/null; then
+    return # already configured
+  fi
+
+  echo "" >> "$RC_FILE"
+  echo "# Added by Verda CLI installer" >> "$RC_FILE"
+  echo "$PATH_LINE" >> "$RC_FILE"
+  echo "  Added $INSTALL_DIR to PATH in $RC_FILE"
+  echo "  Run: source $RC_FILE  (or open a new terminal)"
+}
+
+# Only set up PATH if using the default location
+if [ "$VERDA_INSTALL_DIR" = "" ]; then
+  setup_path
+fi
 
 echo ""
 echo "Verda CLI ${VERDA_VERSION} installed successfully!"
@@ -100,3 +136,11 @@ echo "Get started:"
 echo "  verda auth login     # Configure credentials"
 echo "  verda vm list        # List VM instances"
 echo "  verda --help         # See all commands"
+
+# Warn about old binary in system path
+OLD_BINARY="$(command -v verda 2>/dev/null || true)"
+if [ -n "$OLD_BINARY" ] && [ "$OLD_BINARY" != "$INSTALL_DIR/$BINARY" ]; then
+  echo ""
+  echo "Warning: an older verda binary exists at $OLD_BINARY"
+  echo "  Remove it to avoid conflicts: sudo rm $OLD_BINARY"
+fi
