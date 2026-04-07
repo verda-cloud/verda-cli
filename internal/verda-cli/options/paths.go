@@ -42,6 +42,27 @@ func EnsureVerdaDir() (string, error) {
 	return dir, nil
 }
 
+// VerdaBinDir returns the path to the Verda binary directory (~/.verda/bin).
+func VerdaBinDir() (string, error) {
+	dir, err := VerdaDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "bin"), nil
+}
+
+// EnsureVerdaBinDir creates the Verda binary directory if it doesn't exist.
+func EnsureVerdaBinDir() (string, error) {
+	dir, err := VerdaBinDir()
+	if err != nil {
+		return "", err
+	}
+	if err := mkdirSecure(dir); err != nil {
+		return "", fmt.Errorf("cannot create binary directory %s: %w", dir, err)
+	}
+	return dir, nil
+}
+
 // WriteSecureFile writes data to path with restrictive permissions.
 // On Unix, the file is created with 0600. On Windows, it inherits the
 // parent directory ACL (Go's os.WriteFile uses default security).
