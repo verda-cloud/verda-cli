@@ -1,10 +1,14 @@
 package cmd
 
 import (
+	"fmt"
+	"runtime/debug"
+
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"github.com/verda-cloud/verdagostack/pkg/log"
 	"github.com/verda-cloud/verdagostack/pkg/tui/bubbletea"
+	"github.com/verda-cloud/verdagostack/pkg/version"
 
 	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/auth"
 	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/availability"
@@ -20,7 +24,6 @@ import (
 	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/startupscript"
 	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/update"
 	cmdutil "github/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
-	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/version"
 	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/vm"
 	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/volume"
 	clioptions "github/verda-cloud/verda-cli/internal/verda-cli/options"
@@ -60,6 +63,10 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) (*cobra.Command, *clioptions.Op
 			return nil
 		},
 	}
+
+	// --version / -v flag: print rich version info.
+	cmd.Version = version.Get().GitVersion
+	cmd.SetVersionTemplate(versionTemplate())
 
 	opts.AddFlags(cmd.PersistentFlags())
 	_ = viper.BindPFlags(cmd.PersistentFlags())
@@ -119,7 +126,6 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) (*cobra.Command, *clioptions.Op
 				completion.NewCmdCompletion(ioStreams),
 				settings.NewCmdSettings(f, ioStreams),
 				update.NewCmdUpdate(f, ioStreams),
-				version.NewCmdVersion(f, ioStreams),
 			},
 		},
 	}
@@ -147,4 +153,29 @@ func skipCredentialResolution(cmd *cobra.Command) bool {
 		return true
 	}
 	return false
+}
+
+// versionTemplate returns the template used by cobra's --version flag.
+func versionTemplate() string {
+	info := version.Get()
+	sdkVer := depVersion("github.com/verda-cloud/verdacloud-sdk-go")
+	stackVer := depVersion("github.com/verda-cloud/verdagostack")
+	return fmt.Sprintf("  Version:      %s\n  Platform:     %s\n  SDK:          %s\n  Verdagostack: %s\n",
+		info.GitVersion, info.Platform, sdkVer, stackVer)
+}
+
+func depVersion(modulePath string) string {
+	bi, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "unknown"
+	}
+	for _, dep := range bi.Deps {
+		if dep.Path == modulePath {
+			if dep.Replace != nil {
+				return dep.Replace.Version + " (replaced)"
+			}
+			return dep.Version
+		}
+	}
+	return "unknown"
 }
