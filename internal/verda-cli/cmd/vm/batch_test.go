@@ -245,3 +245,88 @@ func TestFormatBatchResultsNilResults(t *testing.T) {
 		t.Fatalf("expected hostnames in output, got: %s", output)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Part E: Integration Tests (Task 9)
+// ---------------------------------------------------------------------------
+
+func TestShortcutCommandsHaveBatchFlags(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	ioStreams := cmdutil.IOStreams{Out: &buf, ErrOut: &buf}
+	f := cmdutil.NewTestFactory(nil)
+
+	vmCmd := NewCmdVM(f, ioStreams)
+
+	// The shortcut commands to check. Some may be aliases.
+	wantCommands := []string{"shutdown", "start", "hibernate", "delete"}
+	for _, name := range wantCommands {
+		t.Run(name, func(t *testing.T) {
+			var found *cobra.Command
+			for _, sub := range vmCmd.Commands() {
+				if sub.Name() == name {
+					found = sub
+					break
+				}
+			}
+			if found == nil {
+				t.Fatalf("subcommand %q not found", name)
+			}
+			for _, flag := range []string{"all", "status", "with-volumes"} {
+				if found.Flags().Lookup(flag) == nil {
+					t.Errorf("%s missing --%s flag", name, flag)
+				}
+			}
+		})
+	}
+}
+
+func TestWithVolumesHiddenOnNonDelete(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	ioStreams := cmdutil.IOStreams{Out: &buf, ErrOut: &buf}
+	f := cmdutil.NewTestFactory(nil)
+
+	vmCmd := NewCmdVM(f, ioStreams)
+
+	for _, sub := range vmCmd.Commands() {
+		wvFlag := sub.Flags().Lookup("with-volumes")
+		if wvFlag == nil {
+			continue
+		}
+		isDelete := sub.Name() == "delete"
+		if !isDelete && !wvFlag.Hidden {
+			t.Errorf("--with-volumes should be hidden on %s", sub.Name())
+		}
+		if isDelete && wvFlag.Hidden {
+			t.Errorf("--with-volumes should NOT be hidden on delete")
+		}
+	}
+}
+
+func TestActionNameToAPI(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"start", verda.ActionStart},
+		{"shutdown", verda.ActionShutdown},
+		{"stop", verda.ActionShutdown},
+		{"hibernate", verda.ActionHibernate},
+		{"delete", verda.ActionDelete},
+		{"force_shutdown", verda.ActionForceShutdown},
+		{"force-shutdown", verda.ActionForceShutdown},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := actionNameToAPI(tt.input)
+			if got != tt.want {
+				t.Errorf("actionNameToAPI(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}

@@ -1,6 +1,9 @@
 package vm
 
 import (
+	"fmt"
+	"strings"
+
 	"github.com/spf13/cobra"
 
 	cmdutil "github/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
@@ -58,6 +61,8 @@ func newShortcutCmd(f cmdutil.Factory, ioStreams cmdutil.IOStreams, def shortcut
 		},
 	}
 
+	cmd.Example = shortcutExamples(def)
+
 	cmd.Flags().StringVar(&opts.InstanceID, "id", "", "Instance ID (alternative to positional argument)")
 	cmd.Flags().BoolVar(&opts.Yes, "yes", false, "Skip confirmation for destructive actions")
 	cmd.Flags().BoolVar(&opts.All, "all", false, "Target all instances matching filters")
@@ -70,4 +75,37 @@ func newShortcutCmd(f cmdutil.Factory, ioStreams cmdutil.IOStreams, def shortcut
 	}
 
 	return cmd
+}
+
+func shortcutExamples(def shortcutDef) string {
+	name := strings.SplitN(def.Use, " ", 2)[0]
+
+	examples := fmt.Sprintf(`# %s a specific instance
+verda vm %s inst-abc-123
+
+# Interactive: select from list
+verda vm %s
+
+# Batch: %s all matching instances
+verda vm %s --all --status %s`, def.Short, name, name, strings.ToLower(strings.SplitN(def.Short, " ", 2)[0]), name, exampleStatus(def.Action))
+
+	if def.Action == "delete" {
+		examples += fmt.Sprintf(`
+
+# Batch delete with volumes
+verda vm %s --all --status offline --with-volumes --yes`, name)
+	}
+
+	return cmdutil.Examples(examples)
+}
+
+func exampleStatus(action string) string {
+	switch action {
+	case "start":
+		return "offline"
+	case "delete":
+		return "offline"
+	default:
+		return "running"
+	}
 }
