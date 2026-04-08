@@ -106,8 +106,8 @@ func runImages(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 	}
 
 	_, _ = fmt.Fprintf(ioStreams.Out, "  %d image(s) found\n\n", len(images))
-	_, _ = fmt.Fprintf(ioStreams.Out, "  %-38s  %-45s  %-12s  %s\n", "ID", "NAME", "CATEGORY", "DETAILS")
-	_, _ = fmt.Fprintf(ioStreams.Out, "  %-38s  %-45s  %-12s  %s\n", "--", "----", "--------", "-------")
+	_, _ = fmt.Fprintf(ioStreams.Out, "  %-38s  %-45s  %-12s  %s\n", "IMAGE TYPE", "NAME", "CATEGORY", "DETAILS")
+	_, _ = fmt.Fprintf(ioStreams.Out, "  %-38s  %-45s  %-12s  %s\n", "----------", "----", "--------", "-------")
 	for i := range images {
 		details := strings.Join(images[i].Details, ", ")
 		def := ""
@@ -115,7 +115,7 @@ func runImages(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 			def = " *"
 		}
 		_, _ = fmt.Fprintf(ioStreams.Out, "  %-38s  %-45s  %-12s  %s%s\n",
-			images[i].ID, images[i].Name, images[i].Category, details, def)
+			images[i].ImageType, images[i].Name, images[i].Category, details, def)
 	}
 	return nil
 }
