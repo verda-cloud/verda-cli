@@ -313,6 +313,127 @@ func writeBatchAgentOutput(ioStreams cmdutil.IOStreams, format, action string, i
 	return nil
 }
 
+// selectInstances shows a multi-select picker for choosing one or more instances.
+// Returns the selected Instance structs (empty if canceled).
+func selectInstances(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client *verda.Client, statusFilter ...string) ([]verda.Instance, error) {
+	var sp interface{ Stop(string) }
+	if status := f.Status(); status != nil {
+		sp, _ = status.Spinner(ctx, "Loading instances...")
+	}
+	instances, err := client.Instances.Get(ctx, "")
+	if sp != nil {
+		sp.Stop("")
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	// Filter by status.
+	if len(statusFilter) > 0 {
+		filtered := instances[:0]
+		for i := range instances {
+			for _, s := range statusFilter {
+				if instances[i].Status == s {
+					filtered = append(filtered, instances[i])
+					break
+				}
+			}
+		}
+		instances = filtered
+	}
+
+	if len(instances) == 0 {
+		if len(statusFilter) > 0 {
+			_, _ = fmt.Fprintf(ioStreams.Out, "No instances with status %s found.\n", strings.Join(statusFilter, ", "))
+		} else {
+			_, _ = fmt.Fprintln(ioStreams.Out, "No instances found.")
+		}
+		return nil, nil
+	}
+
+	labels := make([]string, len(instances))
+	for i := range instances {
+		labels[i] = formatInstanceRow(&instances[i])
+	}
+
+	indices, err := f.Prompter().MultiSelect(ctx, "Select instances (type to filter, ctrl+a select all)", labels)
+	if err != nil {
+		return nil, nil //nolint:nilerr // User pressed Esc/Ctrl+C.
+	}
+	if len(indices) == 0 {
+		_, _ = fmt.Fprintln(ioStreams.ErrOut, "No instances selected.")
+		return nil, nil
+	}
+
+	selected := make([]verda.Instance, len(indices))
+	for i, idx := range indices {
+		selected[i] = instances[idx]
+	}
+	return selected, nil
+}
+
+// runBatchWithInstances runs a batch action on pre-selected instances
+// (from the interactive multi-select picker).
+func runBatchWithInstances(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client *verda.Client, instances []verda.Instance, opts *actionOptions) error {
+	ctx := cmd.Context()
+
+	action, err := resolveAction(opts.Action, allActions)
+	if err != nil {
+		return err
+	}
+
+	// Delete has special handling.
+	if action.Execute == nil {
+		return runBatchDelete(cmd, f, ioStreams, client, instances, opts)
+	}
+
+	// Confirmation.
+	_, _ = fmt.Fprint(ioStreams.ErrOut, formatBatchConfirmation(action.Label, instances))
+	if action.WarningMsg != "" {
+		warnStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Bold(true)
+		_, _ = fmt.Fprintf(ioStreams.ErrOut, "\n  %s\n\n", warnStyle.Render(action.WarningMsg))
+	}
+
+	confirmed, confirmErr := f.Prompter().Confirm(ctx, fmt.Sprintf("Continue? (%s %d instances)", action.Label, len(instances)))
+	if confirmErr != nil || !confirmed {
+		_, _ = fmt.Fprintln(ioStreams.ErrOut, "Canceled.")
+		return nil
+	}
+
+	// Collect IDs.
+	ids := make([]string, len(instances))
+	for i := range instances {
+		ids[i] = instances[i].ID
+	}
+
+	cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), fmt.Sprintf("Batch %s on %d instances:", action.Label, len(instances)), map[string]any{
+		"action":       opts.Action,
+		"instance_ids": ids,
+	})
+
+	// Execute with spinner.
+	actionCtx, cancel := context.WithTimeout(ctx, f.Options().Timeout)
+	defer cancel()
+
+	var actionSp interface{ Stop(string) }
+	if status := f.Status(); status != nil {
+		actionSp, _ = status.Spinner(actionCtx, fmt.Sprintf("%s %d instances...", action.Label, len(instances)))
+	}
+	results, err := client.Instances.Action(actionCtx, verda.InstanceActionRequest{
+		Action: actionNameToAPI(opts.Action),
+		ID:     ids,
+	})
+	if actionSp != nil {
+		actionSp.Stop("")
+	}
+	if err != nil {
+		return err
+	}
+
+	_, _ = fmt.Fprint(ioStreams.Out, formatBatchResults(action.Label, instances, results))
+	return nil
+}
+
 // fetchBatchInstances loads instances from the API and filters them to those
 // valid for the requested action.
 func fetchBatchInstances(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client *verda.Client, opts *actionOptions) ([]verda.Instance, error) {

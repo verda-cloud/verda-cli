@@ -175,25 +175,16 @@ func runAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 	prompter := f.Prompter()
 	ctx := cmd.Context()
 
-	// Select instance if not provided.
+	// Select instance(s) if not provided.
 	if opts.InstanceID == "" {
-		// When action is pre-set (shortcut commands), only show instances
-		// with statuses valid for that action.
-		var statusFilter []string
-		if opts.Status != "" {
-			// Explicit --status flag overrides action-based filtering.
-			statusFilter = []string{opts.Status}
-		} else if opts.Action != "" {
-			statusFilter = validFromForAction(opts.Action)
+		id, batchErr := resolveInstanceInteractive(cmd, f, ioStreams, client, opts)
+		if batchErr != nil {
+			return batchErr
 		}
-		selected, err := selectInstance(ctx, f, ioStreams, client, statusFilter...)
-		if err != nil {
-			return err
+		if id == "" {
+			return nil // canceled or routed to batch
 		}
-		if selected == "" {
-			return nil
-		}
-		opts.InstanceID = selected
+		opts.InstanceID = id
 	}
 
 	// Fetch instance details.
@@ -344,6 +335,38 @@ func runDeleteAgent(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IO
 	}
 	_, _ = cmdutil.WriteStructured(ioStreams.Out, f.OutputFormat(), result)
 	return nil
+}
+
+// resolveInstanceInteractive handles interactive instance selection.
+// For shortcut commands (action pre-set), uses multi-select so users can pick
+// multiple instances. If multiple are selected, routes to batch and returns "".
+// Returns the selected instance ID, or "" if canceled/routed to batch.
+func resolveInstanceInteractive(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client *verda.Client, opts *actionOptions) (string, error) {
+	ctx := cmd.Context()
+
+	var statusFilter []string
+	if opts.Status != "" {
+		statusFilter = []string{opts.Status}
+	} else if opts.Action != "" {
+		statusFilter = validFromForAction(opts.Action)
+	}
+
+	// Shortcut commands use multi-select; generic "vm action" uses single-select.
+	if opts.Action == "" {
+		return selectInstance(ctx, f, ioStreams, client, statusFilter...)
+	}
+
+	selected, err := selectInstances(ctx, f, ioStreams, client, statusFilter...)
+	if err != nil {
+		return "", err
+	}
+	if len(selected) == 0 {
+		return "", nil
+	}
+	if len(selected) > 1 {
+		return "", runBatchWithInstances(cmd, f, ioStreams, client, selected, opts)
+	}
+	return selected[0].ID, nil
 }
 
 func selectInstance(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client *verda.Client, statusFilter ...string) (string, error) {
