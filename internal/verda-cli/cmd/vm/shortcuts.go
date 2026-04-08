@@ -22,22 +22,22 @@ var shortcuts = []shortcutDef{
 	{
 		Use:    "start <instance-id>",
 		Short:  "Start a VM instance",
-		Action: "start",
+		Action: verda.ActionStart,
 	},
 	{
 		Use:    "stop <instance-id>",
 		Short:  "Stop a VM instance",
-		Action: "shutdown",
+		Action: verda.ActionShutdown,
 	},
 	{
 		Use:    "shutdown <instance-id>",
 		Short:  "Shutdown a VM instance",
-		Action: "shutdown",
+		Action: verda.ActionShutdown,
 	},
 	{
 		Use:    "hibernate <instance-id>",
 		Short:  "Hibernate a VM instance",
-		Action: "hibernate",
+		Action: verda.ActionHibernate,
 	},
 	{
 		Use:     "delete <instance-id>",
@@ -110,7 +110,7 @@ verda vm %s --all --status offline --with-volumes --yes`, name)
 
 func exampleStatus(action string) string {
 	switch action {
-	case "start":
+	case verda.ActionStart:
 		return "offline"
 	case verda.ActionDelete:
 		return "offline"

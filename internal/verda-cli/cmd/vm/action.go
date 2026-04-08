@@ -15,12 +15,12 @@ import (
 
 // actionNameMap maps CLI flag values to action labels.
 var actionNameMap = map[string]string{
-	"start":          "Start",
-	"shutdown":       "Shutdown",
-	"force_shutdown": "Force shutdown",
-	"force-shutdown": "Force shutdown",
-	"hibernate":      "Hibernate",
-	"delete":         "Delete instance",
+	verda.ActionStart:         "Start",
+	verda.ActionShutdown:      "Shutdown",
+	verda.ActionForceShutdown: "Force shutdown",
+	"force-shutdown":          "Force shutdown", // CLI alias (hyphenated)
+	verda.ActionHibernate:     "Hibernate",
+	verda.ActionDelete:        "Delete instance",
 }
 
 // instanceAction defines a supported action with its display label and executor.
@@ -310,7 +310,7 @@ func runAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 // runDeleteAgent handles delete in agent mode: requires --yes, deletes all volumes.
 func runDeleteAgent(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client *verda.Client, inst *verda.Instance, yes bool) error {
 	if !yes {
-		return cmdutil.NewConfirmationRequiredError("delete")
+		return cmdutil.NewConfirmationRequiredError(verda.ActionDelete)
 	}
 
 	// In agent mode, delete the instance and all attached volumes.
@@ -330,7 +330,7 @@ func runDeleteAgent(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IO
 
 	result := map[string]any{
 		"id":              inst.ID,
-		"action":          "delete",
+		"action":          verda.ActionDelete,
 		"status":          "completed",
 		"volumes_deleted": len(volumeIDs),
 	}

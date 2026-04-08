@@ -192,7 +192,7 @@ func runBatchDelete(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOS
 	}
 
 	if f.AgentMode() {
-		return writeBatchAgentOutput(ioStreams, f.OutputFormat(), "delete", instances, results)
+		return writeBatchAgentOutput(ioStreams, f.OutputFormat(), verda.ActionDelete, instances, results)
 	}
 
 	_, _ = fmt.Fprint(ioStreams.Out, formatBatchResults("Delete", instances, results))
