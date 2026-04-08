@@ -245,7 +245,7 @@ func actionNameToAPI(action string) string {
 	switch strings.ToLower(action) {
 	case "start":
 		return verda.ActionStart
-	case "shutdown", "stop":
+	case "shutdown":
 		return verda.ActionShutdown
 	case "force_shutdown", "force-shutdown":
 		return verda.ActionForceShutdown
