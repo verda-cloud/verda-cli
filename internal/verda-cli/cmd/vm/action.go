@@ -151,7 +151,7 @@ func runAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 	// In agent mode, --id and --action are required.
 	if f.AgentMode() {
 		var missing []string
-		if opts.InstanceID == "" {
+		if opts.InstanceID == "" && !opts.All {
 			missing = append(missing, "--id")
 		}
 		if opts.Action == "" {
@@ -160,6 +160,11 @@ func runAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 		if len(missing) > 0 {
 			return cmdutil.NewMissingFlagsError(missing)
 		}
+	}
+
+	// Batch mode: --all routes to batch execution.
+	if opts.All {
+		return runBatchAction(cmd, f, ioStreams, opts)
 	}
 
 	client, err := f.VerdaClient()
