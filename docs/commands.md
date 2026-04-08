@@ -136,6 +136,7 @@ Available themes: `default`, `dracula`, `catppuccin`, `catppuccin-latte`, `nord`
 | `verda update` | Update to the latest version |
 | `verda update --version v1.0.0` | Install a specific version (upgrade or downgrade) |
 | `verda update --list` | List available versions |
+| `verda update --verify` | Verify the binary checksum against the GitHub release |
 
 ## Shell Completion
 
@@ -154,6 +155,7 @@ verda completion fish | source
 
 | Flag | Description |
 |------|-------------|
+| `--version, -v` | Print version information |
 | `--output, -o` | Output format: `table`, `json`, `yaml` (default: table) |
 | `--agent` | Agent mode: JSON output, no prompts, structured errors |
 | `--debug` | Enable debug output (API request/response details) |
