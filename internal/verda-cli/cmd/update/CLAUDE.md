@@ -2,7 +2,7 @@
 
 ## Quick Reference
 - Parent: `verda update` (no aliases)
-- Subcommands: none (single command with `--list` and `--version` flags)
+- Subcommands: none (single command with `--list` and `--target` flags)
 - Files:
   - `update.go` -- All logic: command def, GitHub API, archive extraction, binary replacement
 
@@ -10,7 +10,7 @@
 
 ### Version Resolution
 - Current version from `version.Get().GitVersion` (from `verdagostack/pkg/version`)
-- Auto-prepends `v` prefix if missing from `--version` flag
+- Auto-prepends `v` prefix if missing from `--target` flag
 - Skips update if target == current
 
 ### Asset Matching

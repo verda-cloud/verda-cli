@@ -73,8 +73,7 @@ func (o *Options) AddFlags(fs *pflag.FlagSet) {
 	hideFlags(fs, "auth.client-id", "auth.client-secret", "auth.token",
 		"auth.profile", "auth.credentials-file",
 		"log.disable-caller", "log.disable-stacktrace", "log.enable-color",
-		"log.format", "log.level", "log.output-paths",
-		"version")
+		"log.format", "log.level", "log.output-paths")
 }
 
 // AddFlags binds authentication flags to the given flag set.
