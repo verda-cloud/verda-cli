@@ -326,6 +326,11 @@ func renderDashboard(w interface{ Write([]byte) (int, error) }, d *Dashboard) {
 		}
 	}
 
+	// Disclaimer.
+	lines = append(lines,
+		"",
+		dim.Render("* Estimated. For details, see Billing & Settings at console.verda.com"))
+
 	// Render box.
 	content := strings.Join(lines, "\n")
 
