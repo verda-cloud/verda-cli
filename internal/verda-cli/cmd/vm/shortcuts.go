@@ -60,7 +60,14 @@ func newShortcutCmd(f cmdutil.Factory, ioStreams cmdutil.IOStreams, def shortcut
 
 	cmd.Flags().StringVar(&opts.InstanceID, "id", "", "Instance ID (alternative to positional argument)")
 	cmd.Flags().BoolVar(&opts.Yes, "yes", false, "Skip confirmation for destructive actions")
+	cmd.Flags().BoolVar(&opts.All, "all", false, "Target all instances matching filters")
+	cmd.Flags().StringVar(&opts.Status, "status", "", "Filter instances by status (e.g., running, offline)")
+	cmd.Flags().BoolVar(&opts.WithVolumes, "with-volumes", false, "Also delete all attached volumes (delete only)")
 	opts.Wait.AddFlags(cmd.Flags(), true)
+
+	if def.Action != "delete" {
+		_ = cmd.Flags().MarkHidden("with-volumes")
+	}
 
 	return cmd
 }

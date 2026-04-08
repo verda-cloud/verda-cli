@@ -98,10 +98,13 @@ func availableActions(status string) []instanceAction {
 }
 
 type actionOptions struct {
-	InstanceID string
-	Action     string
-	Yes        bool
-	Wait       cmdutil.WaitOptions
+	InstanceID  string
+	Action      string
+	Yes         bool
+	All         bool
+	Status      string
+	WithVolumes bool
+	Wait        cmdutil.WaitOptions
 }
 
 // NewCmdAction creates the vm action cobra command.
