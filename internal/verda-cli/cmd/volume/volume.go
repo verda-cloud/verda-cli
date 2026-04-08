@@ -24,6 +24,7 @@ func NewCmdVolume(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 		NewCmdDescribe(f, ioStreams),
 		NewCmdAction(f, ioStreams),
 		NewCmdTrash(f, ioStreams),
+		NewCmdDelete(f, ioStreams),
 	)
 	return cmd
 }
