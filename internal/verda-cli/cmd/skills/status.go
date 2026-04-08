@@ -64,15 +64,17 @@ func runStatus(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStrea
 		Agents:    state.Agents,
 	}
 
-	// Check for updates (best-effort).
+	// Check for updates (best-effort). Also used to resolve agent display names.
+	var manifest *Manifest
 	if out.Installed {
 		ft := opts.fetcher
 		if ft == nil {
 			ft = NewFetcher()
 		}
-		if manifest, fetchErr := ft.FetchManifest(ctx); fetchErr == nil {
-			out.Latest = manifest.Version
-			out.UpdateAvailable = manifest.Version != state.Version
+		if m, fetchErr := ft.FetchManifest(ctx); fetchErr == nil {
+			manifest = m
+			out.Latest = m.Version
+			out.UpdateAvailable = m.Version != state.Version
 		}
 	}
 
@@ -99,10 +101,11 @@ func runStatus(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStrea
 	_, _ = fmt.Fprintf(ioStreams.Out, "  Installed:  %s\n", state.InstalledAt.Format("2006-01-02 15:04"))
 	_, _ = fmt.Fprintf(ioStreams.Out, "\n  Agents:\n")
 	for _, name := range out.Agents {
-		agent, ok := AgentByName(name)
 		displayName := name
-		if ok {
-			displayName = agent.DisplayName
+		if manifest != nil {
+			if a, ok := manifest.Agents[name]; ok {
+				displayName = a.DisplayName
+			}
 		}
 		_, _ = fmt.Fprintf(ioStreams.Out, "    %s\n", displayName)
 	}

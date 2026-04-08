@@ -27,7 +27,7 @@ type installOptions struct {
 	agents         []string
 	statePath      string
 	fetcher        *fetcher
-	agentOverrides map[string]Agent
+	agentOverrides map[string]*Agent
 }
 
 func NewCmdInstall(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
@@ -44,9 +44,8 @@ func NewCmdInstall(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Comman
 			Without arguments, shows an interactive picker to select agents.
 			With arguments, installs for the specified agents directly.
 
-			Default agent: claude-code
-
-			Supported agents: claude-code, cursor, windsurf, codex, gemini, copilot
+			Supported agents are defined in the skills repository manifest
+			and may include: claude-code, cursor, windsurf, codex, gemini, copilot.
 		`),
 		Example: cmdutil.Examples(`
 			# Interactive — select agents from a list
@@ -61,7 +60,6 @@ func NewCmdInstall(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Comman
 			# Non-interactive (for CI/scripts)
 			verda --agent skills install claude-code
 		`),
-		ValidArgs: AllAgentNames(),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			opts.agents = args
 			return runInstall(cmd.Context(), f, ioStreams, opts)
@@ -76,15 +74,14 @@ func runInstall(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStre
 		ft = NewFetcher()
 	}
 
-	manifest, err := fetchManifest(ctx, f, ft)
+	manifest, err := fetchManifestWithSpinner(ctx, f, ft)
 	if err != nil {
 		return err
 	}
 
-	// Resolve agents.
-	selectedAgents, err := resolveAgents(ctx, f, ioStreams, opts)
+	selectedAgents, err := resolveAgents(ctx, f, opts, manifest)
 	if err != nil {
-		return err //nolint:wrapcheck // propagate prompter errors as-is
+		return err
 	}
 	if len(selectedAgents) == 0 {
 		_, _ = fmt.Fprintln(ioStreams.ErrOut, "No agents selected.")
@@ -112,12 +109,12 @@ func runInstall(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStre
 	}
 
 	_, _ = fmt.Fprintf(ioStreams.Out, "\nInstalled verda-ai-skills v%s\n", manifest.Version)
-	printHints(ioStreams, opts, selectedAgents)
+	printHints(ioStreams, opts, manifest, selectedAgents)
 
 	return nil
 }
 
-func fetchManifest(ctx context.Context, f cmdutil.Factory, ft *fetcher) (*Manifest, error) {
+func fetchManifestWithSpinner(ctx context.Context, f cmdutil.Factory, ft *fetcher) (*Manifest, error) {
 	var sp interface{ Stop(string) }
 	if status := f.Status(); status != nil {
 		sp, _ = status.Spinner(ctx, "Fetching skills manifest...")
@@ -133,7 +130,7 @@ func fetchManifest(ctx context.Context, f cmdutil.Factory, ft *fetcher) (*Manife
 	return manifest, nil
 }
 
-func confirmInstall(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, manifest *Manifest, selectedAgents []Agent) error {
+func confirmInstall(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, manifest *Manifest, selectedAgents []*Agent) error {
 	if f.AgentMode() {
 		return nil
 	}
@@ -175,14 +172,14 @@ func downloadSkillFiles(ctx context.Context, f cmdutil.Factory, ft *fetcher, man
 	return skillFiles, nil
 }
 
-func installAndPrint(ioStreams cmdutil.IOStreams, selectedAgents []Agent, manifest *Manifest, skillFiles map[string]string) error {
+func installAndPrint(ioStreams cmdutil.IOStreams, selectedAgents []*Agent, manifest *Manifest, skillFiles map[string]string) error {
 	for _, agent := range selectedAgents {
-		if installErr := installForAgent(&agent, skillFiles); installErr != nil {
+		if installErr := installForAgent(agent, skillFiles); installErr != nil {
 			return fmt.Errorf("installing for %s: %w", agent.DisplayName, installErr)
 		}
 		dir := agent.TargetDir()
 		if agent.Method == methodAppend {
-			_, _ = fmt.Fprintf(ioStreams.Out, "  %s: %s\n", agent.DisplayName, filepath.Join(dir, agent.TargetFile))
+			_, _ = fmt.Fprintf(ioStreams.Out, "  %s: %s\n", agent.DisplayName, filepath.Join(dir, agent.TargetFile()))
 		} else {
 			for _, name := range manifest.Skills {
 				_, _ = fmt.Fprintf(ioStreams.Out, "  %s: %s\n", agent.DisplayName, filepath.Join(dir, name))
@@ -192,7 +189,7 @@ func installAndPrint(ioStreams cmdutil.IOStreams, selectedAgents []Agent, manife
 	return nil
 }
 
-func saveInstallState(ioStreams cmdutil.IOStreams, opts *installOptions, manifest *Manifest, selectedAgents []Agent) error {
+func saveInstallState(ioStreams cmdutil.IOStreams, opts *installOptions, manifest *Manifest, selectedAgents []*Agent) error {
 	statePath := opts.statePath
 	if statePath == "" {
 		var err error
@@ -215,7 +212,7 @@ func saveInstallState(ioStreams cmdutil.IOStreams, opts *installOptions, manifes
 	return nil
 }
 
-func printHints(ioStreams cmdutil.IOStreams, opts *installOptions, selectedAgents []Agent) {
+func printHints(ioStreams cmdutil.IOStreams, opts *installOptions, manifest *Manifest, selectedAgents []*Agent) {
 	statePath := opts.statePath
 	if statePath == "" {
 		statePath, _ = StatePath()
@@ -227,7 +224,7 @@ func printHints(ioStreams cmdutil.IOStreams, opts *installOptions, selectedAgent
 		installed[a.Name] = true
 	}
 	var hints []string
-	for _, name := range AllAgentNames() {
+	for _, name := range manifest.AgentNames() {
 		if !installed[name] && !state.HasAgent(name) {
 			hints = append(hints, name)
 		}
@@ -238,14 +235,14 @@ func printHints(ioStreams cmdutil.IOStreams, opts *installOptions, selectedAgent
 	}
 }
 
-func resolveAgents(ctx context.Context, f cmdutil.Factory, _ cmdutil.IOStreams, opts *installOptions) ([]Agent, error) {
+func resolveAgents(ctx context.Context, f cmdutil.Factory, opts *installOptions, manifest *Manifest) ([]*Agent, error) {
 	if len(opts.agents) > 0 {
-		resolved := make([]Agent, 0, len(opts.agents))
+		resolved := make([]*Agent, 0, len(opts.agents))
 		for _, name := range opts.agents {
-			a := resolveAgent(opts, name)
-			if a.Name == "" {
+			a := resolveAgent(opts, manifest, name)
+			if a == nil {
 				return nil, fmt.Errorf("unknown agent %q. Known agents: %s",
-					name, strings.Join(AllAgentNames(), ", "))
+					name, strings.Join(manifest.AgentNames(), ", "))
 			}
 			resolved = append(resolved, a)
 		}
@@ -253,33 +250,37 @@ func resolveAgents(ctx context.Context, f cmdutil.Factory, _ cmdutil.IOStreams, 
 	}
 
 	if f.AgentMode() {
-		a := resolveAgent(opts, "claude-code")
-		return []Agent{a}, nil
+		a := resolveAgent(opts, manifest, defaultAgentName)
+		if a == nil {
+			return nil, errors.New("claude-code not found in manifest")
+		}
+		return []*Agent{a}, nil
 	}
 
-	labels := AgentDisplayLabels()
+	labels := manifest.AgentDisplayLabels()
 	selected, err := f.Prompter().MultiSelect(ctx, "Select AI agents to install skills for", labels)
 	if err != nil {
 		return nil, err
 	}
 
-	allNames := AllAgentNames()
-	resolved := make([]Agent, 0, len(selected))
+	names := manifest.AgentNames()
+	resolved := make([]*Agent, 0, len(selected))
 	for _, idx := range selected {
-		a := resolveAgent(opts, allNames[idx])
-		resolved = append(resolved, a)
+		a := resolveAgent(opts, manifest, names[idx])
+		if a != nil {
+			resolved = append(resolved, a)
+		}
 	}
 	return resolved, nil
 }
 
-func resolveAgent(opts *installOptions, name string) Agent {
+func resolveAgent(opts *installOptions, manifest *Manifest, name string) *Agent {
 	if opts.agentOverrides != nil {
 		if a, ok := opts.agentOverrides[name]; ok {
 			return a
 		}
 	}
-	a, _ := AgentByName(name)
-	return a
+	return manifest.Agents[name]
 }
 
 func installForAgent(agent *Agent, skillFiles map[string]string) error {
@@ -304,7 +305,7 @@ func installCopy(dir string, skillFiles map[string]string) error {
 }
 
 func installAppend(agent *Agent, dir string, skillFiles map[string]string) error {
-	path := filepath.Join(dir, agent.TargetFile)
+	path := filepath.Join(dir, agent.TargetFile())
 
 	var block strings.Builder
 	block.WriteString(markerStart + "\n")

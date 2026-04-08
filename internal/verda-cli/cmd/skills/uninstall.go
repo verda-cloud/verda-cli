@@ -18,7 +18,8 @@ type uninstallOptions struct {
 	agents         []string
 	statePath      string
 	skillNames     []string
-	agentOverrides map[string]Agent
+	agentOverrides map[string]*Agent
+	fetcher        *fetcher
 }
 
 func NewCmdUninstall(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
@@ -42,7 +43,6 @@ func NewCmdUninstall(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Comm
 			# Remove from multiple agents
 			verda skills uninstall claude-code cursor
 		`),
-		ValidArgs: AllAgentNames(),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			opts.agents = args
 			return runUninstall(cmd.Context(), f, ioStreams, opts)
@@ -71,7 +71,10 @@ func runUninstall(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOSt
 		return nil
 	}
 
-	selectedAgents, err := resolveUninstallAgents(ctx, f, ioStreams, opts, state)
+	// Fetch manifest to resolve agent definitions.
+	manifest, _ := fetchManifestForUninstall(ctx, opts)
+
+	selectedAgents, err := resolveUninstallAgents(ctx, f, ioStreams, opts, state, manifest)
 	if err != nil {
 		return err
 	}
@@ -103,7 +106,7 @@ func runUninstall(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOSt
 	}
 
 	for _, agent := range selectedAgents {
-		if removeErr := uninstallForAgent(&agent, skillNames); removeErr != nil {
+		if removeErr := uninstallForAgent(agent, skillNames); removeErr != nil {
 			_, _ = fmt.Fprintf(ioStreams.ErrOut, "  Warning: %s: %v\n", agent.DisplayName, removeErr)
 			continue
 		}
@@ -123,18 +126,20 @@ func runUninstall(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOSt
 	return nil
 }
 
-func resolveUninstallAgents(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *uninstallOptions, state *State) ([]Agent, error) {
+func fetchManifestForUninstall(ctx context.Context, opts *uninstallOptions) (*Manifest, error) {
+	ft := opts.fetcher
+	if ft == nil {
+		ft = NewFetcher()
+	}
+	return ft.FetchManifest(ctx)
+}
+
+func resolveUninstallAgents(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *uninstallOptions, state *State, manifest *Manifest) ([]*Agent, error) {
 	if len(opts.agents) > 0 {
-		resolved := make([]Agent, 0, len(opts.agents))
+		resolved := make([]*Agent, 0, len(opts.agents))
 		for _, name := range opts.agents {
-			a, ok := AgentByName(name)
-			if opts.agentOverrides != nil {
-				if override, has := opts.agentOverrides[name]; has {
-					a = override
-					ok = true
-				}
-			}
-			if !ok {
+			a := resolveUninstallAgent(opts, manifest, name)
+			if a == nil {
 				return nil, fmt.Errorf("unknown agent %q", name)
 			}
 			resolved = append(resolved, a)
@@ -143,9 +148,10 @@ func resolveUninstallAgents(ctx context.Context, f cmdutil.Factory, ioStreams cm
 	}
 
 	if f.AgentMode() {
-		resolved := make([]Agent, 0, len(state.Agents))
+		resolved := make([]*Agent, 0, len(state.Agents))
 		for _, name := range state.Agents {
-			if a, ok := AgentByName(name); ok {
+			a := resolveUninstallAgent(opts, manifest, name)
+			if a != nil {
 				resolved = append(resolved, a)
 			}
 		}
@@ -159,7 +165,8 @@ func resolveUninstallAgents(ctx context.Context, f cmdutil.Factory, ioStreams cm
 
 	labels := make([]string, len(state.Agents))
 	for i, name := range state.Agents {
-		if a, ok := AgentByName(name); ok {
+		a := resolveUninstallAgent(opts, manifest, name)
+		if a != nil {
 			labels[i] = a.DisplayName
 		} else {
 			labels[i] = name
@@ -171,13 +178,27 @@ func resolveUninstallAgents(ctx context.Context, f cmdutil.Factory, ioStreams cm
 		return nil, selectErr
 	}
 
-	resolved := make([]Agent, 0, len(selected))
+	resolved := make([]*Agent, 0, len(selected))
 	for _, idx := range selected {
-		if a, ok := AgentByName(state.Agents[idx]); ok {
+		a := resolveUninstallAgent(opts, manifest, state.Agents[idx])
+		if a != nil {
 			resolved = append(resolved, a)
 		}
 	}
 	return resolved, nil
+}
+
+// resolveUninstallAgent looks up an agent by name: overrides first, then manifest.
+func resolveUninstallAgent(opts *uninstallOptions, manifest *Manifest, name string) *Agent {
+	if opts.agentOverrides != nil {
+		if a, ok := opts.agentOverrides[name]; ok {
+			return a
+		}
+	}
+	if manifest != nil {
+		return manifest.Agents[name]
+	}
+	return nil
 }
 
 func uninstallForAgent(agent *Agent, skillNames []string) error {
@@ -199,7 +220,7 @@ func uninstallCopy(agent *Agent, skillNames []string) error {
 }
 
 func uninstallAppend(agent *Agent) error {
-	path := filepath.Join(agent.TargetDir(), agent.TargetFile)
+	path := filepath.Join(agent.TargetDir(), agent.TargetFile())
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {

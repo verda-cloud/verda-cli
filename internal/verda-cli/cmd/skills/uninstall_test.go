@@ -18,10 +18,9 @@ func TestUninstallCopy(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "verda-cloud.md"), []byte("test"), 0o644)
 	os.WriteFile(filepath.Join(dir, "verda-commands.md"), []byte("test"), 0o644)
-
 	agent := &Agent{
 		Name: "test-agent", Scope: "global", Method: "copy",
-		TargetDir: func() string { return dir },
+		Target: dir,
 	}
 	if err := uninstallForAgent(agent, []string{"verda-cloud.md", "verda-commands.md"}); err != nil {
 		t.Fatalf("uninstall error: %v", err)
@@ -39,10 +38,9 @@ func TestUninstallAppend(t *testing.T) {
 	dir := t.TempDir()
 	content := "# My Agents\n\nSome stuff\n\n" + markerStart + "\nskill content\n" + markerEnd + "\n\nMore stuff\n"
 	os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte(content), 0o644)
-
 	agent := &Agent{
 		Name: "codex", Scope: "project", Method: methodAppend,
-		TargetDir: func() string { return dir }, TargetFile: "AGENTS.md",
+		Target: filepath.Join(dir, "AGENTS.md"),
 	}
 	if err := uninstallForAgent(agent, nil); err != nil {
 		t.Fatalf("uninstall error: %v", err)
@@ -64,7 +62,6 @@ func TestRunUninstall_NonInteractive(t *testing.T) {
 	targetDir := t.TempDir()
 	os.WriteFile(filepath.Join(targetDir, "verda-cloud.md"), []byte("test"), 0o644)
 	os.WriteFile(filepath.Join(targetDir, "verda-commands.md"), []byte("test"), 0o644)
-
 	statePath := filepath.Join(t.TempDir(), "skills.json")
 	_ = SaveState(statePath, &State{
 		Version:     "1.0.0",
@@ -81,11 +78,10 @@ func TestRunUninstall_NonInteractive(t *testing.T) {
 		agents:     []string{"claude-code"},
 		statePath:  statePath,
 		skillNames: []string{"verda-cloud.md", "verda-commands.md"},
-		agentOverrides: map[string]Agent{
+		agentOverrides: map[string]*Agent{
 			"claude-code": {
 				Name: "claude-code", DisplayName: "Claude Code",
-				Scope: "global", Method: "copy",
-				TargetDir: func() string { return targetDir },
+				Scope: "global", Method: "copy", Target: targetDir,
 			},
 		},
 	}

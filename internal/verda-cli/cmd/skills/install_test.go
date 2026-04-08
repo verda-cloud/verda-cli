@@ -19,7 +19,7 @@ func newTestServer(t *testing.T) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/verda-cloud/verda-ai-skills/main/manifest.json":
-			w.Write([]byte(`{"version":"1.0.0","skills":["verda-cloud.md","verda-commands.md"]}`))
+			w.Write([]byte(`{"version":"1.0.0","skills":["verda-cloud.md","verda-commands.md"],"agents":{"claude-code":{"display_name":"Claude Code","scope":"global","target":"~/.claude/skills/","method":"copy"}}}`))
 		case "/verda-cloud/verda-ai-skills/main/skills/verda-cloud.md":
 			w.Write([]byte("# Verda Cloud\nDecision engine content"))
 		case "/verda-cloud/verda-ai-skills/main/skills/verda-commands.md":
@@ -39,8 +39,7 @@ func TestInstallCopy(t *testing.T) {
 	}
 	agent := &Agent{
 		Name: "test-agent", DisplayName: "Test Agent",
-		Scope: "global", Method: "copy",
-		TargetDir: func() string { return dir },
+		Scope: "global", Method: "copy", Target: dir,
 	}
 	if err := installForAgent(agent, skillFiles); err != nil {
 		t.Fatalf("install error: %v", err)
@@ -62,8 +61,8 @@ func TestInstallAppend(t *testing.T) {
 	skillFiles := map[string]string{"verda-cloud.md": "# Verda Cloud\ntest"}
 	agent := &Agent{
 		Name: "codex", DisplayName: "Codex",
-		Scope: "project", Method: "append",
-		TargetDir: func() string { return dir }, TargetFile: "AGENTS.md",
+		Scope: "project", Method: methodAppend,
+		Target: filepath.Join(dir, "AGENTS.md"),
 	}
 	if err := installForAgent(agent, skillFiles); err != nil {
 		t.Fatalf("install error: %v", err)
@@ -87,8 +86,8 @@ func TestInstallAppend_Idempotent(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	agent := &Agent{
-		Name: "codex", Scope: "project", Method: "append",
-		TargetDir: func() string { return dir }, TargetFile: "AGENTS.md",
+		Name: "codex", Scope: "project", Method: methodAppend,
+		Target: filepath.Join(dir, "AGENTS.md"),
 	}
 	_ = installForAgent(agent, map[string]string{"verda-cloud.md": "# V1"})
 	_ = installForAgent(agent, map[string]string{"verda-cloud.md": "# V2"})
@@ -119,11 +118,10 @@ func TestRunInstall_NonInteractive(t *testing.T) {
 		agents:    []string{"claude-code"},
 		statePath: statePath,
 		fetcher:   &fetcher{baseURL: srv.URL, client: srv.Client()},
-		agentOverrides: map[string]Agent{
+		agentOverrides: map[string]*Agent{
 			"claude-code": {
 				Name: "claude-code", DisplayName: "Claude Code",
-				Scope: "global", Method: "copy",
-				TargetDir: func() string { return targetDir },
+				Scope: "global", Method: "copy", Target: targetDir,
 			},
 		},
 	}

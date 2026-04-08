@@ -17,7 +17,7 @@ import (
 func TestRunStatus_Installed(t *testing.T) {
 	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`{"version":"1.1.0","skills":["verda-cloud.md"]}`))
+		w.Write([]byte(`{"version":"1.1.0","skills":["verda-cloud.md"],"agents":{"claude-code":{"display_name":"Claude Code","scope":"global","target":"~/.claude/skills/","method":"copy"},"cursor":{"display_name":"Cursor","scope":"project","target":".cursor/rules/","method":"copy"}}}`))
 	}))
 	defer srv.Close()
 
