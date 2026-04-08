@@ -94,7 +94,7 @@ func runStatus(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 		sp, _ = status.Spinner(ctx, "Loading dashboard...")
 	}
 
-	// Fetch data in parallel.
+	// Fetch all data off the main goroutine (sequential to keep error handling simple).
 	type result struct {
 		instances []verda.Instance
 		volumes   []verda.Volume
@@ -208,12 +208,15 @@ func buildDashboard(instances []verda.Instance, volumes []verda.Volume, balance 
 		d.Financials.RunwayDays = int(math.Floor(d.Financials.Balance / d.Financials.BurnRateDaily))
 	}
 
-	// Locations sorted by instance count descending.
+	// Locations sorted by instance count descending, then code ascending for stability.
 	for _, loc := range locMap {
 		d.Locations = append(d.Locations, *loc)
 	}
 	sort.Slice(d.Locations, func(i, j int) bool {
-		return d.Locations[i].Instances > d.Locations[j].Instances
+		if d.Locations[i].Instances != d.Locations[j].Instances {
+			return d.Locations[i].Instances > d.Locations[j].Instances
+		}
+		return d.Locations[i].Code < d.Locations[j].Code
 	})
 
 	return d
@@ -270,8 +273,8 @@ func renderDashboard(w interface{ Write([]byte) (int, error) }, d *Dashboard) {
 		"",
 		fmt.Sprintf("%-13s%s  %s",
 			bold.Render("Burn rate:"),
-			price.Render(formatPrice(d.Financials.BurnRateHourly)+"/hr"),
-			dim.Render(fmt.Sprintf("(%s/day)", formatPrice(d.Financials.BurnRateDaily)))),
+			price.Render(cmdutil.FormatPrice(d.Financials.BurnRateHourly)+"/hr"),
+			dim.Render(fmt.Sprintf("(%s/day)", cmdutil.FormatPrice(d.Financials.BurnRateDaily)))),
 		fmt.Sprintf("%-13s%s",
 			bold.Render("Balance:"),
 			price.Render(fmt.Sprintf("$%.2f", d.Financials.Balance))))
@@ -320,11 +323,4 @@ func renderDashboard(w interface{ Write([]byte) (int, error) }, d *Dashboard) {
 		Padding(1, 2)
 
 	_, _ = fmt.Fprintf(w, "\n%s\n\n", box.Render(content))
-}
-
-func formatPrice(v float64) string {
-	if v < 0.01 {
-		return fmt.Sprintf("$%.4f", v)
-	}
-	return fmt.Sprintf("$%.2f", v)
 }
