@@ -88,6 +88,38 @@ verda cost balance
 | `verda auth show` | Show active profile and credentials path |
 | `verda auth use PROFILE` | Switch active auth profile |
 
+### Credential Resolution Order
+
+Credentials are resolved from multiple sources in order of precedence:
+
+| Priority | Source | Example |
+|----------|--------|---------|
+| 1 | CLI flags (highest) | `--auth.client-id=xxx` |
+| 2 | Config file | `auth.client-id` in `~/.verda/config.yaml` |
+| 3 | Environment variables | `VERDA_CLIENT_ID`, `VERDA_CLIENT_SECRET` |
+| 4 | Credentials file | `[default]` in `~/.verda/credentials` |
+
+> **Note:** When `--auth.profile` is passed explicitly, the credentials file
+> values for that profile override env vars — but CLI flags still win.
+
+### Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `VERDA_CLIENT_ID` | API client ID |
+| `VERDA_CLIENT_SECRET` | API client secret |
+| `VERDA_PROFILE` | Credentials profile name |
+| `VERDA_SHARED_CREDENTIALS_FILE` | Path to credentials file |
+| `VERDA_AGENT` | Enable agent mode (`1` or `true`) |
+| `VERDA_HOME` | Base directory for config (default `~/.verda`) |
+
+```bash
+# Use env vars for CI/CD pipelines
+export VERDA_CLIENT_ID=your-client-id
+export VERDA_CLIENT_SECRET=your-client-secret
+verda vm list
+```
+
 ## Settings
 
 | Command | Description |
