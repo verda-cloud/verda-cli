@@ -35,6 +35,7 @@ const (
 func NewCmdUpdate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 	var targetVersion string
 	var listVersions bool
+	var verify bool
 
 	cmd := &cobra.Command{
 		Use:   "update",
@@ -64,12 +65,17 @@ func NewCmdUpdate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 			if listVersions {
 				return runList(cmd.Context(), ioStreams)
 			}
+			if verify {
+				info := version.Get()
+				return runVerify(ioStreams.Out, ioStreams.ErrOut, f.OutputFormat(), f.HTTPClient(), info.GitVersion, runtime.GOOS, runtime.GOARCH)
+			}
 			return runUpdate(cmd.Context(), f, ioStreams, targetVersion)
 		},
 	}
 
 	cmd.Flags().StringVar(&targetVersion, "version", "", "Version to install (e.g. v1.0.0)")
 	cmd.Flags().BoolVar(&listVersions, "list", false, "List available versions")
+	cmd.Flags().BoolVar(&verify, "verify", false, "Verify the binary checksum against the GitHub release")
 
 	return cmd
 }
