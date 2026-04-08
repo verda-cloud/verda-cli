@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"runtime/debug"
 
@@ -34,6 +35,7 @@ import (
 // callers (e.g. main) can annotate errors with profile context.
 func NewRootCommand(ioStreams cmdutil.IOStreams) (*cobra.Command, *clioptions.Options) {
 	opts := clioptions.NewOptions()
+	var showVersion bool
 
 	cmd := &cobra.Command{
 		Use:   "verda",
@@ -42,6 +44,13 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) (*cobra.Command, *clioptions.Op
 			Command-line interface for Verda Cloud.`),
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if showVersion {
+				_, _ = fmt.Fprint(cmd.OutOrStdout(), versionOutput())
+				return ErrVersionRequested
+			}
+			return cmd.Help()
+		},
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			// Skip heavy credential resolution for commands that don't need it:
 			// - mcp serve: defers auth to the first tool call
@@ -65,8 +74,7 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) (*cobra.Command, *clioptions.Op
 	}
 
 	// --version / -v flag: print rich version info.
-	cmd.Version = version.Get().GitVersion
-	cmd.SetVersionTemplate(versionTemplate())
+	cmd.PersistentFlags().BoolVarP(&showVersion, "version", "v", false, "Print version information")
 
 	opts.AddFlags(cmd.PersistentFlags())
 	_ = viper.BindPFlags(cmd.PersistentFlags())
@@ -155,8 +163,12 @@ func skipCredentialResolution(cmd *cobra.Command) bool {
 	return false
 }
 
-// versionTemplate returns the template used by cobra's --version flag.
-func versionTemplate() string {
+// ErrVersionRequested is returned by PersistentPreRunE when --version is set.
+// Callers should check for this error and exit 0 instead of printing it.
+var ErrVersionRequested = errors.New("version requested")
+
+// versionOutput returns the formatted version string.
+func versionOutput() string {
 	info := version.Get()
 	sdkVer := depVersion("github.com/verda-cloud/verdacloud-sdk-go")
 	stackVer := depVersion("github.com/verda-cloud/verdagostack")

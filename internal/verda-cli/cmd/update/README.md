@@ -6,7 +6,7 @@ This is a single command (no subcommands).
 
 | Command | Description | Key Flags |
 |---------|-------------|-----------|
-| `verda update` | Update CLI binary in-place from GitHub Releases | `--version`, `--list` |
+| `verda update` | Update CLI binary in-place from GitHub Releases | `--target`, `--list` |
 
 ## Usage Examples
 
@@ -15,7 +15,7 @@ This is a single command (no subcommands).
 verda update
 
 # Install a specific version (upgrade or downgrade)
-verda update --version v1.0.0
+verda update --target v1.0.0
 
 # List available versions (marks current with *)
 verda update --list
@@ -25,7 +25,7 @@ verda update --list
 
 This command is entirely non-interactive. No prompts are used. Behavior is controlled by flags:
 - No flags: fetches and installs the latest release.
-- `--version <tag>`: installs the specified version. Accepts with or without `v` prefix.
+- `--target <tag>`: installs the specified version. Accepts with or without `v` prefix.
 - `--list`: prints up to 20 available versions and exits. The current version is marked with `*`.
 
 If already at the target version, it prints "Already at vX.Y.Z" and exits.
@@ -35,7 +35,7 @@ If already at the target version, it prints "Already at vX.Y.Z" and exits.
 - **update.go** -- Single file containing all logic: command definition, GitHub API interaction, archive extraction, and binary replacement.
 
 ### Update Flow
-1. Resolve target version (latest via API, or from `--version` flag)
+1. Resolve target version (latest via API, or from `--target` flag)
 2. Compare with current version from `version.Get().GitVersion`
 3. Download platform-specific archive asset from GitHub Releases
 4. Extract binary from tar.gz (Linux/macOS) or zip (Windows)

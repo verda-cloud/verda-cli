@@ -47,7 +47,7 @@ func NewCmdUpdate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 			The binary is installed to ~/.verda/bin/ (no sudo required).
 
 			Without flags, updates to the latest version.
-			Use --version to install a specific version (upgrade or downgrade).
+			Use --target to install a specific version (upgrade or downgrade).
 			Use --list to show available versions.
 		`),
 		Example: cmdutil.Examples(`
@@ -55,7 +55,7 @@ func NewCmdUpdate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 			verda update
 
 			# Install specific version
-			verda update --version v1.0.0
+			verda update --target v1.0.0
 
 			# List available versions
 			verda update --list
@@ -73,7 +73,7 @@ func NewCmdUpdate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 		},
 	}
 
-	cmd.Flags().StringVar(&targetVersion, "version", "", "Version to install (e.g. v1.0.0)")
+	cmd.Flags().StringVar(&targetVersion, "target", "", "Version to install (e.g. v1.0.0)")
 	cmd.Flags().BoolVar(&listVersions, "list", false, "List available versions")
 	cmd.Flags().BoolVar(&verify, "verify", false, "Verify the binary checksum against the GitHub release")
 

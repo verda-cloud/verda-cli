@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -11,7 +12,10 @@ import (
 
 func main() {
 	root, opts := cmd.NewRootCommand(cmdutil.NewStdIOStreams())
-	if err := root.Execute(); err != nil {
+	if err := root.Execute(); errors.Is(err, cmd.ErrVersionRequested) {
+		// --version flag was handled; exit cleanly.
+		return
+	} else if err != nil {
 		// In agent mode, always emit structured JSON errors.
 		if opts.Agent || cmdutil.IsAgentError(err) {
 			ae := cmdutil.ClassifyError(err)

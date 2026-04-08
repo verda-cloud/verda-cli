@@ -134,7 +134,7 @@ Available themes: `default`, `dracula`, `catppuccin`, `catppuccin-latte`, `nord`
 | Command | Description |
 |---------|-------------|
 | `verda update` | Update to the latest version |
-| `verda update --version v1.0.0` | Install a specific version (upgrade or downgrade) |
+| `verda update --target v1.0.0` | Install a specific version (upgrade or downgrade) |
 | `verda update --list` | List available versions |
 | `verda update --verify` | Verify the binary checksum against the GitHub release |
 
