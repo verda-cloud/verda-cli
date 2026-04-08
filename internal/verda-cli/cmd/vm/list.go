@@ -3,6 +3,7 @@ package vm
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
@@ -11,7 +12,8 @@ import (
 )
 
 type listOptions struct {
-	Status string
+	Status   string
+	Location string
 }
 
 // NewCmdList creates the vm list cobra command.
@@ -38,6 +40,7 @@ func NewCmdList(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 
 	flags := cmd.Flags()
 	flags.StringVar(&opts.Status, "status", "", "Filter by status (e.g., running, offline, provisioning)")
+	flags.StringVar(&opts.Location, "location", "", "Filter by location (e.g., FIN-01, FIN-03)")
 
 	return cmd
 }
@@ -61,6 +64,17 @@ func runList(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams,
 	}
 	if err != nil {
 		return err
+	}
+
+	// Client-side location filter (API doesn't support it).
+	if opts.Location != "" {
+		filtered := instances[:0]
+		for i := range instances {
+			if strings.EqualFold(instances[i].Location, opts.Location) {
+				filtered = append(filtered, instances[i])
+			}
+		}
+		instances = filtered
 	}
 
 	cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), fmt.Sprintf("API response: %d instance(s):", len(instances)), instances)
