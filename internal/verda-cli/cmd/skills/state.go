@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
 	clioptions "github/verda-cloud/verda-cli/internal/verda-cli/options"
@@ -20,12 +21,7 @@ type State struct {
 
 // HasAgent reports whether the given agent name is in the installed list.
 func (s *State) HasAgent(name string) bool {
-	for _, a := range s.Agents {
-		if a == name {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(s.Agents, name)
 }
 
 // RemoveAgent removes the named agent from the installed list.
