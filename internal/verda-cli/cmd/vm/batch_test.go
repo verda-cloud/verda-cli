@@ -30,7 +30,7 @@ func TestBatchRejectsAllWithID(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when combining --all with --id")
 	}
-	if !strings.Contains(err.Error(), "cannot combine --all with --id") {
+	if !strings.Contains(err.Error(), "cannot combine --all/--hostname with --id") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -50,7 +50,7 @@ func TestBatchRejectsAllWithPositionalArg(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when combining --all with positional arg")
 	}
-	if !strings.Contains(err.Error(), "cannot combine --all with --id") {
+	if !strings.Contains(err.Error(), "cannot combine --all/--hostname with --id") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -303,6 +303,90 @@ func TestWithVolumesHiddenOnNonDelete(t *testing.T) {
 		if isDelete && wvFlag.Hidden {
 			t.Errorf("--with-volumes should NOT be hidden on delete")
 		}
+	}
+}
+
+func TestFilterByHostname(t *testing.T) {
+	t.Parallel()
+
+	instances := []verda.Instance{
+		{ID: "1", Hostname: "test-worker-1"},
+		{ID: "2", Hostname: "test-worker-2"},
+		{ID: "3", Hostname: "prod-server-1"},
+		{ID: "4", Hostname: "test-db"},
+	}
+
+	// Glob matching
+	filtered := filterByHostname(instances, "test-*")
+	if len(filtered) != 3 {
+		t.Fatalf("expected 3 matches for 'test-*', got %d", len(filtered))
+	}
+
+	// Exact match
+	exact := filterByHostname(instances, "prod-server-1")
+	if len(exact) != 1 {
+		t.Fatalf("expected 1 match for exact hostname, got %d", len(exact))
+	}
+
+	// No matches
+	none := filterByHostname(instances, "staging-*")
+	if len(none) != 0 {
+		t.Fatalf("expected 0 matches for 'staging-*', got %d", len(none))
+	}
+
+	// More specific pattern
+	specific := filterByHostname(instances, "test-worker-?")
+	if len(specific) != 2 {
+		t.Fatalf("expected 2 matches for 'test-worker-?', got %d", len(specific))
+	}
+}
+
+func TestStopCommandExists(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	ioStreams := cmdutil.IOStreams{Out: &buf, ErrOut: &buf}
+	f := cmdutil.NewTestFactory(nil)
+
+	vmCmd := NewCmdVM(f, ioStreams)
+
+	var found bool
+	for _, sub := range vmCmd.Commands() {
+		if sub.Name() == "stop" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("'stop' command should exist as a standalone command")
+	}
+}
+
+func TestHostnameFlag(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	ioStreams := cmdutil.IOStreams{Out: &buf, ErrOut: &buf}
+	f := cmdutil.NewTestFactory(nil)
+
+	vmCmd := NewCmdVM(f, ioStreams)
+
+	for _, name := range []string{"stop", "shutdown", "start", "hibernate", "delete"} {
+		t.Run(name, func(t *testing.T) {
+			var found *cobra.Command
+			for _, sub := range vmCmd.Commands() {
+				if sub.Name() == name {
+					found = sub
+					break
+				}
+			}
+			if found == nil {
+				t.Fatalf("subcommand %q not found", name)
+			}
+			if found.Flags().Lookup("hostname") == nil {
+				t.Errorf("%s missing --hostname flag", name)
+			}
+		})
 	}
 }
 

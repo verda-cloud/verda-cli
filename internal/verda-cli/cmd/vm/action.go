@@ -103,6 +103,7 @@ type actionOptions struct {
 	Yes         bool
 	All         bool
 	Status      string
+	Hostname    string
 	WithVolumes bool
 	Wait        cmdutil.WaitOptions
 }
@@ -151,7 +152,7 @@ func runAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 	// In agent mode, --id and --action are required.
 	if f.AgentMode() {
 		var missing []string
-		if opts.InstanceID == "" && !opts.All {
+		if opts.InstanceID == "" && !opts.All && opts.Hostname == "" {
 			missing = append(missing, "--id")
 		}
 		if opts.Action == "" {
@@ -162,8 +163,8 @@ func runAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 		}
 	}
 
-	// Batch mode: --all routes to batch execution.
-	if opts.All {
+	// Batch mode: --all or --hostname routes to batch execution.
+	if opts.All || opts.Hostname != "" {
 		return runBatchAction(cmd, f, ioStreams, opts)
 	}
 

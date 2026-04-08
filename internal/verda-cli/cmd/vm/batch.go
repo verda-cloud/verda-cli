@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -14,11 +15,13 @@ import (
 )
 
 // runBatchAction validates batch flags and executes the action against all
-// matching instances. It is called from runAction when --all is set.
+// matching instances. It is called from runAction when --all or --hostname is set.
+//
+//nolint:gocyclo // Batch CLI command with validation, filtering, confirmation, and execution — inherently complex.
 func runBatchAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *actionOptions) error {
-	// Validation: --all cannot be combined with --id or a positional instance ID.
+	// Validation: --all/--hostname cannot be combined with --id or a positional instance ID.
 	if opts.InstanceID != "" {
-		return errors.New("cannot combine --all with --id or positional instance ID")
+		return errors.New("cannot combine --all/--hostname with --id or positional instance ID")
 	}
 
 	// Validation: --with-volumes is only valid for delete.
@@ -28,7 +31,11 @@ func runBatchAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOS
 
 	// Agent mode requires --yes for batch operations (always destructive at scale).
 	if f.AgentMode() && !opts.Yes {
-		return cmdutil.NewConfirmationRequiredError(opts.Action + " --all")
+		label := opts.Action + " --all"
+		if opts.Hostname != "" {
+			label = opts.Action + " --hostname"
+		}
+		return cmdutil.NewConfirmationRequiredError(label)
 	}
 
 	client, err := f.VerdaClient()
@@ -455,6 +462,11 @@ func fetchBatchInstances(ctx context.Context, f cmdutil.Factory, ioStreams cmdut
 		instances = filterByValidFrom(instances, opts.Action)
 	}
 
+	// Apply hostname glob filter.
+	if opts.Hostname != "" {
+		instances = filterByHostname(instances, opts.Hostname)
+	}
+
 	return instances, nil
 }
 
@@ -473,6 +485,25 @@ func filterByValidFrom(instances []verda.Instance, action string) []verda.Instan
 				filtered = append(filtered, instances[i])
 				break
 			}
+		}
+	}
+	return filtered
+}
+
+// filterByHostname keeps only instances whose hostname matches the glob pattern.
+func filterByHostname(instances []verda.Instance, pattern string) []verda.Instance {
+	filtered := make([]verda.Instance, 0, len(instances))
+	for i := range instances {
+		matched, err := filepath.Match(pattern, instances[i].Hostname)
+		if err != nil {
+			// Invalid pattern — treat as literal prefix match.
+			if strings.HasPrefix(instances[i].Hostname, strings.TrimSuffix(pattern, "*")) {
+				filtered = append(filtered, instances[i])
+			}
+			continue
+		}
+		if matched {
+			filtered = append(filtered, instances[i])
 		}
 	}
 	return filtered
