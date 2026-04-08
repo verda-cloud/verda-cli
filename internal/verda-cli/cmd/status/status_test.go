@@ -14,7 +14,7 @@ func TestBuildDashboard(t *testing.T) {
 		{ID: "i1", Status: verda.StatusRunning, Location: "FIN-01", PricePerHour: 0.10, IsSpot: false},
 		{ID: "i2", Status: verda.StatusRunning, Location: "FIN-01", PricePerHour: 0.05, IsSpot: true},
 		{ID: "i3", Status: verda.StatusRunning, Location: "US-TX-3", PricePerHour: 0.20, IsSpot: false},
-		{ID: "i4", Status: verda.StatusOffline, Location: "US-TX-5", PricePerHour: 0.00},
+		{ID: "i4", Status: verda.StatusOffline, Location: "US-TX-5", PricePerHour: 0.10},
 	}
 	volumes := []verda.Volume{
 		{ID: "v1", Status: verda.VolumeStatusAttached, Size: 50, BaseHourlyCost: 0.007},
@@ -53,10 +53,10 @@ func TestBuildDashboard(t *testing.T) {
 		t.Fatalf("expected 120 GB total, got %d", d.Volumes.TotalSizeGB)
 	}
 
-	// Financials: burn rate = instance hourly (running only) + volume hourly (attached only)
-	// Instance: 0.10 + 0.05 + 0.20 = 0.35
-	// Volume attached: 0.007 + 0.007 = 0.014
-	expectedHourly := 0.364
+	// Financials: burn rate = all non-terminated instances + all volumes
+	// Instances (running + offline): 0.10 + 0.05 + 0.20 + 0.10 = 0.45
+	// All volumes: 0.007 + 0.007 + 0.003 = 0.017
+	expectedHourly := 0.467
 	if math.Abs(d.Financials.BurnRateHourly-expectedHourly) > 0.001 {
 		t.Fatalf("expected hourly burn rate ~$%.3f, got $%.4f", expectedHourly, d.Financials.BurnRateHourly)
 	}
@@ -69,9 +69,9 @@ func TestBuildDashboard(t *testing.T) {
 	if d.Financials.Currency != "USD" {
 		t.Fatalf("expected currency USD, got %s", d.Financials.Currency)
 	}
-	// Runway = 847.23 / (0.364 * 24) ≈ 97 days
-	if d.Financials.RunwayDays < 90 || d.Financials.RunwayDays > 100 {
-		t.Fatalf("expected runway ~97 days, got %d", d.Financials.RunwayDays)
+	// Runway = 847.23 / (0.467 * 24) ≈ 75 days
+	if d.Financials.RunwayDays < 70 || d.Financials.RunwayDays > 80 {
+		t.Fatalf("expected runway ~75 days, got %d", d.Financials.RunwayDays)
 	}
 
 	// Locations

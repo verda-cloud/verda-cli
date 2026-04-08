@@ -157,7 +157,6 @@ func buildDashboard(instances []verda.Instance, volumes []verda.Volume, balance 
 			if inst.IsSpot {
 				d.Instances.SpotRunning++
 			}
-			d.Financials.BurnRateHourly += float64(inst.PricePerHour)
 		case verda.StatusOffline:
 			d.Instances.Offline++
 		case verda.StatusProvisioning, verda.StatusValidating, verda.StatusOrdered, verda.StatusNew:
@@ -166,6 +165,11 @@ func buildDashboard(instances []verda.Instance, volumes []verda.Volume, balance 
 			d.Instances.Error++
 		default:
 			d.Instances.Other++
+		}
+
+		// Offline instances still charge — include all non-terminated instances in burn rate.
+		if inst.Status == verda.StatusRunning || inst.Status == verda.StatusOffline {
+			d.Financials.BurnRateHourly += float64(inst.PricePerHour)
 		}
 
 		// Location tracking.
@@ -183,7 +187,7 @@ func buildDashboard(instances []verda.Instance, volumes []verda.Volume, balance 
 		}
 	}
 
-	// Volume aggregation.
+	// Volume aggregation — both attached and detached volumes incur charges.
 	for i := range volumes {
 		vol := &volumes[i]
 		d.Volumes.Total++
@@ -192,10 +196,11 @@ func buildDashboard(instances []verda.Instance, volumes []verda.Volume, balance 
 		switch vol.Status {
 		case verda.VolumeStatusAttached:
 			d.Volumes.Attached++
-			d.Financials.BurnRateHourly += vol.BaseHourlyCost
 		case verda.VolumeStatusDetached:
 			d.Volumes.Detached++
 		}
+
+		d.Financials.BurnRateHourly += vol.BaseHourlyCost
 	}
 
 	// Financials.
@@ -241,7 +246,7 @@ func renderDashboard(w interface{ Write([]byte) (int, error) }, d *Dashboard) {
 	// Instances.
 	instParts := []string{green.Render(fmt.Sprintf("%d running", d.Instances.Running))}
 	if d.Instances.Offline > 0 {
-		instParts = append(instParts, dim.Render(fmt.Sprintf("%d offline", d.Instances.Offline)))
+		instParts = append(instParts, yellow.Render(fmt.Sprintf("%d offline", d.Instances.Offline)))
 	}
 	if d.Instances.Provisioning > 0 {
 		instParts = append(instParts, yellow.Render(fmt.Sprintf("%d provisioning", d.Instances.Provisioning)))
@@ -250,6 +255,13 @@ func renderDashboard(w interface{ Write([]byte) (int, error) }, d *Dashboard) {
 		instParts = append(instParts, red.Render(fmt.Sprintf("%d error", d.Instances.Error)))
 	}
 	lines = append(lines, fmt.Sprintf("%-13s%s", bold.Render("Instances:"), strings.Join(instParts, "  ")))
+
+	// Warning: offline instances still charge.
+	if d.Instances.Offline > 0 {
+		lines = append(lines, fmt.Sprintf("%-13s%s",
+			"",
+			yellow.Render(fmt.Sprintf("! %d offline instance(s) still charging", d.Instances.Offline))))
+	}
 
 	// Spot (only if any running spot instances).
 	if d.Instances.SpotRunning > 0 {
