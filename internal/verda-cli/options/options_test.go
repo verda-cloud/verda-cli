@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/spf13/viper"
 )
 
 func TestLoadSharedCredentials(t *testing.T) {
@@ -225,5 +227,171 @@ verda_client_secret = secret
 
 	if opts.Output != "json" {
 		t.Fatalf("expected Output to remain 'json', got %q", opts.Output)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Credential resolution priority tests
+//
+// Auto-resolved profile (no explicit --auth.profile):
+//   1. CLI flags          (--auth.client-id=xxx)
+//   2. Config file        (viper: auth.client-id in config.yaml)
+//   3. Environment vars   (VERDA_CLIENT_ID)
+//   4. Credentials file   ([default] section in ~/.verda/credentials)
+//
+// Explicit profile (--auth.profile=staging):
+//   1. CLI flags          — always wins
+//   2. Credentials file   — explicit profile promotes its creds
+//   3. Config file        — viper values
+//   4. Environment vars   — lowest
+//
+// These tests are NOT parallel because they mutate global viper state.
+// ---------------------------------------------------------------------------
+
+// credSource describes which sources to populate in a test case.
+type credSource struct {
+	flag  string // simulate --auth.client-id / --auth.client-secret
+	viper string // simulate config file value
+	env   string // simulate VERDA_CLIENT_ID / VERDA_CLIENT_SECRET
+	cred  string // value in credentials file
+}
+
+func TestCredentialPriority(t *testing.T) {
+	tests := []struct {
+		name    string
+		profile string // empty = auto-resolve, non-empty = explicit
+		id      credSource
+		secret  credSource
+		wantID  string
+		wantSec string
+	}{
+		// --- Auto-resolved profile: flag > viper > env > creds ---
+		{
+			name:    "all sources set, flag wins",
+			id:      credSource{flag: "flag-id", viper: "viper-id", env: "env-id", cred: "cred-id"},
+			secret:  credSource{flag: "flag-secret", viper: "viper-secret", env: "env-secret", cred: "cred-secret"},
+			wantID:  "flag-id",
+			wantSec: "flag-secret",
+		},
+		{
+			name:    "no flag, viper wins over env and creds",
+			id:      credSource{viper: "viper-id", env: "env-id", cred: "cred-id"},
+			secret:  credSource{viper: "viper-secret", env: "env-secret", cred: "cred-secret"},
+			wantID:  "viper-id",
+			wantSec: "viper-secret",
+		},
+		{
+			name:    "no flag or viper, env wins over creds",
+			id:      credSource{env: "env-id", cred: "cred-id"},
+			secret:  credSource{env: "env-secret", cred: "cred-secret"},
+			wantID:  "env-id",
+			wantSec: "env-secret",
+		},
+		{
+			name:    "only creds file, used as fallback",
+			id:      credSource{cred: "cred-id"},
+			secret:  credSource{cred: "cred-secret"},
+			wantID:  "cred-id",
+			wantSec: "cred-secret",
+		},
+		{
+			name:    "mixed: ID from flag, secret from env",
+			id:      credSource{flag: "flag-id", cred: "cred-id"},
+			secret:  credSource{env: "env-secret", cred: "cred-secret"},
+			wantID:  "flag-id",
+			wantSec: "env-secret",
+		},
+		{
+			name:    "mixed: ID from viper, secret from creds",
+			id:      credSource{viper: "viper-id", cred: "cred-id"},
+			secret:  credSource{cred: "cred-secret"},
+			wantID:  "viper-id",
+			wantSec: "cred-secret",
+		},
+
+		// --- Explicit profile: flag > creds > viper > env ---
+		{
+			name:    "explicit profile: creds override viper and env",
+			profile: "staging",
+			id:      credSource{viper: "viper-id", env: "env-id", cred: "staging-id"},
+			secret:  credSource{viper: "viper-secret", env: "env-secret", cred: "staging-secret"},
+			wantID:  "staging-id",
+			wantSec: "staging-secret",
+		},
+		{
+			name:    "explicit profile: flag still wins over creds",
+			profile: "staging",
+			id:      credSource{flag: "flag-id", cred: "staging-id"},
+			secret:  credSource{cred: "staging-secret"},
+			wantID:  "flag-id",
+			wantSec: "staging-secret",
+		},
+		{
+			name:    "explicit profile: mixed flag + creds + env",
+			profile: "staging",
+			id:      credSource{flag: "flag-id", env: "env-id", cred: "staging-id"},
+			secret:  credSource{env: "env-secret", cred: "staging-secret"},
+			wantID:  "flag-id",
+			wantSec: "staging-secret", // explicit profile creds beat env
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// --- credentials file ---
+			profile := tt.profile
+			if profile == "" {
+				profile = "default"
+			}
+			creds := "[" + profile + "]\n"
+			if tt.id.cred != "" {
+				creds += "verda_client_id = " + tt.id.cred + "\n"
+			}
+			if tt.secret.cred != "" {
+				creds += "verda_client_secret = " + tt.secret.cred + "\n"
+			}
+			path := writeCredentialsFile(t, creds)
+
+			// --- viper (config file) ---
+			if tt.id.viper != "" {
+				viper.Set("auth.client-id", tt.id.viper)
+			}
+			if tt.secret.viper != "" {
+				viper.Set("auth.client-secret", tt.secret.viper)
+			}
+			t.Cleanup(func() {
+				viper.Set("auth.client-id", "")
+				viper.Set("auth.client-secret", "")
+			})
+
+			// --- environment variables ---
+			if tt.id.env != "" {
+				t.Setenv("VERDA_CLIENT_ID", tt.id.env)
+			}
+			if tt.secret.env != "" {
+				t.Setenv("VERDA_CLIENT_SECRET", tt.secret.env)
+			}
+
+			// --- build options ---
+			opts := &Options{
+				Server:  defaultBaseURL,
+				Timeout: 30,
+				AuthOptions: &AuthOptions{
+					ClientID:        tt.id.flag,
+					ClientSecret:    tt.secret.flag,
+					Profile:         tt.profile,
+					CredentialsFile: path,
+				},
+			}
+
+			opts.Complete()
+
+			if opts.AuthOptions.ClientID != tt.wantID {
+				t.Errorf("ClientID: want %q, got %q", tt.wantID, opts.AuthOptions.ClientID)
+			}
+			if opts.AuthOptions.ClientSecret != tt.wantSec {
+				t.Errorf("ClientSecret: want %q, got %q", tt.wantSec, opts.AuthOptions.ClientSecret)
+			}
+		})
 	}
 }
