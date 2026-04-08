@@ -2,6 +2,7 @@ package ssh
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -34,6 +35,10 @@ func NewCmdSSH(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 			SSH connection.
 
 			Any arguments after -- are passed directly to the ssh command.
+
+			Supports piping commands via stdin. When stdin is not a terminal,
+			the input is forwarded to the remote host and pseudo-TTY allocation
+			is disabled automatically.
 		`),
 		Example: cmdutil.Examples(`
 			# SSH by hostname
@@ -47,6 +52,12 @@ func NewCmdSSH(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 
 			# Pass extra ssh arguments
 			verda ssh gpu-runner -- -L 8080:localhost:8080
+
+			# Pipe a command to run remotely
+			echo "nvidia-smi" | verda ssh gpu-runner
+
+			# Pipe a script
+			cat setup.sh | verda ssh gpu-runner
 		`),
 		Args:               cobra.ArbitraryArgs, // extra args after "--" are passed to ssh
 		DisableFlagParsing: false,
@@ -98,35 +109,14 @@ func runSSH(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, 
 
 	// Interactive picker when no target is provided.
 	if target == "" {
-		running := filterRunning(instances)
-		if len(running) == 0 {
-			_, _ = fmt.Fprintln(ioStreams.ErrOut, "No running instances found.")
-			return nil
-		}
-
-		labels := make([]string, 0, len(running)+1)
-		for i := range running {
-			ip := ""
-			if running[i].IP != nil && *running[i].IP != "" {
-				ip = *running[i].IP
-			}
-			labels = append(labels, fmt.Sprintf("%-20s  %-18s  %s  %s",
-				running[i].Hostname,
-				running[i].InstanceType,
-				running[i].Location,
-				ip,
-			))
-		}
-		labels = append(labels, "Cancel")
-
-		idx, err := f.Prompter().Select(cmd.Context(), "Select instance to SSH into", labels)
+		picked, err := pickInstance(cmd.Context(), f, ioStreams, instances)
 		if err != nil {
-			return nil // User pressed Esc/Ctrl+C during prompt.
+			return err
 		}
-		if idx == len(running) {
-			return nil // Cancel selected.
+		if picked == "" {
+			return nil // canceled or no running instances
 		}
-		target = running[idx].Hostname
+		target = picked
 	}
 
 	inst := resolveInstance(instances, target)
@@ -150,6 +140,9 @@ func runSSH(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, 
 	}
 
 	sshArgs := []string{"ssh"}
+	if !isTerminal(os.Stdin) {
+		sshArgs = append(sshArgs, "-T")
+	}
 	if opts.KeyFile != "" {
 		sshArgs = append(sshArgs, "-i", opts.KeyFile)
 	}
@@ -163,6 +156,44 @@ func runSSH(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, 
 	return syscall.Exec(sshPath, sshArgs, os.Environ()) //nolint:gosec // Intentional: replace process with ssh using user-provided host and args.
 }
 
+// pickInstance shows an interactive picker for running instances.
+// Returns the selected hostname, or "" if canceled/no running instances.
+func pickInstance(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, instances []verda.Instance) (string, error) {
+	if !isTerminal(os.Stdin) {
+		return "", errors.New("instance ID or hostname is required when piping stdin")
+	}
+
+	running := filterRunning(instances)
+	if len(running) == 0 {
+		_, _ = fmt.Fprintln(ioStreams.ErrOut, "No running instances found.")
+		return "", nil
+	}
+
+	labels := make([]string, 0, len(running)+1)
+	for i := range running {
+		ip := ""
+		if running[i].IP != nil && *running[i].IP != "" {
+			ip = *running[i].IP
+		}
+		labels = append(labels, fmt.Sprintf("%-20s  %-18s  %s  %s",
+			running[i].Hostname,
+			running[i].InstanceType,
+			running[i].Location,
+			ip,
+		))
+	}
+	labels = append(labels, "Cancel")
+
+	idx, err := f.Prompter().Select(ctx, "Select instance to SSH into", labels)
+	if err != nil {
+		return "", err
+	}
+	if idx == len(running) {
+		return "", nil // Cancel selected.
+	}
+	return running[idx].Hostname, nil
+}
+
 // filterRunning returns only instances with status running.
 func filterRunning(instances []verda.Instance) []verda.Instance {
 	var running []verda.Instance
@@ -172,6 +203,15 @@ func filterRunning(instances []verda.Instance) []verda.Instance {
 		}
 	}
 	return running
+}
+
+// isTerminal reports whether f is a terminal.
+func isTerminal(f *os.File) bool {
+	fi, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return fi.Mode()&os.ModeCharDevice != 0
 }
 
 // resolveInstance finds an instance by exact ID match first, then by hostname.

@@ -3,6 +3,7 @@ package ssh
 import (
 	"bytes"
 	"errors"
+	"os"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -12,6 +13,21 @@ import (
 )
 
 func strPtr(s string) *string { return &s }
+
+func TestIsTerminalReturnsFalseForPipe(t *testing.T) {
+	t.Parallel()
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	defer w.Close()
+
+	if isTerminal(r) {
+		t.Fatal("expected pipe to not be a terminal")
+	}
+}
 
 func TestResolveInstanceByID(t *testing.T) {
 	t.Parallel()
