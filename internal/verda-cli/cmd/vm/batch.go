@@ -356,7 +356,7 @@ func selectInstances(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.I
 		labels[i] = formatInstanceRow(&instances[i])
 	}
 
-	indices, err := f.Prompter().MultiSelect(ctx, "Select instances (type to filter, ctrl+a select all)", labels)
+	indices, err := f.Prompter().MultiSelect(ctx, "Select instances", labels)
 	if err != nil {
 		return nil, nil //nolint:nilerr // User pressed Esc/Ctrl+C.
 	}
