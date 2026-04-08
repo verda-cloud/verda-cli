@@ -180,7 +180,10 @@ func runAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 		// When action is pre-set (shortcut commands), only show instances
 		// with statuses valid for that action.
 		var statusFilter []string
-		if opts.Action != "" {
+		if opts.Status != "" {
+			// Explicit --status flag overrides action-based filtering.
+			statusFilter = []string{opts.Status}
+		} else if opts.Action != "" {
 			statusFilter = validFromForAction(opts.Action)
 		}
 		selected, err := selectInstance(ctx, f, ioStreams, client, statusFilter...)
