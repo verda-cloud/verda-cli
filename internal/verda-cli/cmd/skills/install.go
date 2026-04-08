@@ -25,6 +25,7 @@ const (
 
 type installOptions struct {
 	agents         []string
+	force          bool
 	statePath      string
 	fetcher        *fetcher
 	agentOverrides map[string]*Agent
@@ -57,6 +58,9 @@ func NewCmdInstall(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Comman
 			# Install for multiple agents
 			verda skills install claude-code cursor windsurf
 
+			# Reinstall without confirmation
+			verda skills install claude-code --force
+
 			# Non-interactive (for CI/scripts)
 			verda --agent skills install claude-code
 		`),
@@ -65,6 +69,9 @@ func NewCmdInstall(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Comman
 			return runInstall(cmd.Context(), f, ioStreams, opts)
 		},
 	}
+
+	cmd.Flags().BoolVar(&opts.force, "force", false, "Skip confirmation and reinstall even if already installed")
+
 	return cmd
 }
 
@@ -88,7 +95,7 @@ func runInstall(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStre
 		return nil
 	}
 
-	if err := confirmInstall(ctx, f, ioStreams, manifest, selectedAgents); err != nil {
+	if err := confirmInstall(ctx, f, ioStreams, opts, manifest, selectedAgents); err != nil {
 		if errors.Is(err, errCanceled) {
 			return nil
 		}
@@ -130,8 +137,8 @@ func fetchManifestWithSpinner(ctx context.Context, f cmdutil.Factory, ft *fetche
 	return manifest, nil
 }
 
-func confirmInstall(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, manifest *Manifest, selectedAgents []*Agent) error {
-	if f.AgentMode() {
+func confirmInstall(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *installOptions, manifest *Manifest, selectedAgents []*Agent) error {
+	if f.AgentMode() || opts.force {
 		return nil
 	}
 	agentNames := make([]string, len(selectedAgents))
