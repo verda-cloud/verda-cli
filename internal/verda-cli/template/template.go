@@ -13,17 +13,19 @@ import (
 
 // Template represents a saved configuration template for creating resources.
 type Template struct {
-	Resource      string        `yaml:"resource"`
-	BillingType   string        `yaml:"billing_type,omitempty"`
-	Contract      string        `yaml:"contract,omitempty"`
-	Kind          string        `yaml:"kind,omitempty"`
-	InstanceType  string        `yaml:"instance_type,omitempty"`
-	Location      string        `yaml:"location,omitempty"`
-	Image         string        `yaml:"image,omitempty"`
-	OSVolumeSize  int           `yaml:"os_volume_size,omitempty"`
-	Storage       []StorageSpec `yaml:"storage,omitempty"`
-	SSHKeys       []string      `yaml:"ssh_keys,omitempty"`
-	StartupScript string        `yaml:"startup_script,omitempty"`
+	Resource          string        `yaml:"resource"`
+	BillingType       string        `yaml:"billing_type,omitempty"`
+	Contract          string        `yaml:"contract,omitempty"`
+	Kind              string        `yaml:"kind,omitempty"`
+	InstanceType      string        `yaml:"instance_type,omitempty"`
+	Location          string        `yaml:"location,omitempty"`
+	Image             string        `yaml:"image,omitempty"`
+	OSVolumeSize      int           `yaml:"os_volume_size,omitempty"`
+	Storage           []StorageSpec `yaml:"storage,omitempty"`
+	StorageSkip       bool          `yaml:"storage_skip,omitempty"`
+	SSHKeys           []string      `yaml:"ssh_keys,omitempty"`
+	StartupScript     string        `yaml:"startup_script,omitempty"`
+	StartupScriptSkip bool          `yaml:"startup_script_skip,omitempty"`
 }
 
 // StorageSpec describes an additional storage volume attached to a template.

@@ -53,8 +53,10 @@ type createOptions struct {
 	// Internal flags for template/wizard coordination.
 	sshKeyNames       []string // names corresponding to SSHKeyIDs (for template saving)
 	startupScriptName string   // name corresponding to StartupScriptID (for template saving)
-	billingTypeSet    bool     // true when billing type was pre-filled (distinguishes on-demand from unset)
-	locationSet       bool     // true when location was pre-filled (distinguishes FIN-01 from default)
+	billingTypeSet    bool     // true when billing type was pre-filled
+	locationSet       bool     // true when location was pre-filled
+	storageSkip       bool     // true when storage was explicitly skipped
+	startupScriptSkip bool     // true when startup script was explicitly skipped
 }
 
 // NewCmdCreate creates the vm create cobra command.

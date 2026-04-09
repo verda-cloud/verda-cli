@@ -148,6 +148,12 @@ func applyTemplate(tmpl *template.Template, opts *createOptions) {
 		opts.StorageSize = tmpl.Storage[0].Size
 		opts.StorageType = tmpl.Storage[0].Type
 	}
+	if tmpl.StorageSkip {
+		opts.storageSkip = true
+	}
+	if tmpl.StartupScriptSkip {
+		opts.startupScriptSkip = true
+	}
 	// SSH keys and startup script are handled by resolveTemplateNames, not here.
 }
 

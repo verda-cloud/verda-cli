@@ -94,6 +94,8 @@ type TemplateResult struct {
 	StartupScriptName string
 	StorageSize       int
 	StorageType       string
+	StorageSkip       bool // user explicitly chose "None (skip)"
+	StartupScriptSkip bool // user explicitly chose "None (skip)"
 }
 
 // RunTemplateWizard runs the VM create wizard in template mode (no hostname,
@@ -126,6 +128,8 @@ func optsToTemplateResult(opts *createOptions) *TemplateResult {
 		StartupScriptName: opts.startupScriptName,
 		StorageSize:       opts.StorageSize,
 		StorageType:       opts.StorageType,
+		StorageSkip:       opts.StorageSize == 0 && len(opts.VolumeSpecs) == 0,
+		StartupScriptSkip: opts.StartupScriptID == "" && opts.startupScriptName == "",
 	}
 	if opts.IsSpot {
 		result.BillingType = "spot"
@@ -581,8 +585,10 @@ func stepStorage(getClient clientFunc, cache *apiCache, opts *createOptions) wiz
 		},
 		Setter:   func(v any) {}, // Set directly in Loader.
 		Resetter: func() {},      // Don't clear — Loader manages the value.
-		IsSet:    func() bool { return opts.StorageSize > 0 || len(opts.VolumeSpecs) > 0 || len(opts.ExistingVolumes) > 0 },
-		Value:    func() any { return "" },
+		IsSet: func() bool {
+			return opts.storageSkip || opts.StorageSize > 0 || len(opts.VolumeSpecs) > 0 || len(opts.ExistingVolumes) > 0
+		},
+		Value: func() any { return "" },
 	}
 }
 
@@ -983,7 +989,9 @@ func stepStartupScript(getClient clientFunc, opts *createOptions) wizard.Step {
 				if choices[idx].Value != addNewScriptValue {
 					// Set the value directly and return empty so the engine auto-skips.
 					opts.StartupScriptID = choices[idx].Value
-					opts.startupScriptName = choices[idx].Label
+					if choices[idx].Value != "" {
+						opts.startupScriptName = choices[idx].Label
+					}
 					return nil, nil
 				}
 
@@ -999,7 +1007,7 @@ func stepStartupScript(getClient clientFunc, opts *createOptions) wizard.Step {
 		},
 		Setter:   func(v any) {}, // Set directly in Loader.
 		Resetter: func() {},      // Don't clear — Loader manages the value.
-		IsSet:    func() bool { return opts.StartupScriptID != "" },
+		IsSet:    func() bool { return opts.startupScriptSkip || opts.StartupScriptID != "" },
 		Value:    func() any { return opts.StartupScriptID },
 	}
 }

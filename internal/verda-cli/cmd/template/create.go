@@ -128,16 +128,18 @@ func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 
 func vmResultToTemplate(r *vm.TemplateResult) *Template {
 	tmpl := &Template{
-		Resource:      "vm",
-		BillingType:   r.BillingType,
-		Contract:      r.Contract,
-		Kind:          r.Kind,
-		InstanceType:  r.InstanceType,
-		Location:      r.Location,
-		Image:         r.Image,
-		OSVolumeSize:  r.OSVolumeSize,
-		SSHKeys:       r.SSHKeyNames,
-		StartupScript: r.StartupScriptName,
+		Resource:          "vm",
+		BillingType:       r.BillingType,
+		Contract:          r.Contract,
+		Kind:              r.Kind,
+		InstanceType:      r.InstanceType,
+		Location:          r.Location,
+		Image:             r.Image,
+		OSVolumeSize:      r.OSVolumeSize,
+		SSHKeys:           r.SSHKeyNames,
+		StartupScript:     r.StartupScriptName,
+		StorageSkip:       r.StorageSkip,
+		StartupScriptSkip: r.StartupScriptSkip,
 	}
 	if r.StorageSize > 0 {
 		tmpl.Storage = []StorageSpec{{
