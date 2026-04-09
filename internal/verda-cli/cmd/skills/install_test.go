@@ -27,7 +27,7 @@ func TestInstallCopy(t *testing.T) {
 		t.Fatalf("install error: %v", err)
 	}
 	for name, content := range skillFiles {
-		data, err := os.ReadFile(filepath.Join(dir, name))
+		data, err := os.ReadFile(filepath.Clean(filepath.Join(dir, name)))
 		if err != nil {
 			t.Fatalf("read %s: %v", name, err)
 		}
@@ -49,7 +49,7 @@ func TestInstallAppend(t *testing.T) {
 	if err := installForAgent(agent, skillFiles, nil); err != nil {
 		t.Fatalf("install error: %v", err)
 	}
-	data, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
+	data, err := os.ReadFile(filepath.Clean(filepath.Join(dir, "AGENTS.md")))
 	if err != nil {
 		t.Fatalf("read error: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestInstallAppend_Idempotent(t *testing.T) {
 	_ = installForAgent(agent, map[string]string{"verda-cloud.md": "# V1"}, nil)
 	_ = installForAgent(agent, map[string]string{"verda-cloud.md": "# V2"}, nil)
 
-	data, _ := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
+	data, _ := os.ReadFile(filepath.Clean(filepath.Join(dir, "AGENTS.md")))
 	if bytes.Count(data, []byte(markerStart)) != 1 {
 		t.Fatalf("expected exactly 1 start marker, got content:\n%s", data)
 	}
@@ -118,7 +118,7 @@ func TestInstallCopy_CleansUpStaleFiles(t *testing.T) {
 
 	// Simulate a previous install with an old filename.
 	oldFile := filepath.Join(dir, "verda-commands.md")
-	_ = os.WriteFile(oldFile, []byte("old content"), 0o644)
+	_ = os.WriteFile(oldFile, []byte("old content"), 0o600)
 
 	// Install with new filenames — old file should be cleaned up.
 	newFiles := map[string]string{

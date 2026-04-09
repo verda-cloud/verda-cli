@@ -147,7 +147,7 @@ func mergeUserAgents(m *Manifest) {
 	if err != nil {
 		return
 	}
-	data, err := os.ReadFile(filepath.Join(home, ".verda", "agents.json"))
+	data, err := os.ReadFile(filepath.Clean(filepath.Join(home, ".verda", "agents.json")))
 	if err != nil {
 		return
 	}

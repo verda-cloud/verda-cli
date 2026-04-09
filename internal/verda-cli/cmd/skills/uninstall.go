@@ -229,7 +229,7 @@ func uninstallCopy(agent *Agent, skillNames []string) error {
 
 func uninstallAppend(agent *Agent) error {
 	path := filepath.Join(agent.TargetDir(), agent.TargetFile())
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil

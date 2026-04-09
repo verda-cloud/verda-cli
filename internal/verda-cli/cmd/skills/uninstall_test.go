@@ -16,8 +16,8 @@ import (
 func TestUninstallCopy(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "verda-cloud.md"), []byte("test"), 0o644)
-	os.WriteFile(filepath.Join(dir, "verda-reference.md"), []byte("test"), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "verda-cloud.md"), []byte("test"), 0o600)
+	_ = os.WriteFile(filepath.Join(dir, "verda-reference.md"), []byte("test"), 0o600)
 	agent := &Agent{
 		Name: "test-agent", Scope: "global", Method: "copy",
 		Target: dir,
@@ -37,7 +37,7 @@ func TestUninstallAppend(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	content := "# My Agents\n\nSome stuff\n\n" + markerStart + "\nskill content\n" + markerEnd + "\n\nMore stuff\n"
-	os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte(content), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte(content), 0o600)
 	agent := &Agent{
 		Name: "codex", Scope: "project", Method: methodAppend,
 		Target: filepath.Join(dir, "AGENTS.md"),
@@ -45,7 +45,7 @@ func TestUninstallAppend(t *testing.T) {
 	if err := uninstallForAgent(agent, nil); err != nil {
 		t.Fatalf("uninstall error: %v", err)
 	}
-	data, _ := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
+	data, _ := os.ReadFile(filepath.Clean(filepath.Join(dir, "AGENTS.md")))
 	if bytes.Contains(data, []byte(markerStart)) {
 		t.Fatal("expected markers to be removed")
 	}
@@ -60,8 +60,8 @@ func TestUninstallAppend(t *testing.T) {
 func TestRunUninstall_NonInteractive(t *testing.T) {
 	t.Parallel()
 	targetDir := t.TempDir()
-	os.WriteFile(filepath.Join(targetDir, "verda-cloud.md"), []byte("test"), 0o644)
-	os.WriteFile(filepath.Join(targetDir, "verda-reference.md"), []byte("test"), 0o644)
+	_ = os.WriteFile(filepath.Join(targetDir, "verda-cloud.md"), []byte("test"), 0o600)
+	_ = os.WriteFile(filepath.Join(targetDir, "verda-reference.md"), []byte("test"), 0o600)
 	statePath := filepath.Join(t.TempDir(), "skills.json")
 	_ = SaveState(statePath, &State{
 		Version:     "1.0.0",

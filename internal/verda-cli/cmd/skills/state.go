@@ -48,7 +48,7 @@ func StatePath() (string, error) {
 // LoadState reads the skills state from the given path.
 // If the file does not exist, it returns an empty State (not an error).
 func LoadState(path string) (*State, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return &State{}, nil

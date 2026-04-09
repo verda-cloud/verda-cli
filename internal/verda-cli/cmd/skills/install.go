@@ -339,7 +339,7 @@ func installAppend(agent *Agent, dir string, skillFiles map[string]string) error
 	}
 	block.WriteString(markerEnd)
 
-	existing, err := os.ReadFile(path)
+	existing, err := os.ReadFile(filepath.Clean(path))
 	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
