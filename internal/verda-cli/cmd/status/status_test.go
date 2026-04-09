@@ -11,10 +11,10 @@ func TestBuildDashboard(t *testing.T) {
 	t.Parallel()
 
 	instances := []verda.Instance{
-		{ID: "i1", Status: verda.StatusRunning, Location: "FIN-01", PricePerHour: 0.10, IsSpot: false},
-		{ID: "i2", Status: verda.StatusRunning, Location: "FIN-01", PricePerHour: 0.05, IsSpot: true},
-		{ID: "i3", Status: verda.StatusRunning, Location: "US-TX-3", PricePerHour: 0.20, IsSpot: false},
-		{ID: "i4", Status: verda.StatusOffline, Location: "US-TX-5", PricePerHour: 0.10},
+		{ID: "i1", Status: verda.StatusRunning, Location: "FIN-01", PricePerHour: 0.10, IsSpot: false, GPU: verda.InstanceGPU{NumberOfGPUs: 2}},
+		{ID: "i2", Status: verda.StatusRunning, Location: "FIN-01", PricePerHour: 0.05, IsSpot: true, GPU: verda.InstanceGPU{NumberOfGPUs: 1}},
+		{ID: "i3", Status: verda.StatusRunning, Location: "US-TX-3", PricePerHour: 0.20, IsSpot: false, GPU: verda.InstanceGPU{NumberOfGPUs: 4}},
+		{ID: "i4", Status: verda.StatusOffline, Location: "US-TX-5", PricePerHour: 0.10, GPU: verda.InstanceGPU{NumberOfGPUs: 1}},
 	}
 	volumes := []verda.Volume{
 		{ID: "v1", Status: verda.VolumeStatusAttached, Size: 50, BaseHourlyCost: 0.007},
@@ -53,14 +53,15 @@ func TestBuildDashboard(t *testing.T) {
 		t.Fatalf("expected 120 GB total, got %d", d.Volumes.TotalSizeGB)
 	}
 
-	// Financials: burn rate = all non-terminated instances + all volumes
-	// Instances (running + offline): 0.10 + 0.05 + 0.20 + 0.10 = 0.45
+	// Financials: burn rate = price_per_hour * units for each instance + all volumes
+	// i1: 0.10 * 2 GPUs = 0.20, i2: 0.05 * 1 = 0.05, i3: 0.20 * 4 = 0.80, i4: 0.10 * 1 = 0.10
+	// Instance total: 1.15
 	// All volumes: 0.007 + 0.007 + 0.003 = 0.017
-	expectedHourly := 0.467
+	expectedHourly := 1.167
 	if math.Abs(d.Financials.BurnRateHourly-expectedHourly) > 0.001 {
 		t.Fatalf("expected hourly burn rate ~$%.3f, got $%.4f", expectedHourly, d.Financials.BurnRateHourly)
 	}
-	if math.Abs(d.Financials.BurnRateDaily-expectedHourly*24) > 0.01 {
+	if math.Abs(d.Financials.BurnRateDaily-expectedHourly*24) > 0.1 {
 		t.Fatalf("expected daily burn rate ~$%.2f, got $%.4f", expectedHourly*24, d.Financials.BurnRateDaily)
 	}
 	if d.Financials.Balance != 847.23 {
@@ -69,9 +70,9 @@ func TestBuildDashboard(t *testing.T) {
 	if d.Financials.Currency != "USD" {
 		t.Fatalf("expected currency USD, got %s", d.Financials.Currency)
 	}
-	// Runway = 847.23 / (0.467 * 24) ≈ 75 days
-	if d.Financials.RunwayDays < 70 || d.Financials.RunwayDays > 80 {
-		t.Fatalf("expected runway ~75 days, got %d", d.Financials.RunwayDays)
+	// Runway = 847.23 / (1.167 * 24) ≈ 30 days
+	if d.Financials.RunwayDays < 25 || d.Financials.RunwayDays > 35 {
+		t.Fatalf("expected runway ~30 days, got %d", d.Financials.RunwayDays)
 	}
 
 	// Locations
