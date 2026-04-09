@@ -75,6 +75,14 @@ Otherwise walk this chain. **ALWAYS** steps must run even if user specified valu
 | `CONFIRMATION_REQUIRED` | Confirm with user, retry with `--yes` |
 | `VALIDATION_ERROR` | Read `details.field` + `details.reason`, fix and retry |
 
+## Presenting Results
+
+Pick the format that fits the data:
+- **Multiple items to compare** (instance types, pricing) → markdown table, keep columns minimal (4-6 max)
+- **Single item** (one VM, one template) → short summary paragraph or key-value list
+- **Dashboard / overview** → summary paragraph with key numbers highlighted
+- **Never** dump raw JSON to the user
+
 ## Asking Good Questions
 
 When request is vague ("I need a GPU"):

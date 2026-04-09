@@ -379,3 +379,6 @@ scripts/live-test.sh
 # AI working notes and implementation plans (not shipped)
 .ai/notes/
 docs/plans/
+
+# AI agent project-level configs (installed by users, not shipped)
+.cursor/
