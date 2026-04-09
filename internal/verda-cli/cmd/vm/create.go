@@ -327,11 +327,11 @@ func normalizeContract(value string) (string, error) {
 	case "":
 		return "", nil
 	case "pay_as_go", "pay-as-go", "pay_as_you_go", "pay-as-you-go", "payg", "pay as go", "pay as you go":
-		return "PAY_AS_YOU_GO", nil
+		return contractPayAsYouGo, nil
 	case "spot":
-		return "SPOT", nil
+		return contractSpot, nil
 	case "long_term", "long-term", "long term":
-		return "LONG_TERM", nil
+		return contractLongTerm, nil
 	case "1 month", "3 months", "6 months", "1 year", "2 years", "1_month", "3_months", "6_months", "1_year", "2_years":
 		return "", errors.New("the current POST /v1/instances public API does not accept long-term duration values on instance creation; use --contract long_term only if your backend supports it")
 	default:

@@ -150,7 +150,7 @@ func List(baseDir, resource string) ([]Entry, error) {
 		return nil, fmt.Errorf("reading template directory: %w", err)
 	}
 
-	var entries []Entry
+	entries := make([]Entry, 0, len(dirEntries))
 	for _, de := range dirEntries {
 		if de.IsDir() || !strings.HasSuffix(de.Name(), ".yaml") {
 			continue

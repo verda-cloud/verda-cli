@@ -23,6 +23,13 @@ import (
 const (
 	billingTypeSpot = "spot"
 	kindGPU         = "gpu"
+
+	contractPayAsYouGo = "PAY_AS_YOU_GO"
+	contractSpot       = "SPOT"
+	contractLongTerm   = "LONG_TERM"
+
+	unitLabelGPU  = "GPU"
+	unitLabelVCPU = "vCPU"
 )
 
 // clientFunc lazily resolves a Verda API client. This allows the wizard
@@ -227,7 +234,7 @@ func stepContract(getClient clientFunc, opts *createOptions) wizard.Step {
 		},
 		Loader: func(ctx context.Context, _ tui.Prompter, status tui.Status, store *wizard.Store) ([]wizard.Choice, error) {
 			choices := []wizard.Choice{
-				{Label: "Pay as you go", Value: "PAY_AS_YOU_GO"},
+				{Label: "Pay as you go", Value: contractPayAsYouGo},
 			}
 			client, err := getClient()
 			if err != nil {
@@ -353,9 +360,9 @@ func stepInstanceType(getClient clientFunc, cache *apiCache, opts *createOptions
 				units := instanceUnits(t)
 				var priceStr string
 				if units > 1 {
-					unitLabel := "GPU"
+					unitLabel := unitLabelGPU
 					if t.GPU.NumberOfGPUs == 0 {
-						unitLabel = "vCPU"
+						unitLabel = unitLabelVCPU
 					}
 					perUnit := totalPrice / float64(units)
 					priceStr = fmt.Sprintf("$%.3f/%s/hr  $%.3f/hr", perUnit, unitLabel, totalPrice)
@@ -1232,10 +1239,10 @@ func renderDeploymentSummary(opts *createOptions, cache *apiCache) {
 		instUnits = instanceUnits(&info)
 		if info.GPU.NumberOfGPUs > 0 {
 			instLabel = fmt.Sprintf("%s — %s", info.InstanceType, info.GPU.Description)
-			instUnitLabel = "GPU"
+			instUnitLabel = unitLabelGPU
 		} else {
 			instLabel = fmt.Sprintf("%s — %d CPU, %dGB RAM", info.InstanceType, info.CPU.NumberOfCores, info.Memory.SizeInGigabytes)
-			instUnitLabel = "vCPU"
+			instUnitLabel = unitLabelVCPU
 		}
 	}
 
