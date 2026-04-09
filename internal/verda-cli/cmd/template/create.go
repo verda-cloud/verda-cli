@@ -75,7 +75,7 @@ func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 		}
 
 		if err := ValidateName(name); err != nil {
-			_, _ = fmt.Fprintf(ioStreams.ErrOut, "  %v\n", err)
+			_, _ = fmt.Fprintf(ioStreams.ErrOut, "  %v (e.g. gpu-training, cheap-dev-01)\n", err)
 			name = "" // re-prompt
 			continue
 		}
