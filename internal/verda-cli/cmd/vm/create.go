@@ -70,9 +70,27 @@ func NewCmdCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 		Use:   "create",
 		Short: "Create a VM instance",
 		Long: cmdutil.LongDesc(`
-			Create a Verda VM instance using the official Verda Cloud Go SDK.
+			Create a Verda VM instance. Without flags, launches an interactive
+			wizard. Use --from to pre-fill settings from a saved template.
+
+			Templates are created with "verda template create" and stored
+			as YAML files under ~/.verda/templates/vm/.
 		`),
 		Example: cmdutil.Examples(`
+			# Interactive wizard
+			verda vm create
+
+			# From a saved template (only prompts for hostname + confirm)
+			verda vm create --from gpu-training
+			verda vm create --from gpu-training --hostname my-vm
+
+			# Pick template from list
+			verda vm create --from
+
+			# From a template file
+			verda vm create --from ./my-template.yaml
+
+			# Non-interactive with all flags
 			verda vm create \
 			  --kind gpu \
 			  --instance-type 1V100.6V \
@@ -80,22 +98,7 @@ func NewCmdCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 			  --os ubuntu-24.04-cuda-13.0-open-docker \
 			  --os-volume-size 100 \
 			  --hostname gpu-runner \
-			  --description "GPU runner for batch jobs" \
 			  --ssh-key ssh_key_123
-
-			verda vm create \
-			  --kind cpu \
-			  --instance-type CPU.4V.16G \
-			  --location FIN-03 \
-			  --os ubuntu-24.04 \
-			  --os-volume-size 55 \
-			  --hostname training-node \
-			  --is-spot \
-			  --storage-size 500
-
-			verda vm create --from gpu-training --hostname my-vm
-
-			verda vm create --from
 		`),
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {

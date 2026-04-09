@@ -22,19 +22,31 @@ func NewCmdCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 		Use:   "create [name]",
 		Short: "Create a new resource template interactively",
 		Long: cmdutil.LongDesc(`
-			Create a new resource configuration template by running
-			the resource creation wizard. The template captures all
-			settings so you can reuse them later with "verda vm create --from".
+			Create a reusable resource configuration template by running
+			the interactive wizard. The wizard collects instance type,
+			image, location, SSH keys, storage, and other settings.
+
+			Templates are saved as YAML files under ~/.verda/templates/<resource>/.
+			Names are auto-reformatted: "My GPU Setup" becomes "my-gpu-setup".
+
+			After saving, use "verda vm create --from <name>" to create
+			instances with pre-filled settings.
+
+			You can manually edit the template YAML to add features like:
+			  hostname_pattern: "gpu-{random}-{location}"
+			  storage_skip: true
+			  startup_script_skip: true
 		`),
 		Example: cmdutil.Examples(`
-			# Create a template interactively (prompts for name)
+			# Create a template interactively
 			verda template create
 
-			# Create a template with a specific name
+			# Create with a name (skips name prompt)
 			verda template create gpu-training
 
-			# Short alias
-			verda tmpl create my-template
+			# Then use it to create VMs
+			verda vm create --from gpu-training
+			verda vm create --from gpu-training --hostname my-vm
 		`),
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
