@@ -58,28 +58,35 @@ func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 	}
 	resource := resourceMap[idx]
 
-	// 2. Prompt for template name if not provided as positional arg.
-	if name == "" {
-		name, err = prompter.TextInput(ctx, "Template name")
-		if err != nil {
-			return nil //nolint:nilerr // user cancellation (Ctrl+C) is not an error
-		}
-	}
-
-	// 3. Validate name.
-	if err := ValidateName(name); err != nil {
-		return err
-	}
-
-	// 4. Check uniqueness.
+	// 2. Resolve templates directory.
 	verdaDir, err := clioptions.VerdaDir()
 	if err != nil {
 		return err
 	}
 	baseDir := filepath.Join(verdaDir, "templates")
 
-	if _, err := Load(baseDir, resource, name); err == nil {
-		return fmt.Errorf("template %s/%s already exists", resource, name)
+	// 3. Get and validate template name (re-prompt on invalid input).
+	for {
+		if name == "" {
+			name, err = prompter.TextInput(ctx, "Template name (lowercase, hyphens)")
+			if err != nil {
+				return nil //nolint:nilerr // user cancellation (Ctrl+C) is not an error
+			}
+		}
+
+		if err := ValidateName(name); err != nil {
+			_, _ = fmt.Fprintf(ioStreams.ErrOut, "  %v\n", err)
+			name = "" // re-prompt
+			continue
+		}
+
+		if _, loadErr := Load(baseDir, resource, name); loadErr == nil {
+			_, _ = fmt.Fprintf(ioStreams.ErrOut, "  template %s/%s already exists\n", resource, name)
+			name = "" // re-prompt
+			continue
+		}
+
+		break
 	}
 
 	// 5. Run resource wizard.
