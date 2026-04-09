@@ -40,8 +40,9 @@ go mod tidy                             # Sync dependencies
 
 ## Pricing Model
 
-- Instance `price_per_hour` from API is the TOTAL price (not per-GPU). Derive per-unit by dividing.
-- Volume pricing is `price_per_month_per_gb`. Hourly = `ceil(monthly_per_gb * size / 30 / 24 * 10000) / 10000`
+- Instance `price_per_hour` from API is **per-unit** (per-GPU or per-vCPU). Total = `price_per_hour * units`.
+- Use `cmdutil.InstanceTotalHourlyCost(inst)` or `cmdutil.InstanceBillableUnits(inst)` from `cmd/util/pricing.go`.
+- Volume pricing is `price_per_month_per_gb`. Hourly = `ceil(monthly_per_gb * size / 730 * 10000) / 10000`
 
 ## Per-Command Knowledge
 
