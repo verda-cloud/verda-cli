@@ -24,9 +24,10 @@ func resolveCreateInputs(
 	client *verda.Client,
 	opts *createOptions,
 ) (done bool, err error) {
-	// Load template when --from is provided.
-	if opts.From != "" {
-		if err := applyTemplateFrom(cmd.Context(), f, ioStreams, client, opts); err != nil {
+	// Load template when --from is used.
+	if cmd.Flags().Changed("from") {
+		ref := strings.TrimSpace(opts.From)
+		if err := applyTemplateFrom(cmd.Context(), f, ioStreams, client, opts, ref); err != nil {
 			return true, err
 		}
 	}
@@ -41,14 +42,16 @@ func resolveCreateInputs(
 	return false, nil
 }
 
-// applyTemplateFrom loads a template by name or path, applies its values
-// to opts, resolves SSH key / startup script names to IDs, and prints a summary.
+// applyTemplateFrom loads a template, applies its values to opts, resolves
+// SSH key / startup script names to IDs, and prints a summary.
+// If ref is empty, shows an interactive picker; otherwise loads by name or path.
 func applyTemplateFrom(
 	ctx context.Context,
 	f cmdutil.Factory,
 	ioStreams cmdutil.IOStreams,
 	client *verda.Client,
 	opts *createOptions,
+	ref string,
 ) error {
 	verdaDir, err := clioptions.VerdaDir()
 	if err != nil {
@@ -56,13 +59,12 @@ func applyTemplateFrom(
 	}
 	baseDir := filepath.Join(verdaDir, "templates")
 
-	path, err := template.Resolve(baseDir, "vm", opts.From)
+	tmpl, err := loadTemplateRef(ctx, f, baseDir, ref)
 	if err != nil {
 		return err
 	}
-	tmpl, err := template.LoadFromPath(path)
-	if err != nil {
-		return err
+	if tmpl == nil {
+		return nil // user canceled picker
 	}
 
 	applyTemplate(tmpl, opts)
@@ -77,6 +79,42 @@ func applyTemplateFrom(
 	}
 
 	return nil
+}
+
+// loadTemplateRef loads a template by name/path, or shows a picker when ref is empty.
+func loadTemplateRef(ctx context.Context, f cmdutil.Factory, baseDir, ref string) (*template.Template, error) {
+	if ref == "" {
+		return pickTemplate(ctx, f, baseDir)
+	}
+	path, err := template.Resolve(baseDir, "vm", ref)
+	if err != nil {
+		return nil, err
+	}
+	return template.LoadFromPath(path)
+}
+
+// pickTemplate shows an interactive picker of saved VM templates.
+// Returns nil if no templates exist or the user cancels.
+func pickTemplate(ctx context.Context, f cmdutil.Factory, baseDir string) (*template.Template, error) {
+	entries, err := template.List(baseDir, "vm")
+	if err != nil {
+		return nil, err
+	}
+	if len(entries) == 0 {
+		return nil, fmt.Errorf("no VM templates found in %s", filepath.Join(baseDir, "vm"))
+	}
+
+	labels := make([]string, len(entries))
+	for i, e := range entries {
+		labels[i] = fmt.Sprintf("%-20s  %s", e.Name, e.Description)
+	}
+
+	idx, err := f.Prompter().Select(ctx, "Select a template", labels)
+	if err != nil {
+		return nil, nil //nolint:nilerr // user canceled
+	}
+
+	return template.LoadFromPath(entries[idx].Path)
 }
 
 // applyTemplate pre-fills createOptions from a template.
