@@ -35,8 +35,8 @@ func filterByStatus(instances []verda.Instance, statuses []string) []verda.Insta
 	filtered := make([]verda.Instance, 0, len(instances))
 	for i := range instances {
 		for _, s := range statuses {
-			if instances[i].Status == s {
-				filtered = append(filtered, instances[i])
+			if instances[i].Status == s { //nolint:gosec // i is bounded by range
+				filtered = append(filtered, instances[i]) //nolint:gosec // i is bounded by range
 				break
 			}
 		}
