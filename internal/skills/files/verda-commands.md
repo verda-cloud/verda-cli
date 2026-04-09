@@ -21,6 +21,8 @@ Users say things informally. Always translate to the correct hyphenated CLI comm
 | "stop", "shut down", "power off" | `vm shutdown <id>` (alias: `vm stop`) |
 | "hibernate", "suspend", "sleep" | `vm hibernate <id>` |
 | "delete VM", "delete instance", "remove", "destroy", "terminate" | `vm delete <id>` (alias: `vm rm`) |
+| "template", "saved config", "preset", "my templates" | `template` (alias: `tmpl`) |
+| "deploy from template", "use template", "quick deploy" | `vm create --from <template-name>` |
 | "what's available", "stock", "capacity" | `availability` or `vm availability` |
 | "instance types", "GPU types", "CPU types", "machine types", "specs", "flavors" | `instance-types` |
 | "pricing", "plans", "how much", "cost per hour" | `instance-types` (has pricing) or `cost estimate` |
@@ -76,6 +78,7 @@ Users say things informally. Always translate to the correct hyphenated CLI comm
 | `--startup-script` | string | — | From `verda startup-script list` → `id` |
 | `--contract` | string | `PAY_AS_YOU_GO` | `PAY_AS_YOU_GO`, `SPOT`, `LONG_TERM` |
 | `--os-volume-on-spot-discontinue` | string | — | `keep_detached`, `move_to_trash`, `delete_permanently` |
+| `--from` | string | — | Deploy from saved template (skips steps 1-6) |
 | `--wait` | bool | true | Wait for VM to be running |
 | `--wait-timeout` | duration | 5m | **Use `2m` for agent mode** — default 5m is too long |
 
@@ -128,6 +131,29 @@ Flags: `--user` (default: root), `--key` (identity file path)
 | `verda startup-script add -o json` | Add script | `--name`, `--file` or `--script` |
 | `verda startup-script delete <id> -o json` | Remove script | confirm first |
 
+## Templates (alias: `tmpl`)
+
+| Command | Purpose | Key Flags |
+|---------|---------|-----------|
+| `verda template list -o json` | List saved templates | — |
+| `verda template show <name> -o json` | Show template details | — |
+| `verda template delete <name>` | Delete a template | confirm first |
+
+Templates are interactive to create/edit — tell user to run these themselves:
+
+```
+verda template create              # Interactive wizard to save a new template
+verda template edit <name>         # Edit fields of existing template
+```
+
+**Deploy from template:**
+```bash
+verda --agent vm create --from <template-name> --hostname <name> --wait --wait-timeout 2m -o json
+```
+
+Templates store: instance type, location, image, SSH keys, startup script, volumes, billing type.
+Hostname supports patterns: `gpu-{random}-{location}` → `gpu-cold-cable-smiles-fin-03`.
+
 ## Volumes
 
 | Command | Purpose | Key Flags |
@@ -152,3 +178,4 @@ Quick reference: where does each parameter come from?
 | volume ID | `verda volume list -o json` | `id` |
 | VM ID | `verda vm list -o json` | `id` |
 | hostname | `verda vm list -o json` | `hostname` |
+| template name | `verda template list -o json` | `name` |

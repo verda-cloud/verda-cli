@@ -50,6 +50,12 @@ For "what am I spending" / "running costs":
 
 ## Deploy Decision Framework
 
+**Check for templates first:** If the user has saved templates, deploying from one is faster.
+- `verda --agent template list -o json` — check if any templates exist
+- If user mentions a template name or "use my template": `verda --agent vm create --from <name> --hostname <hostname> --wait --wait-timeout 2m -o json`
+- Templates pre-fill instance type, location, image, SSH keys, etc. — only hostname is needed
+- If no templates or user wants fresh config, walk the dependency chain below.
+
 Walk this dependency chain when creating a VM. Steps marked **ALWAYS** must run even if the user specified values. Steps marked **skip if known** can be skipped when user provided the answer.
 
 ### 1. Billing → spot or on-demand? *(skip if known)*
