@@ -92,8 +92,13 @@ func Save(baseDir, resource, name string, tmpl *Template) error {
 	}
 
 	path := filepath.Join(dir, name+".yaml")
-	if err := os.WriteFile(path, data, 0o644); err != nil { //nolint:gosec // templates are not secrets
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil { //nolint:gosec // templates are not secrets
 		return fmt.Errorf("writing template file: %w", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp) // best-effort cleanup
+		return fmt.Errorf("saving template file: %w", err)
 	}
 	return nil
 }
