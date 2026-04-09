@@ -23,6 +23,13 @@ import (
 const (
 	billingTypeSpot = "spot"
 	kindGPU         = "gpu"
+
+	contractPayAsYouGo = "PAY_AS_YOU_GO"
+	contractSpot       = "SPOT"
+	contractLongTerm   = "LONG_TERM"
+
+	unitLabelGPU  = "GPU"
+	unitLabelVCPU = "vCPU"
 )
 
 // clientFunc lazily resolves a Verda API client. This allows the wizard
@@ -70,35 +77,118 @@ func (c *apiCache) fetchAvailability(ctx context.Context, getClient clientFunc, 
 	return c.avail, c.locations, nil
 }
 
+// WizardMode controls which steps are included in the wizard flow.
+type WizardMode int
+
+const (
+	// WizardModeDeploy includes all steps: config + hostname + description + confirm deploy.
+	WizardModeDeploy WizardMode = iota
+	// WizardModeTemplate includes only config steps (no hostname, description, confirm).
+	WizardModeTemplate
+)
+
+// TemplateResult holds the wizard output in a form suitable for template saving.
+// It maps internal IDs to human-readable names for SSH keys and startup scripts.
+type TemplateResult struct {
+	BillingType       string
+	Contract          string
+	Kind              string
+	InstanceType      string
+	Location          string
+	Image             string
+	OSVolumeSize      int
+	SSHKeyNames       []string
+	StartupScriptName string
+	StorageSize       int
+	StorageType       string
+	StorageSkip       bool // user explicitly chose "None (skip)"
+	StartupScriptSkip bool // user explicitly chose "None (skip)"
+}
+
+// RunTemplateWizard runs the VM create wizard in template mode (no hostname,
+// description, or confirm-deploy steps). Returns the wizard results for
+// saving as a template.
+func RunTemplateWizard(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams) (*TemplateResult, error) {
+	opts := &createOptions{
+		LocationCode: verda.LocationFIN01,
+		StorageType:  verda.VolumeTypeNVMe,
+	}
+
+	flow := buildCreateFlow(f.VerdaClient, opts, WizardModeTemplate)
+	engine := wizard.NewEngine(f.Prompter(), f.Status(), wizard.WithOutput(ioStreams.ErrOut))
+	if err := engine.Run(ctx, flow); err != nil {
+		return nil, err
+	}
+
+	return optsToTemplateResult(opts), nil
+}
+
+func optsToTemplateResult(opts *createOptions) *TemplateResult {
+	result := &TemplateResult{
+		Contract:          opts.Contract,
+		Kind:              opts.Kind,
+		InstanceType:      opts.InstanceType,
+		Location:          opts.LocationCode,
+		Image:             opts.Image,
+		OSVolumeSize:      opts.OSVolumeSize,
+		SSHKeyNames:       opts.sshKeyNames,
+		StartupScriptName: opts.startupScriptName,
+		StorageSize:       opts.StorageSize,
+		StorageType:       opts.StorageType,
+		StorageSkip:       opts.StorageSize == 0 && len(opts.VolumeSpecs) == 0,
+		StartupScriptSkip: opts.StartupScriptID == "" && opts.startupScriptName == "",
+	}
+	if opts.IsSpot {
+		result.BillingType = "spot"
+	} else {
+		result.BillingType = "on-demand"
+	}
+	return result
+}
+
 // buildCreateFlow builds the interactive wizard flow for vm create.
 // It mirrors the web UI step order:
 //
 //	billing-type → contract → kind → instance-type → location →
 //	image → os-volume-size → storage-size → ssh-keys →
 //	startup-script → hostname → description
-func buildCreateFlow(getClient clientFunc, opts *createOptions) *wizard.Flow {
+func buildCreateFlow(getClient clientFunc, opts *createOptions, mode WizardMode) *wizard.Flow {
 	cache := &apiCache{}
-	return &wizard.Flow{
-		Name: "vm-create",
-		Layout: []wizard.ViewDef{
-			{ID: "progress", View: wizard.NewProgressView(wizard.WithProgressPercent())},
-			{ID: "hints", View: wizard.NewHintBarView(wizard.WithHintStyle(bubbletea.HintStyle()))},
-		},
-		Steps: []wizard.Step{
-			stepBillingType(opts),
-			stepContract(getClient, opts),
-			stepKind(opts),
-			stepInstanceType(getClient, cache, opts),
-			stepLocation(getClient, cache, opts),
-			stepImage(getClient, opts),
-			stepOSVolumeSize(opts),
-			stepStorage(getClient, cache, opts),
-			stepSSHKeys(getClient, opts),
-			stepStartupScript(getClient, opts),
+
+	steps := []wizard.Step{
+		stepBillingType(opts),
+		stepContract(getClient, opts),
+		stepKind(opts),
+		stepInstanceType(getClient, cache, opts),
+		stepLocation(getClient, cache, opts),
+		stepImage(getClient, opts),
+		stepOSVolumeSize(opts),
+		stepStorage(getClient, cache, opts),
+		stepSSHKeys(getClient, opts),
+		stepStartupScript(getClient, opts),
+	}
+	if mode == WizardModeDeploy {
+		steps = append(steps,
 			stepHostname(opts),
 			stepDescription(opts),
 			stepConfirmDeploy(getClient, cache, opts),
-		},
+		)
+	}
+
+	layout := []wizard.ViewDef{
+		{ID: "hints", View: wizard.NewHintBarView(wizard.WithHintStyle(bubbletea.HintStyle()))},
+	}
+	if mode == WizardModeDeploy {
+		// Prepend progress bar for deploy mode only
+		layout = append([]wizard.ViewDef{
+			{ID: "progress", View: wizard.NewProgressView(wizard.WithProgressPercent())},
+		}, layout...)
+	}
+
+	return &wizard.Flow{
+		Name:   "vm-create",
+		Layout: layout,
+		Steps:  steps,
 	}
 }
 
@@ -120,7 +210,7 @@ func stepBillingType(opts *createOptions) wizard.Step {
 		Resetter: func() {
 			opts.IsSpot = false
 		},
-		IsSet: func() bool { return opts.IsSpot },
+		IsSet: func() bool { return opts.billingTypeSet || opts.IsSpot },
 		Value: func() any {
 			if opts.IsSpot {
 				return billingTypeSpot
@@ -144,7 +234,7 @@ func stepContract(getClient clientFunc, opts *createOptions) wizard.Step {
 		},
 		Loader: func(ctx context.Context, _ tui.Prompter, status tui.Status, store *wizard.Store) ([]wizard.Choice, error) {
 			choices := []wizard.Choice{
-				{Label: "Pay as you go", Value: "PAY_AS_YOU_GO"},
+				{Label: "Pay as you go", Value: contractPayAsYouGo},
 			}
 			client, err := getClient()
 			if err != nil {
@@ -270,9 +360,9 @@ func stepInstanceType(getClient clientFunc, cache *apiCache, opts *createOptions
 				units := instanceUnits(t)
 				var priceStr string
 				if units > 1 {
-					unitLabel := "GPU"
+					unitLabel := unitLabelGPU
 					if t.GPU.NumberOfGPUs == 0 {
-						unitLabel = "vCPU"
+						unitLabel = unitLabelVCPU
 					}
 					perUnit := totalPrice / float64(units)
 					priceStr = fmt.Sprintf("$%.3f/%s/hr  $%.3f/hr", perUnit, unitLabel, totalPrice)
@@ -332,9 +422,11 @@ func stepLocation(getClient clientFunc, cache *apiCache, opts *createOptions) wi
 		},
 		Setter:   func(v any) { opts.LocationCode = v.(string) },
 		Resetter: func() { opts.LocationCode = verda.LocationFIN01 },
-		IsSet:    func() bool { return opts.LocationCode != "" && opts.LocationCode != verda.LocationFIN01 },
-		Value:    func() any { return opts.LocationCode },
-		Default:  func(_ map[string]any) any { return verda.LocationFIN01 },
+		IsSet: func() bool {
+			return opts.locationSet || (opts.LocationCode != "" && opts.LocationCode != verda.LocationFIN01)
+		},
+		Value:   func() any { return opts.LocationCode },
+		Default: func(_ map[string]any) any { return verda.LocationFIN01 },
 	}
 }
 
@@ -500,8 +592,10 @@ func stepStorage(getClient clientFunc, cache *apiCache, opts *createOptions) wiz
 		},
 		Setter:   func(v any) {}, // Set directly in Loader.
 		Resetter: func() {},      // Don't clear — Loader manages the value.
-		IsSet:    func() bool { return opts.StorageSize > 0 || len(opts.VolumeSpecs) > 0 || len(opts.ExistingVolumes) > 0 },
-		Value:    func() any { return "" },
+		IsSet: func() bool {
+			return opts.storageSkip || opts.StorageSize > 0 || len(opts.VolumeSpecs) > 0 || len(opts.ExistingVolumes) > 0
+		},
+		Value: func() any { return "" },
 	}
 }
 
@@ -687,8 +781,10 @@ func stepSSHKeys(getClient clientFunc, opts *createOptions) wizard.Step {
 					// with empty choices and calls Resetter, so we must
 					// bypass by returning a sentinel.
 					opts.SSHKeyIDs = make([]string, len(selected))
+					opts.sshKeyNames = make([]string, len(selected))
 					for i, c := range selected {
 						opts.SSHKeyIDs[i] = c.Value
+						opts.sshKeyNames[i] = c.Label
 					}
 					return nil, nil
 				}
@@ -900,6 +996,9 @@ func stepStartupScript(getClient clientFunc, opts *createOptions) wizard.Step {
 				if choices[idx].Value != addNewScriptValue {
 					// Set the value directly and return empty so the engine auto-skips.
 					opts.StartupScriptID = choices[idx].Value
+					if choices[idx].Value != "" {
+						opts.startupScriptName = choices[idx].Label
+					}
 					return nil, nil
 				}
 
@@ -915,7 +1014,7 @@ func stepStartupScript(getClient clientFunc, opts *createOptions) wizard.Step {
 		},
 		Setter:   func(v any) {}, // Set directly in Loader.
 		Resetter: func() {},      // Don't clear — Loader manages the value.
-		IsSet:    func() bool { return opts.StartupScriptID != "" },
+		IsSet:    func() bool { return opts.startupScriptSkip || opts.StartupScriptID != "" },
 		Value:    func() any { return opts.StartupScriptID },
 	}
 }
@@ -1063,17 +1162,9 @@ func stepConfirmDeploy(getClient clientFunc, cache *apiCache, opts *createOption
 		Prompt:      wizard.ConfirmPrompt,
 		Required:    true,
 		Default: func(_ map[string]any) any {
-			// Fetch volume type pricing (best effort).
-			if cache.volumeTypes == nil && len(opts.VolumeSpecs) > 0 {
-				if client, err := getClient(); err == nil {
-					if vTypes, err := client.VolumeTypes.GetAllVolumeTypes(context.Background()); err == nil {
-						cache.volumeTypes = make(map[string]verda.VolumeType, len(vTypes))
-						for _, vt := range vTypes {
-							cache.volumeTypes[vt.Type] = vt
-						}
-					}
-				}
-			}
+			// Ensure pricing data is available (may be missing when
+			// steps were skipped via --from template pre-fill).
+			ensurePricingCache(getClient, cache, opts)
 			renderDeploymentSummary(opts, cache)
 			return true
 		},
@@ -1085,6 +1176,37 @@ func stepConfirmDeploy(getClient clientFunc, cache *apiCache, opts *createOption
 		Resetter: func() {},
 		IsSet:    func() bool { return false },
 		Value:    func() any { return true },
+	}
+}
+
+// ensurePricingCache populates the apiCache with instance type and volume
+// type pricing data if it's missing. This happens when wizard steps were
+// skipped because a template pre-filled the values.
+func ensurePricingCache(getClient clientFunc, cache *apiCache, _ *createOptions) {
+	client, err := getClient()
+	if err != nil {
+		return
+	}
+	ctx := context.Background()
+
+	// Fetch instance types if missing.
+	if cache.instanceTypes == nil {
+		if types, err := client.InstanceTypes.Get(ctx, "usd"); err == nil {
+			cache.instanceTypes = make(map[string]verda.InstanceTypeInfo, len(types))
+			for i := range types {
+				cache.instanceTypes[types[i].InstanceType] = types[i]
+			}
+		}
+	}
+
+	// Fetch volume types if missing.
+	if cache.volumeTypes == nil {
+		if vTypes, err := client.VolumeTypes.GetAllVolumeTypes(ctx); err == nil {
+			cache.volumeTypes = make(map[string]verda.VolumeType, len(vTypes))
+			for _, vt := range vTypes {
+				cache.volumeTypes[vt.Type] = vt
+			}
+		}
 	}
 }
 
@@ -1117,10 +1239,10 @@ func renderDeploymentSummary(opts *createOptions, cache *apiCache) {
 		instUnits = instanceUnits(&info)
 		if info.GPU.NumberOfGPUs > 0 {
 			instLabel = fmt.Sprintf("%s — %s", info.InstanceType, info.GPU.Description)
-			instUnitLabel = "GPU"
+			instUnitLabel = unitLabelGPU
 		} else {
 			instLabel = fmt.Sprintf("%s — %d CPU, %dGB RAM", info.InstanceType, info.CPU.NumberOfCores, info.Memory.SizeInGigabytes)
-			instUnitLabel = "vCPU"
+			instUnitLabel = unitLabelVCPU
 		}
 	}
 

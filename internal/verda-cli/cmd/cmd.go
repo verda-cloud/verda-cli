@@ -24,6 +24,7 @@ import (
 	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/sshkey"
 	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/startupscript"
 	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/status"
+	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/template"
 	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/update"
 	cmdutil "github/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/vm"
@@ -114,6 +115,7 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) (*cobra.Command, *clioptions.Op
 				locations.NewCmdLocations(f, ioStreams),
 				sshkey.NewCmdSSHKey(f, ioStreams),
 				startupscript.NewCmdStartupScript(f, ioStreams),
+				template.NewCmdTemplate(f, ioStreams),
 				volume.NewCmdVolume(f, ioStreams),
 			},
 		},

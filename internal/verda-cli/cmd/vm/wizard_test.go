@@ -37,7 +37,7 @@ func TestBuildCreateFlowHappyPath(t *testing.T) {
 
 	// errClient returns error — API steps skipped via IsSet, confirm step handles error gracefully.
 	errClient := func() (*verda.Client, error) { return nil, errors.New("no client in test") }
-	flow := buildCreateFlow(errClient, opts)
+	flow := buildCreateFlow(errClient, opts, WizardModeDeploy)
 	engine := wizard.NewEngine(mock, nil)
 
 	if err := engine.Run(context.Background(), flow); err != nil {
@@ -82,7 +82,7 @@ func TestBuildCreateFlowSpotSkipsContract(t *testing.T) {
 	mock.AddConfirm(true)        // confirm deploy
 
 	errClient := func() (*verda.Client, error) { return nil, errors.New("no client in test") }
-	flow := buildCreateFlow(errClient, opts)
+	flow := buildCreateFlow(errClient, opts, WizardModeDeploy)
 	engine := wizard.NewEngine(mock, nil)
 
 	if err := engine.Run(context.Background(), flow); err != nil {

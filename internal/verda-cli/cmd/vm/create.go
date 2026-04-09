@@ -28,6 +28,7 @@ type createOptions struct {
 	Hostname     string
 	Description  string
 	Kind         string
+	From         string // --from template name or path
 
 	SSHKeyIDs       []string
 	LocationCode    string
@@ -48,6 +49,14 @@ type createOptions struct {
 	StorageOnSpotDiscontinue  string
 
 	Wait cmdutil.WaitOptions
+
+	// Internal flags for template/wizard coordination.
+	sshKeyNames       []string // names corresponding to SSHKeyIDs (for template saving)
+	startupScriptName string   // name corresponding to StartupScriptID (for template saving)
+	billingTypeSet    bool     // true when billing type was pre-filled
+	locationSet       bool     // true when location was pre-filled
+	storageSkip       bool     // true when storage was explicitly skipped
+	startupScriptSkip bool     // true when startup script was explicitly skipped
 }
 
 // NewCmdCreate creates the vm create cobra command.
@@ -61,9 +70,27 @@ func NewCmdCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 		Use:   "create",
 		Short: "Create a VM instance",
 		Long: cmdutil.LongDesc(`
-			Create a Verda VM instance using the official Verda Cloud Go SDK.
+			Create a Verda VM instance. Without flags, launches an interactive
+			wizard. Use --from to pre-fill settings from a saved template.
+
+			Templates are created with "verda template create" and stored
+			as YAML files under ~/.verda/templates/vm/.
 		`),
 		Example: cmdutil.Examples(`
+			# Interactive wizard
+			verda vm create
+
+			# From a saved template (only prompts for hostname + confirm)
+			verda vm create --from gpu-training
+			verda vm create --from gpu-training --hostname my-vm
+
+			# Pick template from list
+			verda vm create --from
+
+			# From a template file
+			verda vm create --from ./my-template.yaml
+
+			# Non-interactive with all flags
 			verda vm create \
 			  --kind gpu \
 			  --instance-type 1V100.6V \
@@ -71,21 +98,17 @@ func NewCmdCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 			  --os ubuntu-24.04-cuda-13.0-open-docker \
 			  --os-volume-size 100 \
 			  --hostname gpu-runner \
-			  --description "GPU runner for batch jobs" \
 			  --ssh-key ssh_key_123
-
-			verda vm create \
-			  --kind cpu \
-			  --instance-type CPU.4V.16G \
-			  --location FIN-03 \
-			  --os ubuntu-24.04 \
-			  --os-volume-size 55 \
-			  --hostname training-node \
-			  --is-spot \
-			  --storage-size 500
 		`),
-		Args: cobra.NoArgs,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// --from with NoOptDefVal: "verda vm create --from gpu-training"
+			// leaves "gpu-training" as a positional arg. Recombine it.
+			if cmd.Flags().Changed("from") && strings.TrimSpace(opts.From) == "" && len(args) == 1 {
+				opts.From = args[0]
+			} else if len(args) > 0 {
+				return cmdutil.UsageErrorf(cmd, "unexpected argument %q", args[0])
+			}
 			return runCreate(cmd, f, ioStreams, opts)
 		},
 	}
@@ -117,6 +140,8 @@ func NewCmdCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 	flags.IntVar(&opts.StorageSize, "storage-size", 0, "Size of the optional additional storage volume in GiB")
 	flags.StringVar(&opts.StorageType, "storage-type", opts.StorageType, "Type of the optional additional storage volume")
 	flags.StringVar(&opts.StorageOnSpotDiscontinue, "storage-on-spot-discontinue", "", "Spot discontinue policy for the optional additional storage volume")
+	flags.StringVar(&opts.From, "from", "", "Create from a saved template; use alone to pick from list")
+	flags.Lookup("from").NoOptDefVal = " " // allow --from without value (shows picker)
 	_ = flags.MarkHidden("type")
 	_ = flags.MarkHidden("image")
 	_ = flags.MarkHidden("ssh-key-id")
@@ -139,11 +164,9 @@ func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 		return cmdutil.NewMissingFlagsError(missing)
 	}
 
-	// If any required field is missing, run the interactive wizard.
-	if opts.InstanceType == "" || opts.Image == "" || opts.Hostname == "" {
-		if err := runWizard(cmd.Context(), f, ioStreams, opts); err != nil {
-			return err
-		}
+	// Template + wizard: apply template if --from is used, then fill remaining fields.
+	if done, err := resolveCreateInputs(cmd, f, ioStreams, client, opts); done || err != nil {
+		return err
 	}
 
 	req, err := opts.request()
@@ -214,7 +237,7 @@ func missingCreateFlags(opts *createOptions) []string {
 }
 
 func runWizard(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *createOptions) error {
-	flow := buildCreateFlow(f.VerdaClient, opts)
+	flow := buildCreateFlow(f.VerdaClient, opts, WizardModeDeploy)
 	engine := wizard.NewEngine(f.Prompter(), f.Status(), wizard.WithOutput(ioStreams.ErrOut))
 	return engine.Run(ctx, flow)
 }
@@ -304,11 +327,11 @@ func normalizeContract(value string) (string, error) {
 	case "":
 		return "", nil
 	case "pay_as_go", "pay-as-go", "pay_as_you_go", "pay-as-you-go", "payg", "pay as go", "pay as you go":
-		return "PAY_AS_YOU_GO", nil
+		return contractPayAsYouGo, nil
 	case "spot":
-		return "SPOT", nil
+		return contractSpot, nil
 	case "long_term", "long-term", "long term":
-		return "LONG_TERM", nil
+		return contractLongTerm, nil
 	case "1 month", "3 months", "6 months", "1 year", "2 years", "1_month", "3_months", "6_months", "1_year", "2_years":
 		return "", errors.New("the current POST /v1/instances public API does not accept long-term duration values on instance creation; use --contract long_term only if your backend supports it")
 	default:
