@@ -15,7 +15,8 @@ func NewCmdSkills(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 			agents (Claude Code, Cursor, Windsurf, Codex, Gemini CLI, Copilot)
 			how to use the Verda CLI for cloud infrastructure management.
 
-			Skills are maintained at https://github.com/verda-cloud/verda-ai-skills
+			Skills are bundled with the CLI. User-defined agents can be added
+			via ~/.verda/agents.json.
 		`),
 		Run: cmdutil.DefaultSubCommandRun(ioStreams.Out),
 	}

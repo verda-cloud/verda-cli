@@ -38,14 +38,12 @@ func NewCmdInstall(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Comman
 		Short: "Install AI agent skills for Verda Cloud",
 		Long: cmdutil.LongDesc(`
 			Install skill files that teach AI coding agents how to use the
-			Verda CLI. Skills are fetched from:
-			https://github.com/verda-cloud/verda-ai-skills
+			Verda CLI. Skills are bundled with the CLI binary.
 
 			Without arguments, shows an interactive picker to select agents.
 			With arguments, installs for the specified agents directly.
 
-			Supported agents are defined in the skills repository manifest
-			and may include: claude-code, cursor, windsurf, codex, gemini, copilot.
+			User-defined agents can be added via ~/.verda/agents.json.
 		`),
 		Example: cmdutil.Examples(`
 			# Interactive — select agents from a list
