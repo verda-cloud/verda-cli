@@ -2,7 +2,7 @@
   "version": "1.0.0",
   "skills": [
     "verda-cloud.md",
-    "verda-commands.md"
+    "verda-reference.md"
   ],
   "agents": {
     "claude-code": {

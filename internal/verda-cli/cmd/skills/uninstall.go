@@ -12,7 +12,7 @@ import (
 	cmdutil "github/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
 
-var defaultSkillNames = []string{"verda-cloud.md", "verda-commands.md"}
+var defaultSkillNames = []string{"verda-cloud.md", "verda-reference.md"}
 
 type uninstallOptions struct {
 	agents         []string
@@ -107,7 +107,12 @@ func runUninstall(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOSt
 		}
 	}
 
+	// Use skill names from state (tracks what was actually installed),
+	// fall back to manifest, then hardcoded defaults.
 	skillNames := opts.skillNames
+	if len(skillNames) == 0 && len(state.Skills) > 0 {
+		skillNames = state.Skills
+	}
 	if len(skillNames) == 0 {
 		skillNames = defaultSkillNames
 	}

@@ -16,14 +16,14 @@ func TestInstallCopy(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	skillFiles := map[string]string{
-		"verda-cloud.md":    "# Verda Cloud\ntest",
-		"verda-commands.md": "# Commands\ntest",
+		"verda-cloud.md":     "# Verda Cloud\ntest",
+		"verda-reference.md": "# Commands\ntest",
 	}
 	agent := &Agent{
 		Name: "test-agent", DisplayName: "Test Agent",
 		Scope: "global", Method: "copy", Target: dir,
 	}
-	if err := installForAgent(agent, skillFiles); err != nil {
+	if err := installForAgent(agent, skillFiles, nil); err != nil {
 		t.Fatalf("install error: %v", err)
 	}
 	for name, content := range skillFiles {
@@ -46,7 +46,7 @@ func TestInstallAppend(t *testing.T) {
 		Scope: "project", Method: methodAppend,
 		Target: filepath.Join(dir, "AGENTS.md"),
 	}
-	if err := installForAgent(agent, skillFiles); err != nil {
+	if err := installForAgent(agent, skillFiles, nil); err != nil {
 		t.Fatalf("install error: %v", err)
 	}
 	data, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
@@ -71,8 +71,8 @@ func TestInstallAppend_Idempotent(t *testing.T) {
 		Name: "codex", Scope: "project", Method: methodAppend,
 		Target: filepath.Join(dir, "AGENTS.md"),
 	}
-	_ = installForAgent(agent, map[string]string{"verda-cloud.md": "# V1"})
-	_ = installForAgent(agent, map[string]string{"verda-cloud.md": "# V2"})
+	_ = installForAgent(agent, map[string]string{"verda-cloud.md": "# V1"}, nil)
+	_ = installForAgent(agent, map[string]string{"verda-cloud.md": "# V2"}, nil)
 
 	data, _ := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
 	if bytes.Count(data, []byte(markerStart)) != 1 {
@@ -80,6 +80,43 @@ func TestInstallAppend_Idempotent(t *testing.T) {
 	}
 	if !bytes.Contains(data, []byte("# V2")) {
 		t.Fatal("expected updated content")
+	}
+}
+
+func TestInstallCopy_CleansUpStaleFiles(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	// Simulate a previous install with an old filename.
+	oldFile := filepath.Join(dir, "verda-commands.md")
+	_ = os.WriteFile(oldFile, []byte("old content"), 0o644)
+
+	// Install with new filenames — old file should be cleaned up.
+	newFiles := map[string]string{
+		"verda-cloud.md":     "# Cloud",
+		"verda-reference.md": "# Reference",
+	}
+	agent := &Agent{
+		Name: "test", DisplayName: "Test",
+		Scope: "global", Method: "copy", Target: dir,
+	}
+	previousSkills := []string{"verda-cloud.md", "verda-commands.md"}
+
+	if err := installForAgent(agent, newFiles, previousSkills); err != nil {
+		t.Fatalf("install error: %v", err)
+	}
+
+	// New files should exist.
+	if _, err := os.Stat(filepath.Join(dir, "verda-reference.md")); err != nil {
+		t.Fatal("verda-reference.md should exist")
+	}
+	// Old renamed file should be removed.
+	if _, err := os.Stat(oldFile); !os.IsNotExist(err) {
+		t.Fatal("verda-commands.md should have been removed")
+	}
+	// File that exists in both old and new should still exist.
+	if _, err := os.Stat(filepath.Join(dir, "verda-cloud.md")); err != nil {
+		t.Fatal("verda-cloud.md should still exist")
 	}
 }
 
@@ -111,8 +148,8 @@ func TestRunInstall_NonInteractive(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(targetDir, "verda-cloud.md")); err != nil {
 		t.Fatal("verda-cloud.md not installed")
 	}
-	if _, err := os.Stat(filepath.Join(targetDir, "verda-commands.md")); err != nil {
-		t.Fatal("verda-commands.md not installed")
+	if _, err := os.Stat(filepath.Join(targetDir, "verda-reference.md")); err != nil {
+		t.Fatal("verda-reference.md not installed")
 	}
 	state, _ := LoadState(statePath)
 	if state.Version == "" {

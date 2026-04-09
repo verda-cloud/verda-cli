@@ -17,6 +17,7 @@ type State struct {
 	Version     string    `json:"version"`
 	InstalledAt time.Time `json:"installed_at"`
 	Agents      []string  `json:"agents"`
+	Skills      []string  `json:"skills,omitempty"` // skill filenames installed (for cleanup on rename)
 }
 
 // HasAgent reports whether the given agent name is in the installed list.

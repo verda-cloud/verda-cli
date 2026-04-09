@@ -43,7 +43,7 @@ func NewCmdInstall(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Comman
 
 			Two skill files are installed per agent:
 			  - verda-cloud.md: Decision engine (deploy workflow, cost checks, error recovery)
-			  - verda-commands.md: Command reference (flags, output fields, parameter sources)
+			  - verda-reference.md: Command reference (flags, output fields, parameter sources)
 
 			Install methods vary by agent:
 			  - copy: Files placed in agent's rules directory (Claude Code, Cursor, Windsurf)
@@ -106,7 +106,10 @@ func runInstall(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStre
 		return err
 	}
 
-	if err := installAndPrint(ioStreams, selectedAgents, manifest, skillFiles); err != nil {
+	// Load previous state to detect stale files from renamed skills.
+	prevState := loadPreviousState(opts)
+
+	if err := installAndPrint(ioStreams, selectedAgents, manifest, skillFiles, prevState.Skills); err != nil {
 		return err
 	}
 
@@ -155,9 +158,22 @@ func confirmInstall(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IO
 	return nil
 }
 
-func installAndPrint(ioStreams cmdutil.IOStreams, selectedAgents []*Agent, manifest *Manifest, skillFiles map[string]string) error {
+func loadPreviousState(opts *installOptions) *State {
+	statePath := opts.statePath
+	if statePath == "" {
+		var err error
+		statePath, err = StatePath()
+		if err != nil {
+			return &State{}
+		}
+	}
+	state, _ := LoadState(statePath)
+	return state
+}
+
+func installAndPrint(ioStreams cmdutil.IOStreams, selectedAgents []*Agent, manifest *Manifest, skillFiles map[string]string, previousSkills []string) error {
 	for _, agent := range selectedAgents {
-		if installErr := installForAgent(agent, skillFiles); installErr != nil {
+		if installErr := installForAgent(agent, skillFiles, previousSkills); installErr != nil {
 			return fmt.Errorf("installing for %s: %w", agent.DisplayName, installErr)
 		}
 		dir := agent.TargetDir()
@@ -184,6 +200,7 @@ func saveInstallState(ioStreams cmdutil.IOStreams, opts *installOptions, manifes
 	state, _ := LoadState(statePath)
 	state.Version = manifest.Version
 	state.InstalledAt = time.Now()
+	state.Skills = manifest.Skills
 	for _, a := range selectedAgents {
 		if !state.HasAgent(a.Name) {
 			state.Agents = append(state.Agents, a.Name)
@@ -266,7 +283,7 @@ func resolveAgent(opts *installOptions, manifest *Manifest, name string) *Agent 
 	return manifest.Agents[name]
 }
 
-func installForAgent(agent *Agent, skillFiles map[string]string) error {
+func installForAgent(agent *Agent, skillFiles map[string]string, previousSkills []string) error {
 	dir := agent.TargetDir()
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return fmt.Errorf("creating directory %s: %w", dir, err)
@@ -274,7 +291,20 @@ func installForAgent(agent *Agent, skillFiles map[string]string) error {
 	if agent.Method == methodAppend {
 		return installAppend(agent, dir, skillFiles)
 	}
+	// Remove stale files from a previous install (e.g. renamed skills).
+	cleanupStaleFiles(dir, skillFiles, previousSkills)
 	return installCopy(dir, skillFiles)
+}
+
+// cleanupStaleFiles removes previously installed skill files that are no longer
+// in the current manifest. This handles file renames across CLI versions.
+func cleanupStaleFiles(dir string, currentFiles map[string]string, previousSkills []string) {
+	for _, old := range previousSkills {
+		if _, exists := currentFiles[old]; exists {
+			continue // still in current manifest
+		}
+		_ = os.Remove(filepath.Join(dir, old)) // best-effort
+	}
 }
 
 func installCopy(dir string, skillFiles map[string]string) error {
