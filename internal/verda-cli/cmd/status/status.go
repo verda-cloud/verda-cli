@@ -169,7 +169,7 @@ func buildDashboard(instances []verda.Instance, volumes []verda.Volume, balance 
 
 		// Offline instances still charge — include all non-terminated instances in burn rate.
 		if inst.Status == verda.StatusRunning || inst.Status == verda.StatusOffline {
-			d.Financials.BurnRateHourly += instanceHourlyCost(inst)
+			d.Financials.BurnRateHourly += cmdutil.InstanceTotalHourlyCost(inst)
 		}
 
 		// Location tracking.
@@ -225,19 +225,6 @@ func buildDashboard(instances []verda.Instance, volumes []verda.Volume, balance 
 	})
 
 	return d
-}
-
-// instanceHourlyCost returns the total hourly cost for an instance.
-// PricePerHour is per-core: multiply by GPU count (or CPU cores for CPU instances).
-func instanceHourlyCost(inst *verda.Instance) float64 {
-	units := inst.GPU.NumberOfGPUs
-	if units == 0 {
-		units = inst.CPU.NumberOfCores
-	}
-	if units == 0 {
-		units = 1
-	}
-	return float64(inst.PricePerHour) * float64(units)
 }
 
 func renderDashboard(w interface{ Write([]byte) (int, error) }, d *Dashboard) {
