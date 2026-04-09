@@ -29,6 +29,11 @@ func NewCmdUninstall(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Comm
 		Long: cmdutil.LongDesc(`
 			Remove verda-ai-skills from the specified AI agents.
 
+			For copy-method agents (Claude Code, Cursor, Windsurf), skill files
+			are deleted from the target directory. For append-method agents
+			(Codex, Gemini, Copilot), the marked content block is removed from
+			the target file, preserving surrounding content.
+
 			Without arguments, shows an interactive picker of currently
 			installed agents to select from.
 		`),
@@ -41,6 +46,9 @@ func NewCmdUninstall(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Comm
 
 			# Remove from multiple agents
 			verda skills uninstall claude-code cursor
+
+			# Non-interactive — remove from all installed agents
+			verda --agent skills uninstall
 		`),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			opts.agents = args

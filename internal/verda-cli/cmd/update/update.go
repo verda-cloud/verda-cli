@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -20,6 +21,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/verda-cloud/verdagostack/pkg/version"
 
+	skillscmd "github/verda-cloud/verda-cli/internal/verda-cli/cmd/skills"
 	cmdutil "github/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 	"github/verda-cloud/verda-cli/internal/verda-cli/options"
 )
@@ -163,6 +165,9 @@ func runUpdate(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStrea
 	}
 
 	_, _ = fmt.Fprintf(ioStreams.Out, "Updated to %s\n", target)
+
+	// Update installed skills if any agents have them.
+	updateInstalledSkills(ctx, dst, ioStreams)
 
 	// Migrate: if the currently running binary is outside ~/.verda/bin/,
 	// handle the old location based on how it was installed.
@@ -421,4 +426,32 @@ func ghGet(ctx context.Context, url string, v any) error {
 		return fmt.Errorf("GitHub API: HTTP %d for %s", resp.StatusCode, url)
 	}
 	return json.NewDecoder(resp.Body).Decode(v)
+}
+
+// updateInstalledSkills re-installs skills for agents that already have them.
+// It runs the NEW binary (at dst) so the latest embedded skills are used.
+// Best-effort: failures are reported as warnings, not errors.
+func updateInstalledSkills(ctx context.Context, newBinary string, ioStreams cmdutil.IOStreams) {
+	statePath, err := skillscmd.StatePath()
+	if err != nil {
+		return
+	}
+	state, err := skillscmd.LoadState(statePath)
+	if err != nil || state.Version == "" || len(state.Agents) == 0 {
+		return
+	}
+
+	args := make([]string, 0, 4+len(state.Agents))
+	args = append(args, "--agent", "skills", "install", "--force")
+	args = append(args, state.Agents...)
+
+	cmd := exec.CommandContext(ctx, newBinary, args...) //nolint:gosec // newBinary is the just-installed verda binary
+	cmd.Stdout = ioStreams.Out
+	cmd.Stderr = ioStreams.ErrOut
+
+	if err := cmd.Run(); err != nil {
+		_, _ = fmt.Fprintf(ioStreams.ErrOut, "Warning: could not update skills: %v\n", err)
+		_, _ = fmt.Fprintf(ioStreams.ErrOut, "  Run 'verda skills install %s --force' manually.\n",
+			strings.Join(state.Agents, " "))
+	}
 }

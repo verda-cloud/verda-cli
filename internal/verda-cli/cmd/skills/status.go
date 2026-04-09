@@ -28,11 +28,21 @@ func NewCmdStatus(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 		Short: "Show installed skills status",
 		Long: cmdutil.LongDesc(`
 			Display the currently installed skills version, which agents
-			have skills installed, and whether an update is available.
+			have skills installed, and whether a newer version is bundled
+			with this CLI build.
+
+			The "latest" version is the one embedded in the current CLI binary.
+			If your installed version differs, run "verda skills install" to update.
 		`),
 		Example: cmdutil.Examples(`
+			# Human-readable output
 			verda skills status
+
+			# Structured output for scripts
 			verda skills status -o json
+
+			# Check if update is available (JSON fields: version, latest, update_available)
+			verda --agent skills status -o json
 		`),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {

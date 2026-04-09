@@ -38,27 +38,34 @@ func NewCmdInstall(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Comman
 		Short: "Install AI agent skills for Verda Cloud",
 		Long: cmdutil.LongDesc(`
 			Install skill files that teach AI coding agents how to use the
-			Verda CLI. Skills are bundled with the CLI binary.
+			Verda CLI. Skills are bundled with the CLI binary and versioned
+			with each release.
+
+			Two skill files are installed per agent:
+			  - verda-cloud.md: Decision engine (deploy workflow, cost checks, error recovery)
+			  - verda-commands.md: Command reference (flags, output fields, parameter sources)
+
+			Install methods vary by agent:
+			  - copy: Files placed in agent's rules directory (Claude Code, Cursor, Windsurf)
+			  - append: Content injected between markers in a target file (Codex, Gemini, Copilot)
 
 			Without arguments, shows an interactive picker to select agents.
 			With arguments, installs for the specified agents directly.
-
-			User-defined agents can be added via ~/.verda/agents.json.
 		`),
 		Example: cmdutil.Examples(`
 			# Interactive — select agents from a list
 			verda skills install
 
-			# Install for Claude Code (default)
+			# Install for Claude Code (writes to ~/.claude/skills/)
 			verda skills install claude-code
 
-			# Install for multiple agents
+			# Install for multiple agents at once
 			verda skills install claude-code cursor windsurf
 
-			# Reinstall without confirmation
+			# Reinstall / update without confirmation
 			verda skills install claude-code --force
 
-			# Non-interactive (for CI/scripts)
+			# Non-interactive for CI/scripts (defaults to claude-code)
 			verda --agent skills install claude-code
 		`),
 		RunE: func(cmd *cobra.Command, args []string) error {
