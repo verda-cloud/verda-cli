@@ -86,7 +86,7 @@ func runEdit(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams,
 		}
 		labels[len(fields)] = "Save & exit"
 
-		idx, selErr := prompter.Select(ctx, "Edit field", labels)
+		idx, selErr := prompter.Select(ctx, "Edit field", labels, tui.WithSelectDefault(len(fields)), tui.WithPageSize(len(labels)))
 		if selErr != nil {
 			// Ctrl+C — save what we have
 			break
@@ -217,6 +217,18 @@ func buildFieldMenu(tmpl *Template) []editableField {
 				return nil
 			},
 		},
+		{
+			label:   "Description",
+			display: func(t *Template) string { return valueOrDash(t.Description) },
+			edit: func(ctx context.Context, f cmdutil.Factory, t *Template) error {
+				val, err := f.Prompter().TextInput(ctx, "Description", tui.WithDefault(t.Description))
+				if err != nil {
+					return nil //nolint:nilerr // user canceled
+				}
+				t.Description = val
+				return nil
+			},
+		},
 	}
 	return fields
 }
@@ -315,20 +327,18 @@ func editImage(ctx context.Context, f cmdutil.Factory, t *Template) error {
 	}
 
 	choices := make([]string, 0, len(images))
-	values := make([]string, 0, len(images))
 	for _, img := range images {
 		if img.IsCluster {
 			continue
 		}
-		choices = append(choices, img.ID)
-		values = append(values, img.ID)
+		choices = append(choices, img.Name)
 	}
 
 	idx, selErr := f.Prompter().Select(ctx, "Image", choices)
 	if selErr != nil {
 		return nil //nolint:nilerr // user canceled
 	}
-	t.Image = values[idx]
+	t.Image = choices[idx]
 	return nil
 }
 

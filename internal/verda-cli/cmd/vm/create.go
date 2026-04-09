@@ -79,12 +79,15 @@ type createOptions struct {
 	Wait cmdutil.WaitOptions
 
 	// Internal flags for template/wizard coordination.
-	sshKeyNames       []string // names corresponding to SSHKeyIDs (for template saving)
-	startupScriptName string   // name corresponding to StartupScriptID (for template saving)
-	billingTypeSet    bool     // true when billing type was pre-filled
-	locationSet       bool     // true when location was pre-filled
-	storageSkip       bool     // true when storage was explicitly skipped
-	startupScriptSkip bool     // true when startup script was explicitly skipped
+	sshKeyNames         []string // names corresponding to SSHKeyIDs (for template saving)
+	startupScriptName   string   // name corresponding to StartupScriptID (for template saving)
+	billingTypeSet      bool     // true when billing type was pre-filled
+	locationSet         bool     // true when location was pre-filled
+	storageSkip         bool     // true when storage was explicitly skipped
+	startupScriptSkip   bool     // true when startup script was explicitly skipped
+	imageName           string   // human-readable image name (for template saving)
+	hostnamePattern     string   // template-mode only: hostname pattern
+	templateDescription string   // template-mode only: user description
 }
 
 // NewCmdCreate creates the vm create cobra command.

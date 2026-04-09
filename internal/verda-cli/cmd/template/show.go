@@ -123,6 +123,7 @@ func runShow(f cmdutil.Factory, ioStreams cmdutil.IOStreams, ref string) error {
 	}
 
 	pf("Hostname Pattern:", tmpl.HostnamePattern)
+	pf("Description:", tmpl.Description)
 
 	return nil
 }

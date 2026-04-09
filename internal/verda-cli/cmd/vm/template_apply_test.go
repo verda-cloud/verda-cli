@@ -40,8 +40,9 @@ func TestApplyTemplate(t *testing.T) {
 	if opts.LocationCode != "FIN-01" {
 		t.Errorf("LocationCode = %q, want FIN-01", opts.LocationCode)
 	}
-	if opts.Image != "ubuntu-24.04-cuda-12.8" {
-		t.Errorf("Image = %q, want ubuntu-24.04-cuda-12.8", opts.Image)
+	// Image is resolved by resolveTemplateNames, not applyTemplate.
+	if opts.Image != "" {
+		t.Errorf("Image = %q, want empty (resolved later by resolveTemplateNames)", opts.Image)
 	}
 	if opts.OSVolumeSize != 200 {
 		t.Errorf("OSVolumeSize = %d, want 200", opts.OSVolumeSize)

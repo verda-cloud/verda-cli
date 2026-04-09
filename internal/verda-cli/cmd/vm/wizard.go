@@ -43,7 +43,7 @@ type WizardMode int
 const (
 	// WizardModeDeploy includes all steps: config + hostname + description + confirm deploy.
 	WizardModeDeploy WizardMode = iota
-	// WizardModeTemplate includes only config steps (no hostname, description, confirm).
+	// WizardModeTemplate includes config steps + hostname pattern + template description (no deploy hostname, deploy description, or confirm).
 	WizardModeTemplate
 )
 
@@ -63,11 +63,13 @@ type TemplateResult struct {
 	StorageType       string
 	StorageSkip       bool // user explicitly chose "None (skip)"
 	StartupScriptSkip bool // user explicitly chose "None (skip)"
+	HostnamePattern   string
+	Description       string
 }
 
-// RunTemplateWizard runs the VM create wizard in template mode (no hostname,
-// description, or confirm-deploy steps). Returns the wizard results for
-// saving as a template.
+// RunTemplateWizard runs the VM create wizard in template mode. Includes config
+// steps plus hostname-pattern and template description, but no deploy hostname,
+// deploy description, or confirm-deploy steps.
 func RunTemplateWizard(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams) (*TemplateResult, error) {
 	return runTemplateWizardWithOpts(ctx, f, ioStreams, &createOptions{
 		LocationCode: verda.LocationFIN01,
@@ -91,7 +93,7 @@ func optsToTemplateResult(opts *createOptions) *TemplateResult {
 		Kind:              opts.Kind,
 		InstanceType:      opts.InstanceType,
 		Location:          opts.LocationCode,
-		Image:             opts.Image,
+		Image:             opts.imageName,
 		OSVolumeSize:      opts.OSVolumeSize,
 		SSHKeyNames:       opts.sshKeyNames,
 		StartupScriptName: opts.startupScriptName,
@@ -99,6 +101,8 @@ func optsToTemplateResult(opts *createOptions) *TemplateResult {
 		StorageType:       opts.StorageType,
 		StorageSkip:       opts.StorageSize == 0 && len(opts.VolumeSpecs) == 0,
 		StartupScriptSkip: opts.StartupScriptID == "" && opts.startupScriptName == "",
+		HostnamePattern:   opts.hostnamePattern,
+		Description:       opts.templateDescription,
 	}
 	if opts.IsSpot {
 		result.BillingType = "spot"
@@ -134,6 +138,12 @@ func buildCreateFlow(ctx context.Context, getClient clientFunc, opts *createOpti
 			stepHostname(opts),
 			stepDescription(opts),
 			stepConfirmDeploy(ctx, errOut, getClient, cache, opts),
+		)
+	}
+	if mode == WizardModeTemplate {
+		steps = append(steps,
+			stepHostnamePattern(opts),
+			stepTemplateDescription(opts),
 		)
 	}
 
@@ -404,6 +414,7 @@ func stepLocation(getClient clientFunc, cache *apiCache, opts *createOptions) wi
 // --- Step 6: OS Image ---
 
 func stepImage(getClient clientFunc, opts *createOptions) wizard.Step {
+	var imagesByID map[string]string // ID → Name lookup, built by Loader
 	return wizard.Step{
 		Name:        "image",
 		Description: "Operating system image",
@@ -420,11 +431,13 @@ func stepImage(getClient clientFunc, opts *createOptions) wizard.Step {
 			if err != nil {
 				return nil, fmt.Errorf("fetching images: %w", err)
 			}
+			imagesByID = make(map[string]string, len(images))
 			var choices []wizard.Choice
 			for _, img := range images {
 				if img.IsCluster {
 					continue
 				}
+				imagesByID[img.ID] = img.Name
 				desc := ""
 				if len(img.Details) > 0 {
 					desc = strings.Join(img.Details, ", ")
@@ -437,9 +450,15 @@ func stepImage(getClient clientFunc, opts *createOptions) wizard.Step {
 			}
 			return choices, nil
 		},
-		Default:  func(_ map[string]any) any { return opts.Image },
-		Setter:   func(v any) { opts.Image = v.(string) },
-		Resetter: func() { opts.Image = "" },
+		Default: func(_ map[string]any) any { return opts.Image },
+		Setter: func(v any) {
+			id := v.(string)
+			opts.Image = id
+			if imagesByID != nil {
+				opts.imageName = imagesByID[id]
+			}
+		},
+		Resetter: func() { opts.Image = ""; opts.imageName = "" },
 		IsSet:    func() bool { return opts.Image != "" },
 		Value:    func() any { return opts.Image },
 	}
@@ -716,6 +735,39 @@ func stepStartupScript(getClient clientFunc, opts *createOptions) wizard.Step {
 		Resetter: func() {},      // Don't clear — Loader manages the value.
 		IsSet:    func() bool { return opts.startupScriptSkip || opts.StartupScriptID != "" },
 		Value:    func() any { return opts.StartupScriptID },
+	}
+}
+
+// --- Template Step: Hostname Pattern ---
+
+func stepHostnamePattern(opts *createOptions) wizard.Step {
+	return wizard.Step{
+		Name:        "hostname-pattern",
+		Description: "Hostname pattern (optional)",
+		Prompt:      wizard.TextInputPrompt,
+		Required:    false,
+		Default: func(_ map[string]any) any {
+			return "{random}-{location}"
+		},
+		Setter:   func(v any) { opts.hostnamePattern = v.(string) },
+		Resetter: func() { opts.hostnamePattern = "" },
+		IsSet:    func() bool { return opts.hostnamePattern != "" },
+		Value:    func() any { return opts.hostnamePattern },
+	}
+}
+
+// --- Template Step: Description ---
+
+func stepTemplateDescription(opts *createOptions) wizard.Step {
+	return wizard.Step{
+		Name:        "template-description",
+		Description: "Description (optional)",
+		Prompt:      wizard.TextInputPrompt,
+		Required:    false,
+		Setter:      func(v any) { opts.templateDescription = v.(string) },
+		Resetter:    func() { opts.templateDescription = "" },
+		IsSet:       func() bool { return opts.templateDescription != "" },
+		Value:       func() any { return opts.templateDescription },
 	}
 }
 

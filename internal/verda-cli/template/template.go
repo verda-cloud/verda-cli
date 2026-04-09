@@ -32,6 +32,7 @@ type Template struct {
 	StartupScript     string        `yaml:"startup_script,omitempty"`
 	StartupScriptSkip bool          `yaml:"startup_script_skip,omitempty"`
 	HostnamePattern   string        `yaml:"hostname_pattern,omitempty"`
+	Description       string        `yaml:"description,omitempty"`
 }
 
 // StorageSpec describes an additional storage volume attached to a template.
@@ -210,9 +211,13 @@ func Delete(baseDir, resource, name string) error {
 	return nil
 }
 
-// AutoDescription returns a human-readable summary by joining non-empty
-// InstanceType, Image, and Location fields with ", ".
+// AutoDescription returns a human-readable summary. If the user provided a
+// custom Description it is returned as-is; otherwise the method falls back to
+// joining non-empty InstanceType, Image, and Location with ", ".
 func (t *Template) AutoDescription() string {
+	if t.Description != "" {
+		return t.Description
+	}
 	var parts []string
 	for _, s := range []string{t.InstanceType, t.Image, t.Location} {
 		if s != "" {

@@ -149,6 +149,8 @@ func vmResultToTemplate(r *vm.TemplateResult) *Template {
 		StartupScript:     r.StartupScriptName,
 		StorageSkip:       r.StorageSkip,
 		StartupScriptSkip: r.StartupScriptSkip,
+		HostnamePattern:   r.HostnamePattern,
+		Description:       r.Description,
 	}
 	if r.StorageSize > 0 {
 		tmpl.Storage = []StorageSpec{{

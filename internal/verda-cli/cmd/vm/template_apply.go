@@ -131,9 +131,7 @@ func applyTemplate(tmpl *template.Template, opts *createOptions) {
 		opts.LocationCode = tmpl.Location
 		opts.locationSet = true
 	}
-	if tmpl.Image != "" {
-		opts.Image = tmpl.Image
-	}
+	// Image name is resolved to ID by resolveTemplateNames, not here.
 	if tmpl.OSVolumeSize != 0 {
 		opts.OSVolumeSize = tmpl.OSVolumeSize
 	}
@@ -156,18 +154,51 @@ func applyTemplate(tmpl *template.Template, opts *createOptions) {
 	// SSH keys and startup script are handled by resolveTemplateNames, not here.
 }
 
-// resolveTemplateNames resolves SSH key names and startup script name to IDs.
-// Prints each warning to ioStreams.ErrOut and returns the collected warnings.
+// resolveTemplateNames resolves image name, SSH key names, and startup script
+// name to IDs. Prints each warning to ioStreams.ErrOut and returns the
+// collected warnings.
 func resolveTemplateNames(ctx context.Context, ioStreams cmdutil.IOStreams, client *verda.Client, tmpl *template.Template, opts *createOptions) []string {
+	imageWarnings := resolveImageName(ctx, client, tmpl.Image, opts)
 	_, sshWarnings := resolveSSHKeyNames(ctx, client, tmpl.SSHKeys, opts)
 	scriptWarnings := resolveStartupScriptName(ctx, client, tmpl.StartupScript, opts)
-	warnings := make([]string, 0, len(sshWarnings)+len(scriptWarnings))
+	warnings := make([]string, 0, len(imageWarnings)+len(sshWarnings)+len(scriptWarnings))
+	warnings = append(warnings, imageWarnings...)
 	warnings = append(warnings, sshWarnings...)
 	warnings = append(warnings, scriptWarnings...)
 	for _, w := range warnings {
 		_, _ = fmt.Fprintf(ioStreams.ErrOut, "  Warning: %s\n", w)
 	}
 	return warnings
+}
+
+// resolveImageName resolves an image name to its ID via the API.
+// For backward compatibility, if the name matches an existing image ID directly,
+// it is used as-is (handles templates created before name-based storage).
+func resolveImageName(ctx context.Context, client *verda.Client, name string, opts *createOptions) (warnings []string) {
+	if name == "" {
+		return nil
+	}
+	images, err := client.Images.Get(ctx)
+	if err != nil {
+		return []string{fmt.Sprintf("failed to resolve image name: %v", err)}
+	}
+	// Try matching by name first.
+	for _, img := range images {
+		if img.Name == name {
+			opts.Image = img.ID
+			opts.imageName = img.Name
+			return nil
+		}
+	}
+	// Backward compat: if the value matches an image ID, use it directly.
+	for _, img := range images {
+		if img.ID == name {
+			opts.Image = img.ID
+			opts.imageName = img.Name
+			return nil
+		}
+	}
+	return []string{fmt.Sprintf("image %q not found", name)}
 }
 
 // resolveSSHKeyNames resolves SSH key names to IDs via the API.
