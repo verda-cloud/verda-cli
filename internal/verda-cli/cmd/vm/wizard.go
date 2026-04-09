@@ -80,6 +80,61 @@ const (
 	WizardModeTemplate
 )
 
+// TemplateResult holds the wizard output in a form suitable for template saving.
+// It maps internal IDs to human-readable names for SSH keys and startup scripts.
+type TemplateResult struct {
+	BillingType       string
+	Contract          string
+	Kind              string
+	InstanceType      string
+	Location          string
+	Image             string
+	OSVolumeSize      int
+	SSHKeyNames       []string
+	StartupScriptName string
+	StorageSize       int
+	StorageType       string
+}
+
+// RunTemplateWizard runs the VM create wizard in template mode (no hostname,
+// description, or confirm-deploy steps). Returns the wizard results for
+// saving as a template.
+func RunTemplateWizard(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams) (*TemplateResult, error) {
+	opts := &createOptions{
+		LocationCode: verda.LocationFIN01,
+		StorageType:  verda.VolumeTypeNVMe,
+	}
+
+	flow := buildCreateFlow(f.VerdaClient, opts, WizardModeTemplate)
+	engine := wizard.NewEngine(f.Prompter(), f.Status(), wizard.WithOutput(ioStreams.ErrOut))
+	if err := engine.Run(ctx, flow); err != nil {
+		return nil, err
+	}
+
+	return optsToTemplateResult(opts), nil
+}
+
+func optsToTemplateResult(opts *createOptions) *TemplateResult {
+	result := &TemplateResult{
+		Contract:          opts.Contract,
+		Kind:              opts.Kind,
+		InstanceType:      opts.InstanceType,
+		Location:          opts.LocationCode,
+		Image:             opts.Image,
+		OSVolumeSize:      opts.OSVolumeSize,
+		SSHKeyNames:       opts.sshKeyNames,
+		StartupScriptName: opts.startupScriptName,
+		StorageSize:       opts.StorageSize,
+		StorageType:       opts.StorageType,
+	}
+	if opts.IsSpot {
+		result.BillingType = "spot"
+	} else {
+		result.BillingType = "on-demand"
+	}
+	return result
+}
+
 // buildCreateFlow builds the interactive wizard flow for vm create.
 // It mirrors the web UI step order:
 //
@@ -711,8 +766,10 @@ func stepSSHKeys(getClient clientFunc, opts *createOptions) wizard.Step {
 					// with empty choices and calls Resetter, so we must
 					// bypass by returning a sentinel.
 					opts.SSHKeyIDs = make([]string, len(selected))
+					opts.sshKeyNames = make([]string, len(selected))
 					for i, c := range selected {
 						opts.SSHKeyIDs[i] = c.Value
+						opts.sshKeyNames[i] = c.Label
 					}
 					return nil, nil
 				}
@@ -924,6 +981,7 @@ func stepStartupScript(getClient clientFunc, opts *createOptions) wizard.Step {
 				if choices[idx].Value != addNewScriptValue {
 					// Set the value directly and return empty so the engine auto-skips.
 					opts.StartupScriptID = choices[idx].Value
+					opts.startupScriptName = choices[idx].Label
 					return nil, nil
 				}
 

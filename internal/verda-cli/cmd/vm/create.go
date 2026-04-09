@@ -48,6 +48,11 @@ type createOptions struct {
 	StorageOnSpotDiscontinue  string
 
 	Wait cmdutil.WaitOptions
+
+	// Template-only: capture names for SSH keys and startup scripts
+	// so templates can store human-readable names instead of IDs.
+	sshKeyNames       []string // names corresponding to SSHKeyIDs
+	startupScriptName string   // name corresponding to StartupScriptID
 }
 
 // NewCmdCreate creates the vm create cobra command.
