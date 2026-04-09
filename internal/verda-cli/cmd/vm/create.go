@@ -22,6 +22,34 @@ var validSpotPolicies = map[string]struct{}{
 	verda.SpotDiscontinueDeletePermanent: {},
 }
 
+// createOptions holds all configuration for vm create. Fields are populated
+// in a defined sequence — each stage may read fields set by prior stages:
+//
+// Stage 1 — Flag parsing (cobra):
+//
+//	Sets all public fields from CLI flags. LocationCode defaults to FIN-01.
+//
+// Stage 2 — Template application (applyTemplate):
+//
+//	Overwrites empty fields with template values. Sets billingTypeSet,
+//	locationSet, storageSkip, startupScriptSkip coordination flags.
+//	Expands HostnamePattern into Hostname.
+//
+// Stage 3 — Name resolution (resolveTemplateNames):
+//
+//	Resolves sshKeyNames → SSHKeyIDs, startupScriptName → StartupScriptID
+//	via API calls. On failure, leaves IDs empty for wizard to prompt.
+//
+// Stage 4 — Wizard (buildCreateFlow steps):
+//
+//	Fills remaining gaps interactively. Steps check IsSet to skip pre-filled
+//	values. Steps 8/9/10 (storage, ssh-keys, startup-script) manage state
+//	directly via their Loader closures.
+//
+// Stage 5 — Request building (request()):
+//
+//	Reads all fields to assemble CreateInstanceRequest. Auto-sets
+//	Contract="SPOT" when IsSpot && Contract is empty.
 type createOptions struct {
 	InstanceType string
 	Image        string
