@@ -34,9 +34,12 @@
     },
     "gemini": {
       "display_name": "Gemini CLI",
-      "scope": "project",
-      "target": "GEMINI.md",
-      "method": "append"
+      "scope": "global",
+      "target": "~/.gemini/skills/verda-cloud/",
+      "method": "copy",
+      "file_map": {
+        "verda-cloud.md": "SKILL.md"
+      }
     },
     "copilot": {
       "display_name": "Copilot",
