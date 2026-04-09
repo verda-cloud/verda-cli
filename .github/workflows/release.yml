@@ -52,18 +52,14 @@ jobs:
           # Release notes for this version only (passed to goreleaser)
           git-cliff --tag ${{ github.event.inputs.version }} --latest --strip header -o RELEASE_NOTES.md
 
-      - name: Commit, tag, and push release branch
+      - name: Tag and push release
         run: |
           VERSION="${{ github.event.inputs.version }}"
-          BRANCH="release/${VERSION}"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git remote set-url origin https://x-access-token:${{ secrets.RELEASE_TOKEN }}@github.com/${{ github.repository }}
-          git checkout -b "${BRANCH}"
-          git add -A
-          git commit -m "chore(release): ${VERSION}"
           git tag "${VERSION}"
-          git push origin "${BRANCH}" --tags
+          git push origin --tags
 
       - name: Install cosign
         uses: sigstore/cosign-installer@v3
@@ -114,7 +110,7 @@ jobs:
 
       - name: Sign checksum files with cosign
         # Keyless signing via GitHub OIDC. The certificate identity will be:
-        #   https://github.com/verda-cloud/verda-cli/.github/workflows/release.yml@refs/heads/release/<ver>
+        #   https://github.com/verda-cloud/verda-cli/.github/workflows/release.yml@refs/heads/main
         #
         # To verify manually:
         #   cosign verify-blob \
@@ -153,13 +149,18 @@ jobs:
             "dist/verda_${VER}_SHA256SUMS.sig" \
             "dist/verda_${VER}_SHA256SUMS.pem"
 
-      - name: Create PR to merge release into main
+      - name: Commit changelog and create PR
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         run: |
           VERSION="${{ github.event.inputs.version }}"
+          BRANCH="chore/changelog-${VERSION}"
+          git checkout -b "${BRANCH}"
+          git add CHANGELOG.md
+          git commit -m "chore(release): update changelog for ${VERSION}"
+          git push origin "${BRANCH}"
           gh pr create \
             --base main \
-            --head "release/${VERSION}" \
-            --title "chore(release): ${VERSION}" \
-            --body "Automated release PR for ${VERSION}. Merges changelog and version updates into main."
+            --head "${BRANCH}" \
+            --title "chore(release): update changelog for ${VERSION}" \
+            --body "Updates CHANGELOG.md with release notes for ${VERSION}."
