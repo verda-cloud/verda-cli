@@ -25,20 +25,16 @@ func resolveCreateInputs(
 	opts *createOptions,
 ) (done bool, err error) {
 	fromFlagSet := cmd.Flags().Changed("from")
-	needsWizard := opts.InstanceType == "" || opts.Image == "" || opts.Hostname == ""
 
-	if !fromFlagSet && !needsWizard {
-		return false, nil
-	}
-
-	allEmpty := opts.InstanceType == "" && opts.Image == "" && opts.Hostname == ""
-	applied, err := handleTemplateFrom(cmd.Context(), f, ioStreams, client, opts, fromFlagSet, allEmpty)
-	if err != nil {
-		return true, err
-	}
-	// If --from was explicitly set and the picker was canceled, stop.
-	if fromFlagSet && !applied {
-		return true, nil
+	// Only load templates when --from is explicitly used.
+	if fromFlagSet {
+		applied, err := handleTemplateFrom(cmd.Context(), f, ioStreams, client, opts)
+		if err != nil {
+			return true, err
+		}
+		if !applied {
+			return true, nil // user canceled picker
+		}
 	}
 
 	// Run wizard for any remaining missing fields.
@@ -54,45 +50,25 @@ func resolveCreateInputs(
 // handleTemplateFrom loads a template (by ref or picker), applies it to opts,
 // resolves SSH key / startup script names to IDs, and prints the summary.
 //
-// Parameters:
-//   - fromFlagSet: true when --from was explicitly provided on the command line
-//   - ref: the --from value (may be empty when the flag is set without a value)
-//   - allEmpty: true when no required flags were set at all (instance-type, os, hostname)
-//
-// Returns true if a template was applied, false otherwise.
+// handleTemplateFrom loads a template (by name/path or via picker when --from
+// has no value), applies it to opts, resolves names, and prints a summary.
+// Returns true if a template was applied, false if the user canceled.
 func handleTemplateFrom(
 	ctx context.Context,
 	f cmdutil.Factory,
 	ioStreams cmdutil.IOStreams,
 	client *verda.Client,
 	opts *createOptions,
-	fromFlagSet bool,
-	allEmpty bool,
 ) (applied bool, err error) {
-	var tmpl *template.Template
+	// NoOptDefVal=" " is the sentinel for --from without a value.
+	ref := strings.TrimSpace(opts.From)
 
-	if fromFlagSet {
-		// --from explicitly used (with or without value).
-		// NoOptDefVal=" " is the sentinel for --from without a value.
-		ref := strings.TrimSpace(opts.From)
-		tmpl, err = loadTemplate(ctx, f, ref, false)
-		if err != nil {
-			return false, err
-		}
-		if tmpl == nil {
-			return false, nil // user canceled picker
-		}
-	} else if allEmpty {
-		// No flags at all: offer template picker with "Start from scratch"
-		tmpl, err = loadTemplate(ctx, f, "", true)
-		if err != nil {
-			return false, err
-		}
-		// tmpl may be nil if "Start from scratch" selected or no templates
+	tmpl, err := loadTemplate(ctx, f, ref, false)
+	if err != nil {
+		return false, err
 	}
-
 	if tmpl == nil {
-		return false, nil
+		return false, nil // user canceled picker
 	}
 
 	applyTemplate(tmpl, opts)
