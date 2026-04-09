@@ -1155,17 +1155,9 @@ func stepConfirmDeploy(getClient clientFunc, cache *apiCache, opts *createOption
 		Prompt:      wizard.ConfirmPrompt,
 		Required:    true,
 		Default: func(_ map[string]any) any {
-			// Fetch volume type pricing (best effort).
-			if cache.volumeTypes == nil && len(opts.VolumeSpecs) > 0 {
-				if client, err := getClient(); err == nil {
-					if vTypes, err := client.VolumeTypes.GetAllVolumeTypes(context.Background()); err == nil {
-						cache.volumeTypes = make(map[string]verda.VolumeType, len(vTypes))
-						for _, vt := range vTypes {
-							cache.volumeTypes[vt.Type] = vt
-						}
-					}
-				}
-			}
+			// Ensure pricing data is available (may be missing when
+			// steps were skipped via --from template pre-fill).
+			ensurePricingCache(getClient, cache, opts)
 			renderDeploymentSummary(opts, cache)
 			return true
 		},
@@ -1177,6 +1169,37 @@ func stepConfirmDeploy(getClient clientFunc, cache *apiCache, opts *createOption
 		Resetter: func() {},
 		IsSet:    func() bool { return false },
 		Value:    func() any { return true },
+	}
+}
+
+// ensurePricingCache populates the apiCache with instance type and volume
+// type pricing data if it's missing. This happens when wizard steps were
+// skipped because a template pre-filled the values.
+func ensurePricingCache(getClient clientFunc, cache *apiCache, _ *createOptions) {
+	client, err := getClient()
+	if err != nil {
+		return
+	}
+	ctx := context.Background()
+
+	// Fetch instance types if missing.
+	if cache.instanceTypes == nil {
+		if types, err := client.InstanceTypes.Get(ctx, "usd"); err == nil {
+			cache.instanceTypes = make(map[string]verda.InstanceTypeInfo, len(types))
+			for i := range types {
+				cache.instanceTypes[types[i].InstanceType] = types[i]
+			}
+		}
+	}
+
+	// Fetch volume types if missing.
+	if cache.volumeTypes == nil {
+		if vTypes, err := client.VolumeTypes.GetAllVolumeTypes(ctx); err == nil {
+			cache.volumeTypes = make(map[string]verda.VolumeType, len(vTypes))
+			for _, vt := range vTypes {
+				cache.volumeTypes[vt.Type] = vt
+			}
+		}
 	}
 }
 

@@ -95,3 +95,35 @@ func TestApplyTemplate_Partial(t *testing.T) {
 		t.Errorf("StorageType = %q, want NVMe (should keep default)", opts.StorageType)
 	}
 }
+
+func TestApplyTemplate_SkipFlags(t *testing.T) {
+	t.Parallel()
+
+	tmpl := &template.Template{
+		Resource:          "vm",
+		BillingType:       "on-demand",
+		Kind:              "GPU",
+		InstanceType:      "1V100.6V",
+		Location:          "FIN-01",
+		Image:             "ubuntu-24.04-cuda-12.8",
+		OSVolumeSize:      50,
+		StorageSkip:       true,
+		StartupScriptSkip: true,
+	}
+
+	opts := &createOptions{}
+	applyTemplate(tmpl, opts)
+
+	if !opts.billingTypeSet {
+		t.Error("expected billingTypeSet=true")
+	}
+	if !opts.locationSet {
+		t.Error("expected locationSet=true")
+	}
+	if !opts.storageSkip {
+		t.Error("expected storageSkip=true")
+	}
+	if !opts.startupScriptSkip {
+		t.Error("expected startupScriptSkip=true")
+	}
+}
