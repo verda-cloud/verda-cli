@@ -250,8 +250,8 @@ func editInstanceType(ctx context.Context, f cmdutil.Factory, t *Template) error
 		return err
 	}
 
-	var choices []string
-	var values []string
+	choices := make([]string, 0, len(types))
+	values := make([]string, 0, len(types))
 	for i := range types {
 		it := &types[i]
 		if t.Kind != "" && !matchKind(it.InstanceType, t.Kind) {
@@ -314,8 +314,8 @@ func editImage(ctx context.Context, f cmdutil.Factory, t *Template) error {
 		return err
 	}
 
-	var choices []string
-	var values []string
+	choices := make([]string, 0, len(images))
+	values := make([]string, 0, len(images))
 	for _, img := range images {
 		if img.IsCluster {
 			continue
