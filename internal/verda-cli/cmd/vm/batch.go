@@ -15,13 +15,12 @@ import (
 )
 
 // runBatchAction validates batch flags and executes the action against all
-// matching instances. It is called from runAction when --all or --hostname is set.
-//
-//nolint:gocyclo // Batch CLI command with validation, filtering, confirmation, and execution — inherently complex.
+// matching instances. It is called from runAction when --all is set.
+// --status and --hostname act as filters (AND logic) to narrow the target set.
 func runBatchAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *actionOptions) error {
-	// Validation: --all/--hostname cannot be combined with --id or a positional instance ID.
+	// Validation: --all cannot be combined with --id or a positional instance ID.
 	if opts.InstanceID != "" {
-		return errors.New("cannot combine --all/--hostname with --id or positional instance ID")
+		return errors.New("cannot combine --all with --id or positional instance ID")
 	}
 
 	// Validation: --with-volumes is only valid for delete.
@@ -31,11 +30,7 @@ func runBatchAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOS
 
 	// Agent mode requires --yes for batch operations (always destructive at scale).
 	if f.AgentMode() && !opts.Yes {
-		label := opts.Action + " --all"
-		if opts.Hostname != "" {
-			label = opts.Action + " --hostname"
-		}
-		return cmdutil.NewConfirmationRequiredError(label)
+		return cmdutil.NewConfirmationRequiredError(opts.Action + " --all")
 	}
 
 	client, err := f.VerdaClient()

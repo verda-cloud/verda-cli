@@ -55,14 +55,19 @@ func NewCmdDelete(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 	}
 
 	cmd.Flags().StringVar(&opts.VolumeID, "id", "", "Volume ID (alternative to positional argument)")
-	cmd.Flags().BoolVar(&opts.All, "all", false, "Target all volumes matching filters")
-	cmd.Flags().StringVar(&opts.Status, "status", "", "Filter volumes by status (e.g., detached, attached)")
+	cmd.Flags().BoolVar(&opts.All, "all", false, "Target all volumes (use with --status to filter)")
+	cmd.Flags().StringVar(&opts.Status, "status", "", "Filter by status, requires --all (e.g., detached, attached)")
 	cmd.Flags().BoolVar(&opts.Yes, "yes", false, "Skip confirmation for destructive actions")
 
 	return cmd
 }
 
 func runDelete(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *deleteOptions) error {
+	// Validate: --status is a filter that requires --all.
+	if !opts.All && opts.Status != "" {
+		return errors.New("--status can only be used with --all")
+	}
+
 	// Validate: --all cannot combine with --id or positional arg.
 	if opts.All && opts.VolumeID != "" {
 		return errors.New("cannot combine --all with --id or positional volume ID")
@@ -138,19 +143,13 @@ func runSingleVolumeDelete(ctx context.Context, f cmdutil.Factory, ioStreams cmd
 }
 
 func runInteractiveVolumeDelete(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client *verda.Client, opts *deleteOptions) error {
-	// Load volumes with optional status filter.
+	// Load all volumes (--status filter is only valid with --all, validated earlier).
 	var sp interface{ Stop(string) }
 	if status := f.Status(); status != nil {
 		sp, _ = status.Spinner(ctx, "Loading volumes...")
 	}
 
-	var volumes []verda.Volume
-	var err error
-	if opts.Status != "" {
-		volumes, err = client.Volumes.ListVolumesByStatus(ctx, opts.Status)
-	} else {
-		volumes, err = client.Volumes.ListVolumes(ctx)
-	}
+	volumes, err := client.Volumes.ListVolumes(ctx)
 	if sp != nil {
 		sp.Stop("")
 	}

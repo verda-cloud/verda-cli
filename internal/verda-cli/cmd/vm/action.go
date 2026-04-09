@@ -149,10 +149,22 @@ func NewCmdAction(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 
 //nolint:gocyclo // Interactive CLI command with prompts, confirmation, and spinner — inherently complex.
 func runAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *actionOptions) error {
+	// Validate: --status and --hostname are filters that require --all.
+	if !opts.All && (opts.Status != "" || opts.Hostname != "") {
+		flags := []string{}
+		if opts.Status != "" {
+			flags = append(flags, "--status")
+		}
+		if opts.Hostname != "" {
+			flags = append(flags, "--hostname")
+		}
+		return fmt.Errorf("%s can only be used with --all", strings.Join(flags, " and "))
+	}
+
 	// In agent mode, --id and --action are required.
 	if f.AgentMode() {
 		var missing []string
-		if opts.InstanceID == "" && !opts.All && opts.Hostname == "" {
+		if opts.InstanceID == "" && !opts.All {
 			missing = append(missing, "--id")
 		}
 		if opts.Action == "" {
@@ -163,8 +175,8 @@ func runAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 		}
 	}
 
-	// Batch mode: --all or --hostname routes to batch execution.
-	if opts.All || opts.Hostname != "" {
+	// Batch mode: --all routes to batch execution.
+	if opts.All {
 		return runBatchAction(cmd, f, ioStreams, opts)
 	}
 
