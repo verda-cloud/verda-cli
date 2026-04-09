@@ -90,7 +90,7 @@ func NewCmdCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 			  --is-spot \
 			  --storage-size 500
 
-			verda vm create --from gpu-training --hostname my-vm
+			verda vm create --from=gpu-training --hostname my-vm
 		`),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -125,7 +125,8 @@ func NewCmdCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 	flags.IntVar(&opts.StorageSize, "storage-size", 0, "Size of the optional additional storage volume in GiB")
 	flags.StringVar(&opts.StorageType, "storage-type", opts.StorageType, "Type of the optional additional storage volume")
 	flags.StringVar(&opts.StorageOnSpotDiscontinue, "storage-on-spot-discontinue", "", "Spot discontinue policy for the optional additional storage volume")
-	flags.StringVar(&opts.From, "from", "", "Create from a saved template (name or file path); use without value to pick")
+	flags.StringVar(&opts.From, "from", "", "Create from a saved template; omit value to pick from list")
+	flags.Lookup("from").NoOptDefVal = " " // allow --from without value (shows picker)
 	_ = flags.MarkHidden("type")
 	_ = flags.MarkHidden("image")
 	_ = flags.MarkHidden("ssh-key-id")

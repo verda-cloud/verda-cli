@@ -72,8 +72,10 @@ func handleTemplateFrom(
 	var tmpl *template.Template
 
 	if fromFlagSet {
-		// --from explicitly used (with or without value)
-		tmpl, err = loadTemplate(ctx, f, opts.From, false)
+		// --from explicitly used (with or without value).
+		// NoOptDefVal=" " is the sentinel for --from without a value.
+		ref := strings.TrimSpace(opts.From)
+		tmpl, err = loadTemplate(ctx, f, ref, false)
 		if err != nil {
 			return false, err
 		}
