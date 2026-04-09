@@ -199,7 +199,7 @@ func stepBillingType(opts *createOptions) wizard.Step {
 		Resetter: func() {
 			opts.IsSpot = false
 		},
-		IsSet: func() bool { return opts.IsSpot },
+		IsSet: func() bool { return opts.billingTypeSet || opts.IsSpot },
 		Value: func() any {
 			if opts.IsSpot {
 				return billingTypeSpot
@@ -411,9 +411,11 @@ func stepLocation(getClient clientFunc, cache *apiCache, opts *createOptions) wi
 		},
 		Setter:   func(v any) { opts.LocationCode = v.(string) },
 		Resetter: func() { opts.LocationCode = verda.LocationFIN01 },
-		IsSet:    func() bool { return opts.LocationCode != "" && opts.LocationCode != verda.LocationFIN01 },
-		Value:    func() any { return opts.LocationCode },
-		Default:  func(_ map[string]any) any { return verda.LocationFIN01 },
+		IsSet: func() bool {
+			return opts.locationSet || (opts.LocationCode != "" && opts.LocationCode != verda.LocationFIN01)
+		},
+		Value:   func() any { return opts.LocationCode },
+		Default: func(_ map[string]any) any { return verda.LocationFIN01 },
 	}
 }
 

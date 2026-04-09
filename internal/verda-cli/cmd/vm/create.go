@@ -50,10 +50,11 @@ type createOptions struct {
 
 	Wait cmdutil.WaitOptions
 
-	// Template-only: capture names for SSH keys and startup scripts
-	// so templates can store human-readable names instead of IDs.
-	sshKeyNames       []string // names corresponding to SSHKeyIDs
-	startupScriptName string   // name corresponding to StartupScriptID
+	// Internal flags for template/wizard coordination.
+	sshKeyNames       []string // names corresponding to SSHKeyIDs (for template saving)
+	startupScriptName string   // name corresponding to StartupScriptID (for template saving)
+	billingTypeSet    bool     // true when billing type was pre-filled (distinguishes on-demand from unset)
+	locationSet       bool     // true when location was pre-filled (distinguishes FIN-01 from default)
 }
 
 // NewCmdCreate creates the vm create cobra command.

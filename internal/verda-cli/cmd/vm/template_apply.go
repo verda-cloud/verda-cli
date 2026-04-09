@@ -119,8 +119,9 @@ func pickTemplate(ctx context.Context, f cmdutil.Factory, baseDir string) (*temp
 
 // applyTemplate pre-fills createOptions from a template.
 func applyTemplate(tmpl *template.Template, opts *createOptions) {
-	if tmpl.BillingType == billingTypeSpot {
-		opts.IsSpot = true
+	if tmpl.BillingType != "" {
+		opts.IsSpot = tmpl.BillingType == billingTypeSpot
+		opts.billingTypeSet = true
 	}
 	if tmpl.Contract != "" {
 		opts.Contract = tmpl.Contract
@@ -133,6 +134,7 @@ func applyTemplate(tmpl *template.Template, opts *createOptions) {
 	}
 	if tmpl.Location != "" {
 		opts.LocationCode = tmpl.Location
+		opts.locationSet = true
 	}
 	if tmpl.Image != "" {
 		opts.Image = tmpl.Image
