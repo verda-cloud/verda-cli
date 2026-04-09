@@ -28,6 +28,7 @@ type createOptions struct {
 	Hostname     string
 	Description  string
 	Kind         string
+	From         string // --from template name or path
 
 	SSHKeyIDs       []string
 	LocationCode    string
@@ -88,6 +89,8 @@ func NewCmdCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 			  --hostname training-node \
 			  --is-spot \
 			  --storage-size 500
+
+			verda vm create --from gpu-training --hostname my-vm
 		`),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -122,6 +125,7 @@ func NewCmdCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 	flags.IntVar(&opts.StorageSize, "storage-size", 0, "Size of the optional additional storage volume in GiB")
 	flags.StringVar(&opts.StorageType, "storage-type", opts.StorageType, "Type of the optional additional storage volume")
 	flags.StringVar(&opts.StorageOnSpotDiscontinue, "storage-on-spot-discontinue", "", "Spot discontinue policy for the optional additional storage volume")
+	flags.StringVar(&opts.From, "from", "", "Create from a saved template (name or file path); use without value to pick")
 	_ = flags.MarkHidden("type")
 	_ = flags.MarkHidden("image")
 	_ = flags.MarkHidden("ssh-key-id")
@@ -144,11 +148,9 @@ func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 		return cmdutil.NewMissingFlagsError(missing)
 	}
 
-	// If any required field is missing, run the interactive wizard.
-	if opts.InstanceType == "" || opts.Image == "" || opts.Hostname == "" {
-		if err := runWizard(cmd.Context(), f, ioStreams, opts); err != nil {
-			return err
-		}
+	// Template + wizard: apply template if --from is used, then fill remaining fields.
+	if done, err := resolveCreateInputs(cmd, f, ioStreams, client, opts); done || err != nil {
+		return err
 	}
 
 	req, err := opts.request()
