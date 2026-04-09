@@ -25,11 +25,6 @@ var shortcuts = []shortcutDef{
 		Action: verda.ActionStart,
 	},
 	{
-		Use:    "stop <instance-id>",
-		Short:  "Stop a VM instance",
-		Action: verda.ActionShutdown,
-	},
-	{
 		Use:    "shutdown <instance-id>",
 		Short:  "Shutdown a VM instance",
 		Action: verda.ActionShutdown,

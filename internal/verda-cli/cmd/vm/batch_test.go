@@ -24,7 +24,7 @@ func TestBatchRejectsAllWithID(t *testing.T) {
 
 	root := &cobra.Command{Use: "verda", SilenceUsage: true, SilenceErrors: true}
 	root.AddCommand(NewCmdVM(f, ioStreams))
-	root.SetArgs([]string{"vm", "stop", "--all", "--id", "inst-123", "--yes"})
+	root.SetArgs([]string{"vm", "shutdown", "--all", "--id", "inst-123", "--yes"})
 
 	err := root.Execute()
 	if err == nil {
@@ -44,7 +44,7 @@ func TestBatchRejectsAllWithPositionalArg(t *testing.T) {
 
 	root := &cobra.Command{Use: "verda", SilenceUsage: true, SilenceErrors: true}
 	root.AddCommand(NewCmdVM(f, ioStreams))
-	root.SetArgs([]string{"vm", "stop", "inst-123", "--all", "--yes"})
+	root.SetArgs([]string{"vm", "shutdown", "inst-123", "--all", "--yes"})
 
 	err := root.Execute()
 	if err == nil {
@@ -64,7 +64,7 @@ func TestBatchRejectsWithVolumesOnNonDelete(t *testing.T) {
 
 	root := &cobra.Command{Use: "verda", SilenceUsage: true, SilenceErrors: true}
 	root.AddCommand(NewCmdVM(f, ioStreams))
-	root.SetArgs([]string{"vm", "stop", "--all", "--with-volumes", "--yes"})
+	root.SetArgs([]string{"vm", "shutdown", "--all", "--with-volumes", "--yes"})
 
 	err := root.Execute()
 	if err == nil {
@@ -84,7 +84,7 @@ func TestBatchAgentModeRequiresYes(t *testing.T) {
 
 	root := &cobra.Command{Use: "verda", SilenceUsage: true, SilenceErrors: true}
 	root.AddCommand(NewCmdVM(f, ioStreams))
-	root.SetArgs([]string{"vm", "stop", "--all"})
+	root.SetArgs([]string{"vm", "shutdown", "--all"})
 
 	err := root.Execute()
 	if err == nil {
@@ -341,7 +341,7 @@ func TestFilterByHostname(t *testing.T) {
 	}
 }
 
-func TestStopCommandExists(t *testing.T) {
+func TestShutdownCommandExists(t *testing.T) {
 	t.Parallel()
 
 	var buf bytes.Buffer
@@ -352,13 +352,13 @@ func TestStopCommandExists(t *testing.T) {
 
 	var found bool
 	for _, sub := range vmCmd.Commands() {
-		if sub.Name() == "stop" {
+		if sub.Name() == "shutdown" {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Fatal("'stop' command should exist as a standalone command")
+		t.Fatal("'shutdown' command should exist as a standalone command")
 	}
 }
 
@@ -371,7 +371,7 @@ func TestHostnameFlag(t *testing.T) {
 
 	vmCmd := NewCmdVM(f, ioStreams)
 
-	for _, name := range []string{"stop", "shutdown", "start", "hibernate", "delete"} {
+	for _, name := range []string{"shutdown", "start", "hibernate", "delete"} {
 		t.Run(name, func(t *testing.T) {
 			var found *cobra.Command
 			for _, sub := range vmCmd.Commands() {
@@ -399,7 +399,6 @@ func TestActionNameToAPI(t *testing.T) {
 	}{
 		{"start", verda.ActionStart},
 		{"shutdown", verda.ActionShutdown},
-		{"stop", verda.ActionShutdown},
 		{"hibernate", verda.ActionHibernate},
 		{"delete", verda.ActionDelete},
 		{"force_shutdown", verda.ActionForceShutdown},
