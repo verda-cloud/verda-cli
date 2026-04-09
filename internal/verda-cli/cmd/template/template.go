@@ -20,6 +20,7 @@ func NewCmdTemplate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Comma
 	}
 
 	cmd.AddCommand(
+		NewCmdCreate(f, ioStreams),
 		NewCmdList(f, ioStreams),
 		NewCmdShow(f, ioStreams),
 		NewCmdDelete(f, ioStreams),
