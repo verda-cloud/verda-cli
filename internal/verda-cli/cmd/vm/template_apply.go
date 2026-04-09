@@ -71,12 +71,9 @@ func applyTemplateFrom(
 
 	resolveCtx, resolveCancel := context.WithTimeout(ctx, f.Options().Timeout)
 	defer resolveCancel()
-	warnings := resolveTemplateNames(resolveCtx, client, tmpl, opts)
+	resolveTemplateNames(resolveCtx, ioStreams, client, tmpl, opts)
 
 	printTemplateSummary(ioStreams, tmpl)
-	for _, w := range warnings {
-		_, _ = fmt.Fprintf(ioStreams.ErrOut, "  Warning: %s -- will prompt during wizard\n", w)
-	}
 
 	return nil
 }
@@ -162,25 +159,29 @@ func applyTemplate(tmpl *template.Template, opts *createOptions) {
 }
 
 // resolveTemplateNames resolves SSH key names and startup script name to IDs.
-// Returns warnings for any names that couldn't be resolved.
-func resolveTemplateNames(ctx context.Context, client *verda.Client, tmpl *template.Template, opts *createOptions) []string {
-	sshWarnings := resolveSSHKeyNames(ctx, client, tmpl.SSHKeys, opts)
+// Prints each warning to ioStreams.ErrOut and returns the collected warnings.
+func resolveTemplateNames(ctx context.Context, ioStreams cmdutil.IOStreams, client *verda.Client, tmpl *template.Template, opts *createOptions) []string {
+	_, sshWarnings := resolveSSHKeyNames(ctx, client, tmpl.SSHKeys, opts)
 	scriptWarnings := resolveStartupScriptName(ctx, client, tmpl.StartupScript, opts)
 	warnings := make([]string, 0, len(sshWarnings)+len(scriptWarnings))
 	warnings = append(warnings, sshWarnings...)
 	warnings = append(warnings, scriptWarnings...)
+	for _, w := range warnings {
+		_, _ = fmt.Fprintf(ioStreams.ErrOut, "  Warning: %s\n", w)
+	}
 	return warnings
 }
 
 // resolveSSHKeyNames resolves SSH key names to IDs via the API.
-// On API errors, returns no warnings (wizard will prompt later).
-func resolveSSHKeyNames(ctx context.Context, client *verda.Client, names []string, opts *createOptions) []string {
+// Returns (resolved IDs, warnings). On API error or name-not-found, a warning
+// is returned so the caller can inform the user.
+func resolveSSHKeyNames(ctx context.Context, client *verda.Client, names []string, opts *createOptions) (ids, warnings []string) {
 	if len(names) == 0 {
-		return nil
+		return nil, nil
 	}
 	keys, err := client.SSHKeys.GetAllSSHKeys(ctx)
 	if err != nil {
-		return nil // silently skip; wizard will prompt later
+		return nil, []string{fmt.Sprintf("failed to resolve SSH key names: %v", err)}
 	}
 
 	nameToID := make(map[string]string, len(keys))
@@ -188,28 +189,28 @@ func resolveSSHKeyNames(ctx context.Context, client *verda.Client, names []strin
 		nameToID[k.Name] = k.ID
 	}
 
-	var warnings []string
 	for _, name := range names {
 		id, ok := nameToID[name]
 		if !ok {
 			warnings = append(warnings, fmt.Sprintf("SSH key %q not found", name))
 			continue
 		}
+		ids = append(ids, id)
 		opts.SSHKeyIDs = append(opts.SSHKeyIDs, id)
 		opts.sshKeyNames = append(opts.sshKeyNames, name)
 	}
-	return warnings
+	return ids, warnings
 }
 
 // resolveStartupScriptName resolves a startup script name to its ID via the API.
-// On API errors, returns no warnings (wizard will prompt later).
-func resolveStartupScriptName(ctx context.Context, client *verda.Client, name string, opts *createOptions) []string {
+// Returns warnings on API error or name-not-found so the caller can inform the user.
+func resolveStartupScriptName(ctx context.Context, client *verda.Client, name string, opts *createOptions) (warnings []string) {
 	if name == "" {
 		return nil
 	}
 	scripts, err := client.StartupScripts.GetAllStartupScripts(ctx)
 	if err != nil {
-		return nil // silently skip; wizard will prompt later
+		return []string{fmt.Sprintf("failed to resolve startup script name: %v", err)}
 	}
 
 	for _, s := range scripts {
