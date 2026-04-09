@@ -376,6 +376,9 @@ scripts/live-test.sh
 .claude/commands/
 .claude/topic-switch.json
 
+# Release artifacts (generated during CI release workflow)
+RELEASE_NOTES.md
+
 # AI working notes and implementation plans (not shipped)
 .ai/notes/
 docs/plans/
