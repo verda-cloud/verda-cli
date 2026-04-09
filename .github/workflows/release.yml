@@ -58,7 +58,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git remote set-url origin https://x-access-token:${{ secrets.RELEASE_TOKEN }}@github.com/${{ github.repository }}
-          git add CHANGELOG.md RELEASE_NOTES.md
+          git add CHANGELOG.md
           git commit -m "chore(release): update changelog for ${VERSION}"
           git tag "${VERSION}"
           git push origin main --tags
@@ -150,6 +150,3 @@ jobs:
             "dist/verda_${VER}_binary_SHA256SUMS.pem" \
             "dist/verda_${VER}_SHA256SUMS.sig" \
             "dist/verda_${VER}_SHA256SUMS.pem"
-
-      - name: Clean up release notes
-        run: rm -f RELEASE_NOTES.md
