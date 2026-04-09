@@ -27,6 +27,8 @@ const (
 
 	unitLabelGPU  = "GPU"
 	unitLabelVCPU = "vCPU"
+
+	billingTypeOnDemand = "on-demand"
 )
 
 // clientFunc lazily resolves a Verda API client. This allows the wizard
@@ -67,11 +69,13 @@ type TemplateResult struct {
 // description, or confirm-deploy steps). Returns the wizard results for
 // saving as a template.
 func RunTemplateWizard(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams) (*TemplateResult, error) {
-	opts := &createOptions{
+	return runTemplateWizardWithOpts(ctx, f, ioStreams, &createOptions{
 		LocationCode: verda.LocationFIN01,
 		StorageType:  verda.VolumeTypeNVMe,
-	}
+	})
+}
 
+func runTemplateWizardWithOpts(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *createOptions) (*TemplateResult, error) {
 	flow := buildCreateFlow(ctx, f.VerdaClient, opts, WizardModeTemplate, ioStreams.ErrOut)
 	engine := wizard.NewEngine(f.Prompter(), f.Status(), wizard.WithOutput(ioStreams.ErrOut))
 	if err := engine.Run(ctx, flow); err != nil {
@@ -99,7 +103,7 @@ func optsToTemplateResult(opts *createOptions) *TemplateResult {
 	if opts.IsSpot {
 		result.BillingType = "spot"
 	} else {
-		result.BillingType = "on-demand"
+		result.BillingType = billingTypeOnDemand
 	}
 	return result
 }
@@ -159,9 +163,15 @@ func stepBillingType(opts *createOptions) wizard.Step {
 		Prompt:      wizard.SelectPrompt,
 		Required:    true,
 		Loader: wizard.StaticChoices(
-			wizard.Choice{Label: "On-Demand", Value: "on-demand", Description: "Pay as you go or long-term contract"},
+			wizard.Choice{Label: "On-Demand", Value: billingTypeOnDemand, Description: "Pay as you go or long-term contract"},
 			wizard.Choice{Label: "Spot Instance", Value: billingTypeSpot, Description: "Lower price, may be interrupted"},
 		),
+		Default: func(_ map[string]any) any {
+			if opts.IsSpot {
+				return billingTypeSpot
+			}
+			return billingTypeOnDemand
+		},
 		Setter: func(v any) {
 			opts.IsSpot = v.(string) == billingTypeSpot
 		},
@@ -173,7 +183,7 @@ func stepBillingType(opts *createOptions) wizard.Step {
 			if opts.IsSpot {
 				return billingTypeSpot
 			}
-			return "on-demand"
+			return billingTypeOnDemand
 		},
 	}
 }
@@ -219,6 +229,7 @@ func stepContract(getClient clientFunc, opts *createOptions) wizard.Step {
 			}
 			return choices, nil
 		},
+		Default: func(_ map[string]any) any { return opts.Contract },
 		Setter: func(v any) {
 			opts.Contract = v.(string)
 		},
@@ -240,6 +251,7 @@ func stepKind(opts *createOptions) wizard.Step {
 			wizard.Choice{Label: "GPU", Value: kindGPU, Description: "GPU-accelerated instances"},
 			wizard.Choice{Label: "CPU", Value: "cpu", Description: "CPU-only instances"},
 		),
+		Default:  func(_ map[string]any) any { return opts.Kind },
 		Setter:   func(v any) { opts.Kind = v.(string) },
 		Resetter: func() { opts.Kind = "" },
 		IsSet:    func() bool { return opts.Kind != "" },
@@ -338,6 +350,7 @@ func stepInstanceType(getClient clientFunc, cache *apiCache, opts *createOptions
 			}
 			return choices, nil
 		},
+		Default:  func(_ map[string]any) any { return opts.InstanceType },
 		Setter:   func(v any) { opts.InstanceType = v.(string) },
 		Resetter: func() { opts.InstanceType = "" },
 		IsSet:    func() bool { return opts.InstanceType != "" },
@@ -384,7 +397,7 @@ func stepLocation(getClient clientFunc, cache *apiCache, opts *createOptions) wi
 			return opts.locationSet || (opts.LocationCode != "" && opts.LocationCode != verda.LocationFIN01)
 		},
 		Value:   func() any { return opts.LocationCode },
-		Default: func(_ map[string]any) any { return verda.LocationFIN01 },
+		Default: func(_ map[string]any) any { return opts.LocationCode },
 	}
 }
 
@@ -424,6 +437,7 @@ func stepImage(getClient clientFunc, opts *createOptions) wizard.Step {
 			}
 			return choices, nil
 		},
+		Default:  func(_ map[string]any) any { return opts.Image },
 		Setter:   func(v any) { opts.Image = v.(string) },
 		Resetter: func() { opts.Image = "" },
 		IsSet:    func() bool { return opts.Image != "" },
@@ -439,7 +453,12 @@ func stepOSVolumeSize(opts *createOptions) wizard.Step {
 		Description: "OS volume size (GiB)",
 		Prompt:      wizard.TextInputPrompt,
 		Required:    false,
-		Default:     func(_ map[string]any) any { return "50" },
+		Default: func(_ map[string]any) any {
+			if opts.OSVolumeSize > 0 {
+				return strconv.Itoa(opts.OSVolumeSize)
+			}
+			return "50"
+		},
 		Validate: func(v any) error {
 			s := v.(string)
 			if s == "" {

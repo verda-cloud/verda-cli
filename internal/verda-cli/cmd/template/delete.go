@@ -11,23 +11,30 @@ import (
 // NewCmdDelete creates the template delete command.
 func NewCmdDelete(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:     "delete <resource/name>",
+		Use:     "delete [resource/name]",
 		Aliases: []string{"rm"},
 		Short:   "Delete a saved template",
 		Long: cmdutil.LongDesc(`
 			Delete a saved resource configuration template.
+			Without arguments, shows an interactive picker with confirmation.
 			The argument must be in resource/name format (e.g. vm/gpu-training).
 		`),
 		Example: cmdutil.Examples(`
+			# Interactive picker
+			verda template delete
+
 			# Delete a VM template
 			verda template delete vm/gpu-training
 
 			# Short alias
 			verda tmpl rm vm/gpu-training
 		`),
-		Args: cobra.ExactArgs(1),
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runDelete(cmd, f, ioStreams, args[0])
+			if len(args) == 1 {
+				return runDelete(cmd, f, ioStreams, args[0])
+			}
+			return runDeleteInteractive(cmd, f, ioStreams)
 		},
 	}
 
@@ -68,4 +75,15 @@ func runDelete(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 
 	_, _ = fmt.Fprintf(ioStreams.Out, "Deleted template: %s/%s\n", resource, name)
 	return nil
+}
+
+func runDeleteInteractive(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams) error {
+	entry, err := pickTemplateEntry(cmd, f)
+	if err != nil {
+		return err
+	}
+	if entry == nil {
+		return nil // user canceled
+	}
+	return runDelete(cmd, f, ioStreams, entry.Resource+"/"+entry.Name)
 }
