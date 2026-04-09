@@ -245,7 +245,7 @@ image: ubuntu-24.04-cuda-12.8-open-docker
 hostname_pattern: from-template
 `
 	tmplPath := filepath.Join(tmplDir, "test-template.yaml")
-	if err := os.WriteFile(tmplPath, []byte(tmplContent), 0o644); err != nil {
+	if err := os.WriteFile(tmplPath, []byte(tmplContent), 0o600); err != nil {
 		t.Fatalf("failed to write template file: %v", err)
 	}
 
@@ -305,7 +305,7 @@ image: ubuntu-24.04-cuda-12.8-open-docker
 hostname_pattern: from-template
 `
 	tmplPath := filepath.Join(tmplDir, "test-template.yaml")
-	if err := os.WriteFile(tmplPath, []byte(tmplContent), 0o644); err != nil {
+	if err := os.WriteFile(tmplPath, []byte(tmplContent), 0o600); err != nil {
 		t.Fatalf("failed to write template file: %v", err)
 	}
 
