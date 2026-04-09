@@ -1,34 +1,15 @@
 # Changelog
 
 
-## [Unreleased]
+## [v1.5.0] - 2026-04-09
 - [`d6fe448`] Feat/vm batch operation support
 - [`79cf7b7`] Feat/verda status dashboard
 - [`d2e2338`] Require --all for filter flags (--status, --hostname) in batch operations
 - [`72ccba7`] Update license
 - [`be03cc3`] Feat/verda template
 - [`dfa9753`] Refactor: architecture hardening + template edit command
-- [`d3fd513`] Add skills fetcher for downloading manifest and skill files from GitHub
-- [`f20ef84`] Add skills state management for tracking installed skills
-- [`23b671b`] Add skills parent command and wire into root with credential skip
-- [`a8051ea`] Add skills install subcommand with full fetch, select, and install flow
-- [`db96b93`] Add skills uninstall subcommand with interactive and non-interactive modes
-- [`f3b5345`] Refactor(skills): move agent definitions from hardcoded registry to manifest
-- [`c7c27dc`] Feat(skills): add --force flag to install subcommand
-- [`5049480`] Add agent mode skip wait and response immediately
-- [`e5a3576`] Refactor license
-- [`72b1457`] Feat(skills): add embedded skills package with manifest and skill files
-- [`ce8662c`] Refactor(skills): replace HTTP fetching with embedded skills package
-- [`a041a93`] Docs(skills): update descriptions to reflect embedded skills
-- [`17272a8`] Feat(skills): enrich help text and auto-update skills on CLI update
-- [`812e252`] Docs(skills): add template command reference to embedded skills
-- [`5d3537c`] Fix(skills): handle renamed skill files and track installed filenames
-- [`6b5f1bc`] Feat(skills): add file_map for per-agent file renaming, fix Codex install
-- [`491255c`] Fix(skills): update Gemini CLI to directory-based SKILL.md install
-- [`8db8123`] Chore: add .cursor/ to gitignore, add presenting results to skill
-- [`a4d021d`] Docs: rewrite CLAUDE.md and AGENTS.md for Go CLI specificity
-- [`315d574`] Docs(agents): enforce strict read-first, plan-first workflow
-- [`e1efa04`] Docs(agents): reference superpowers skills in plan step
+- [`2b00794`] Feat/ai skills integration
+- [`897ef0e`] Fix: commit changelog before tagging to fix goreleaser dirty-state error
 
 ## [v1.4.2] - 2026-04-08
 - [`0095dee`] Fix: correct homebrew and scoop package name in README
