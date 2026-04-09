@@ -280,14 +280,9 @@ func runAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 	actionCtx, cancel := context.WithTimeout(ctx, f.Options().Timeout)
 	defer cancel()
 
-	var sp interface{ Stop(string) }
-	if status := f.Status(); status != nil {
-		sp, _ = status.Spinner(actionCtx, fmt.Sprintf("%s %s...", action.Label, inst.Hostname))
-	}
-	err = action.Execute(actionCtx, client, inst)
-	if sp != nil {
-		sp.Stop("")
-	}
+	err = cmdutil.RunWithSpinner(actionCtx, f.Status(), fmt.Sprintf("%s %s...", action.Label, inst.Hostname), func() error {
+		return action.Execute(actionCtx, client, inst)
+	})
 	if err != nil {
 		return err
 	}
@@ -383,14 +378,9 @@ func resolveInstanceInteractive(cmd *cobra.Command, f cmdutil.Factory, ioStreams
 }
 
 func selectInstance(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client *verda.Client, statusFilter ...string) (string, error) {
-	var sp interface{ Stop(string) }
-	if status := f.Status(); status != nil {
-		sp, _ = status.Spinner(ctx, "Loading instances...")
-	}
-	instances, err := client.Instances.Get(ctx, "")
-	if sp != nil {
-		sp.Stop("")
-	}
+	instances, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading instances...", func() ([]verda.Instance, error) {
+		return client.Instances.Get(ctx, "")
+	})
 	if err != nil {
 		return "", err
 	}
@@ -498,14 +488,9 @@ func runDeleteFlow(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOS
 	deleteCtx, cancel := context.WithTimeout(ctx, f.Options().Timeout)
 	defer cancel()
 
-	var sp interface{ Stop(string) }
-	if status := f.Status(); status != nil {
-		sp, _ = status.Spinner(deleteCtx, fmt.Sprintf("Deleting %s...", inst.Hostname))
-	}
-	err = client.Instances.Delete(deleteCtx, []string{inst.ID}, volumeIDs, false)
-	if sp != nil {
-		sp.Stop("")
-	}
+	err = cmdutil.RunWithSpinner(deleteCtx, f.Status(), fmt.Sprintf("Deleting %s...", inst.Hostname), func() error {
+		return client.Instances.Delete(deleteCtx, []string{inst.ID}, volumeIDs, false)
+	})
 	if err != nil {
 		return err
 	}

@@ -92,17 +92,12 @@ func runBatchAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOS
 	actionCtx, cancel := context.WithTimeout(ctx, f.Options().Timeout)
 	defer cancel()
 
-	var sp interface{ Stop(string) }
-	if status := f.Status(); status != nil {
-		sp, _ = status.Spinner(actionCtx, fmt.Sprintf("%s %d instances...", action.Label, len(instances)))
-	}
-	results, err := client.Instances.Action(actionCtx, verda.InstanceActionRequest{
-		Action: actionNameToAPI(opts.Action),
-		ID:     ids,
+	results, err := cmdutil.WithSpinner(actionCtx, f.Status(), fmt.Sprintf("%s %d instances...", action.Label, len(instances)), func() ([]verda.InstanceActionResult, error) {
+		return client.Instances.Action(actionCtx, verda.InstanceActionRequest{
+			Action: actionNameToAPI(opts.Action),
+			ID:     ids,
+		})
 	})
-	if sp != nil {
-		sp.Stop("")
-	}
 	if err != nil {
 		return err
 	}
@@ -170,18 +165,13 @@ func runBatchDelete(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOS
 	deleteCtx, cancel := context.WithTimeout(ctx, f.Options().Timeout)
 	defer cancel()
 
-	var sp interface{ Stop(string) }
-	if status := f.Status(); status != nil {
-		sp, _ = status.Spinner(deleteCtx, fmt.Sprintf("Deleting %d instances...", len(instances)))
-	}
-	results, err := client.Instances.Action(deleteCtx, verda.InstanceActionRequest{
-		Action:    verda.ActionDelete,
-		ID:        ids,
-		VolumeIDs: volumeIDs,
+	results, err := cmdutil.WithSpinner(deleteCtx, f.Status(), fmt.Sprintf("Deleting %d instances...", len(instances)), func() ([]verda.InstanceActionResult, error) {
+		return client.Instances.Action(deleteCtx, verda.InstanceActionRequest{
+			Action:    verda.ActionDelete,
+			ID:        ids,
+			VolumeIDs: volumeIDs,
+		})
 	})
-	if sp != nil {
-		sp.Stop("")
-	}
 	if err != nil {
 		return err
 	}
@@ -318,14 +308,9 @@ func writeBatchAgentOutput(ioStreams cmdutil.IOStreams, format, action string, i
 // selectInstances shows a multi-select picker for choosing one or more instances.
 // Returns the selected Instance structs (empty if canceled).
 func selectInstances(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client *verda.Client, statusFilter ...string) ([]verda.Instance, error) {
-	var sp interface{ Stop(string) }
-	if status := f.Status(); status != nil {
-		sp, _ = status.Spinner(ctx, "Loading instances...")
-	}
-	instances, err := client.Instances.Get(ctx, "")
-	if sp != nil {
-		sp.Stop("")
-	}
+	instances, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading instances...", func() ([]verda.Instance, error) {
+		return client.Instances.Get(ctx, "")
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -417,17 +402,12 @@ func runBatchWithInstances(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdu
 	actionCtx, cancel := context.WithTimeout(ctx, f.Options().Timeout)
 	defer cancel()
 
-	var actionSp interface{ Stop(string) }
-	if status := f.Status(); status != nil {
-		actionSp, _ = status.Spinner(actionCtx, fmt.Sprintf("%s %d instances...", action.Label, len(instances)))
-	}
-	results, err := client.Instances.Action(actionCtx, verda.InstanceActionRequest{
-		Action: actionNameToAPI(opts.Action),
-		ID:     ids,
+	results, err := cmdutil.WithSpinner(actionCtx, f.Status(), fmt.Sprintf("%s %d instances...", action.Label, len(instances)), func() ([]verda.InstanceActionResult, error) {
+		return client.Instances.Action(actionCtx, verda.InstanceActionRequest{
+			Action: actionNameToAPI(opts.Action),
+			ID:     ids,
+		})
 	})
-	if actionSp != nil {
-		actionSp.Stop("")
-	}
 	if err != nil {
 		return err
 	}
@@ -439,15 +419,9 @@ func runBatchWithInstances(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdu
 // fetchBatchInstances loads instances from the API and filters them to those
 // valid for the requested action.
 func fetchBatchInstances(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client *verda.Client, opts *actionOptions) ([]verda.Instance, error) {
-	var sp interface{ Stop(string) }
-	if status := f.Status(); status != nil {
-		sp, _ = status.Spinner(ctx, "Loading instances...")
-	}
-
-	instances, err := client.Instances.Get(ctx, opts.Status)
-	if sp != nil {
-		sp.Stop("")
-	}
+	instances, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading instances...", func() ([]verda.Instance, error) {
+		return client.Instances.Get(ctx, opts.Status)
+	})
 	if err != nil {
 		return nil, err
 	}

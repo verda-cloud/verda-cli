@@ -179,14 +179,9 @@ func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 	createCtx, createCancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
 	defer createCancel()
 
-	var sp interface{ Stop(string) }
-	if status := f.Status(); status != nil {
-		sp, _ = status.Spinner(createCtx, "Creating VM instance...")
-	}
-	instance, err := client.Instances.Create(createCtx, req)
-	if sp != nil {
-		sp.Stop("")
-	}
+	instance, err := cmdutil.WithSpinner(createCtx, f.Status(), "Creating VM instance...", func() (*verda.Instance, error) {
+		return client.Instances.Create(createCtx, req)
+	})
 	if err != nil {
 		return err
 	}

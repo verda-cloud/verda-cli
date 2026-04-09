@@ -241,7 +241,7 @@ func stepContract(getClient clientFunc, opts *createOptions) wizard.Step {
 			if err != nil {
 				return choices, nil //nolint:nilerr // Non-fatal: just offer pay-as-you-go.
 			}
-			periods, err := withSpinner(ctx, status, "Loading contract options...", func() ([]verda.LongTermPeriod, error) {
+			periods, err := cmdutil.WithSpinner(ctx, status, "Loading contract options...", func() ([]verda.LongTermPeriod, error) {
 				return client.LongTerm.GetInstancePeriods(ctx)
 			})
 			if err != nil {
@@ -308,7 +308,7 @@ func stepInstanceType(getClient clientFunc, cache *apiCache, opts *createOptions
 			kind := c["kind"].(string)
 			isSpot := c["billing-type"] == billingTypeSpot
 
-			types, err := withSpinner(ctx, status, "Loading instance types...", func() ([]verda.InstanceTypeInfo, error) {
+			types, err := cmdutil.WithSpinner(ctx, status, "Loading instance types...", func() ([]verda.InstanceTypeInfo, error) {
 				return client.InstanceTypes.Get(ctx, "usd")
 			})
 			if err != nil {
@@ -444,7 +444,7 @@ func stepImage(getClient clientFunc, opts *createOptions) wizard.Step {
 			if err != nil {
 				return nil, err
 			}
-			images, err := withSpinner(ctx, status, "Loading OS images...", func() ([]verda.Image, error) {
+			images, err := cmdutil.WithSpinner(ctx, status, "Loading OS images...", func() ([]verda.Image, error) {
 				return client.Images.Get(ctx)
 			})
 			if err != nil {
@@ -689,7 +689,7 @@ func promptAddVolume(ctx context.Context, prompter tui.Prompter, store *wizard.S
 }
 
 func promptAttachExisting(ctx context.Context, prompter tui.Prompter, status tui.Status, client *verda.Client) (string, error) {
-	volumes, err := withSpinner(ctx, status, "Loading volumes...", func() ([]verda.Volume, error) {
+	volumes, err := cmdutil.WithSpinner(ctx, status, "Loading volumes...", func() ([]verda.Volume, error) {
 		return client.Volumes.ListVolumes(ctx)
 	})
 	if err != nil {
@@ -740,7 +740,7 @@ func stepSSHKeys(getClient clientFunc, opts *createOptions) wizard.Step {
 			if err != nil {
 				return nil, err
 			}
-			keys, err := withSpinner(ctx, status, "Loading SSH keys...", func() ([]verda.SSHKey, error) {
+			keys, err := cmdutil.WithSpinner(ctx, status, "Loading SSH keys...", func() ([]verda.SSHKey, error) {
 				return client.SSHKeys.GetAllSSHKeys(ctx)
 			})
 			if err != nil {
@@ -974,7 +974,7 @@ func stepStartupScript(getClient clientFunc, opts *createOptions) wizard.Step {
 			if err != nil {
 				return nil, err
 			}
-			scripts, err := withSpinner(ctx, status, "Loading startup scripts...", func() ([]verda.StartupScript, error) {
+			scripts, err := cmdutil.WithSpinner(ctx, status, "Loading startup scripts...", func() ([]verda.StartupScript, error) {
 				return client.StartupScripts.GetAllStartupScripts(ctx)
 			})
 			if err != nil {
@@ -1136,22 +1136,6 @@ func promptAddStartupScript(ctx context.Context, prompter tui.Prompter, client *
 		return nil, nil
 	}
 	return created, nil
-}
-
-// --- Spinner helper ---
-
-// withSpinner runs fn while showing a spinner. If status is nil, runs fn directly.
-func withSpinner[T any](ctx context.Context, status tui.Status, msg string, fn func() (T, error)) (T, error) {
-	if status == nil {
-		return fn()
-	}
-	sp, err := status.Spinner(ctx, msg)
-	if err != nil {
-		return fn() // fallback: run without spinner
-	}
-	result, fnErr := fn()
-	sp.Stop("")
-	return result, fnErr
 }
 
 // --- Step 13: Deployment Summary & Confirm ---
