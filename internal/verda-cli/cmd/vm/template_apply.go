@@ -10,7 +10,6 @@ import (
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
 
 	cmdutil "github/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
-	clioptions "github/verda-cloud/verda-cli/internal/verda-cli/options"
 	"github/verda-cloud/verda-cli/internal/verda-cli/template"
 )
 
@@ -53,11 +52,10 @@ func applyTemplateFrom(
 	opts *createOptions,
 	ref string,
 ) error {
-	verdaDir, err := clioptions.VerdaDir()
+	baseDir, err := cmdutil.TemplatesBaseDir()
 	if err != nil {
 		return err
 	}
-	baseDir := filepath.Join(verdaDir, "templates")
 
 	tmpl, err := loadTemplateRef(ctx, f, baseDir, ref)
 	if err != nil {

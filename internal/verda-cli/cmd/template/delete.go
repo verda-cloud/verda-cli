@@ -2,12 +2,10 @@ package template
 
 import (
 	"fmt"
-	"path/filepath"
 
 	"github.com/spf13/cobra"
 
 	cmdutil "github/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
-	clioptions "github/verda-cloud/verda-cli/internal/verda-cli/options"
 )
 
 // NewCmdDelete creates the template delete command.
@@ -42,11 +40,10 @@ func runDelete(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 		return err
 	}
 
-	verdaDir, err := clioptions.VerdaDir()
+	baseDir, err := cmdutil.TemplatesBaseDir()
 	if err != nil {
 		return err
 	}
-	baseDir := filepath.Join(verdaDir, "templates")
 
 	// Verify template exists by loading it first.
 	if _, err := Load(baseDir, resource, name); err != nil {

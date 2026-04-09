@@ -8,7 +8,6 @@ import (
 	"github.com/spf13/cobra"
 
 	cmdutil "github/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
-	clioptions "github/verda-cloud/verda-cli/internal/verda-cli/options"
 )
 
 // parseRef splits a "resource/name" reference into its two parts.
@@ -51,11 +50,10 @@ func runShow(f cmdutil.Factory, ioStreams cmdutil.IOStreams, ref string) error {
 		return err
 	}
 
-	verdaDir, err := clioptions.VerdaDir()
+	baseDir, err := cmdutil.TemplatesBaseDir()
 	if err != nil {
 		return err
 	}
-	baseDir := filepath.Join(verdaDir, "templates")
 
 	tmpl, err := Load(baseDir, resource, name)
 	if err != nil {
