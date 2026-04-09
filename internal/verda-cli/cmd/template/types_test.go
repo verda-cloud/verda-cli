@@ -410,3 +410,49 @@ func TestResolveTemplatePath(t *testing.T) {
 		t.Fatal("Resolve() expected error for nonexistent name, got nil")
 	}
 }
+
+func TestExpandHostnamePattern(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		pattern  string
+		location string
+		check    func(string) bool
+		desc     string
+	}{
+		{
+			pattern: "gpu-{random}",
+			check: func(s string) bool {
+				return strings.HasPrefix(s, "gpu-") && len(s) > 4
+			},
+			desc: "prefix with random",
+		},
+		{
+			pattern:  "train-{location}",
+			location: "FIN-03",
+			check:    func(s string) bool { return s == "train-fin-03" },
+			desc:     "location placeholder",
+		},
+		{
+			pattern:  "{random}-{location}",
+			location: "FIN-01",
+			check: func(s string) bool {
+				return strings.HasSuffix(s, "-fin-01") && len(s) > 7
+			},
+			desc: "random + location",
+		},
+		{
+			pattern: "static-name",
+			check:   func(s string) bool { return s == "static-name" },
+			desc:    "no placeholders",
+		},
+	}
+
+	for _, tt := range tests {
+		result := ExpandHostnamePattern(tt.pattern, tt.location)
+		if !tt.check(result) {
+			t.Errorf("%s: ExpandHostnamePattern(%q, %q) = %q, unexpected",
+				tt.desc, tt.pattern, tt.location, result)
+		}
+	}
+}

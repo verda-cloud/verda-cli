@@ -14,12 +14,13 @@ type (
 
 // Re-export functions from the shared template package.
 var (
-	ValidateName = tmpl.ValidateName
-	Save         = tmpl.Save
-	Load         = tmpl.Load
-	LoadFromPath = tmpl.LoadFromPath
-	Resolve      = tmpl.Resolve
-	List         = tmpl.List
-	ListAll      = tmpl.ListAll
-	Delete       = tmpl.Delete
+	ValidateName          = tmpl.ValidateName
+	Save                  = tmpl.Save
+	Load                  = tmpl.Load
+	LoadFromPath          = tmpl.LoadFromPath
+	Resolve               = tmpl.Resolve
+	List                  = tmpl.List
+	ListAll               = tmpl.ListAll
+	Delete                = tmpl.Delete
+	ExpandHostnamePattern = tmpl.ExpandHostnamePattern
 )

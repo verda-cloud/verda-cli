@@ -154,6 +154,10 @@ func applyTemplate(tmpl *template.Template, opts *createOptions) {
 	if tmpl.StartupScriptSkip {
 		opts.startupScriptSkip = true
 	}
+	// Hostname pattern: expand {random} and {location} placeholders.
+	if tmpl.HostnamePattern != "" && opts.Hostname == "" {
+		opts.Hostname = template.ExpandHostnamePattern(tmpl.HostnamePattern, opts.LocationCode)
+	}
 	// SSH keys and startup script are handled by resolveTemplateNames, not here.
 }
 
@@ -252,6 +256,9 @@ func printTemplateSummary(ioStreams cmdutil.IOStreams, tmpl *template.Template) 
 	}
 	if tmpl.StartupScript != "" {
 		_, _ = fmt.Fprintf(w, "    %-14s %s\n", "Startup:", tmpl.StartupScript)
+	}
+	if tmpl.HostnamePattern != "" {
+		_, _ = fmt.Fprintf(w, "    %-14s %s\n", "Hostname:", tmpl.HostnamePattern)
 	}
 
 	_, _ = fmt.Fprintln(w)

@@ -8,8 +8,13 @@ import (
 	"regexp"
 	"strings"
 
+	petname "github.com/dustinkirkland/golang-petname"
 	"go.yaml.in/yaml/v3"
 )
+
+func generateRandomWords() string {
+	return petname.Generate(3, "-")
+}
 
 // Template represents a saved configuration template for creating resources.
 type Template struct {
@@ -26,6 +31,7 @@ type Template struct {
 	SSHKeys           []string      `yaml:"ssh_keys,omitempty"`
 	StartupScript     string        `yaml:"startup_script,omitempty"`
 	StartupScriptSkip bool          `yaml:"startup_script_skip,omitempty"`
+	HostnamePattern   string        `yaml:"hostname_pattern,omitempty"`
 }
 
 // StorageSpec describes an additional storage volume attached to a template.
@@ -40,6 +46,23 @@ type Entry struct {
 	Name        string
 	Description string
 	Path        string
+}
+
+// ExpandHostnamePattern expands placeholders in a hostname pattern:
+//   - {random} → 3 random words joined by hyphens (e.g. "cold-cable-smiles")
+//   - {location} → lowercased location code (e.g. "fin-03")
+//
+// Example: "gpu-{random}-{location}" → "gpu-cold-cable-smiles-fin-03".
+func ExpandHostnamePattern(pattern, locationCode string) string {
+	s := pattern
+	if strings.Contains(s, "{random}") {
+		words := generateRandomWords()
+		s = strings.ReplaceAll(s, "{random}", words)
+	}
+	if strings.Contains(s, "{location}") {
+		s = strings.ReplaceAll(s, "{location}", strings.ToLower(locationCode))
+	}
+	return s
 }
 
 // nameRe matches valid template names: lowercase alphanumeric and hyphens.
