@@ -70,35 +70,59 @@ func (c *apiCache) fetchAvailability(ctx context.Context, getClient clientFunc, 
 	return c.avail, c.locations, nil
 }
 
+// WizardMode controls which steps are included in the wizard flow.
+type WizardMode int
+
+const (
+	// WizardModeDeploy includes all steps: config + hostname + description + confirm deploy.
+	WizardModeDeploy WizardMode = iota
+	// WizardModeTemplate includes only config steps (no hostname, description, confirm).
+	WizardModeTemplate
+)
+
 // buildCreateFlow builds the interactive wizard flow for vm create.
 // It mirrors the web UI step order:
 //
 //	billing-type → contract → kind → instance-type → location →
 //	image → os-volume-size → storage-size → ssh-keys →
 //	startup-script → hostname → description
-func buildCreateFlow(getClient clientFunc, opts *createOptions) *wizard.Flow {
+func buildCreateFlow(getClient clientFunc, opts *createOptions, mode WizardMode) *wizard.Flow {
 	cache := &apiCache{}
-	return &wizard.Flow{
-		Name: "vm-create",
-		Layout: []wizard.ViewDef{
-			{ID: "progress", View: wizard.NewProgressView(wizard.WithProgressPercent())},
-			{ID: "hints", View: wizard.NewHintBarView(wizard.WithHintStyle(bubbletea.HintStyle()))},
-		},
-		Steps: []wizard.Step{
-			stepBillingType(opts),
-			stepContract(getClient, opts),
-			stepKind(opts),
-			stepInstanceType(getClient, cache, opts),
-			stepLocation(getClient, cache, opts),
-			stepImage(getClient, opts),
-			stepOSVolumeSize(opts),
-			stepStorage(getClient, cache, opts),
-			stepSSHKeys(getClient, opts),
-			stepStartupScript(getClient, opts),
+
+	steps := []wizard.Step{
+		stepBillingType(opts),
+		stepContract(getClient, opts),
+		stepKind(opts),
+		stepInstanceType(getClient, cache, opts),
+		stepLocation(getClient, cache, opts),
+		stepImage(getClient, opts),
+		stepOSVolumeSize(opts),
+		stepStorage(getClient, cache, opts),
+		stepSSHKeys(getClient, opts),
+		stepStartupScript(getClient, opts),
+	}
+	if mode == WizardModeDeploy {
+		steps = append(steps,
 			stepHostname(opts),
 			stepDescription(opts),
 			stepConfirmDeploy(getClient, cache, opts),
-		},
+		)
+	}
+
+	layout := []wizard.ViewDef{
+		{ID: "hints", View: wizard.NewHintBarView(wizard.WithHintStyle(bubbletea.HintStyle()))},
+	}
+	if mode == WizardModeDeploy {
+		// Prepend progress bar for deploy mode only
+		layout = append([]wizard.ViewDef{
+			{ID: "progress", View: wizard.NewProgressView(wizard.WithProgressPercent())},
+		}, layout...)
+	}
+
+	return &wizard.Flow{
+		Name:   "vm-create",
+		Layout: layout,
+		Steps:  steps,
 	}
 }
 
