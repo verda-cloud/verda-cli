@@ -1,62 +1,106 @@
 # Verda CLI
 
-Command-line interface for Verda Cloud, built with Go + Cobra + Bubble Tea TUI.
+Go CLI for Verda Cloud. Cobra commands + Bubble Tea TUI + lipgloss styling.
 
-## Build & Test
+## Build & Validate
 
 ```bash
-go build -o ./bin/verda ./cmd/verda/   # Build binary
-go test ./...                           # Run all tests
-go mod tidy                             # Sync dependencies
+make build        # Build binary to ./bin/verda
+make test         # Run all tests (go test + golangci-lint)
+make lint         # Lint only
+make pre-commit   # Full pre-commit suite
 ```
+
+Never use raw `go test ./...` — always `make test` which includes linting.
 
 ## Architecture
 
-- `cmd/verda/` -- Entrypoint
-- `internal/verda-cli/cmd/` -- Command implementations organized by domain (vm, volume, auth, sshkey, startupscript)
-- `internal/verda-cli/cmd/util/` -- Shared: Factory, IOStreams, helpers, templates, hostname utils
-- `internal/verda-cli/options/` -- Global CLI options, credentials resolution
+```
+cmd/verda/                    # Entrypoint
+internal/verda-cli/
+  cmd/cmd.go                  # Root command, command groups
+  cmd/util/                   # Factory, IOStreams, helpers, pricing, hostname
+  cmd/<domain>/               # One dir per domain (vm, volume, auth, skills, ...)
+  options/                    # Global CLI options, credentials
+internal/skills/              # Embedded AI skill files (go:embed)
+```
 
-### Key Patterns
+### Core Patterns
 
-- **Factory pattern** (`cmd/util/factory.go`): Dependency injection for Prompter, Status, VerdaClient, Debug
-- **Wizard engine** (`verdagostack/pkg/tui/wizard`): Multi-step interactive flows (vm create, auth login)
-- **Lazy client** (`clientFunc` type): API client resolved on first use, not at wizard start
-- **API cache** (`apiCache`): Shared across wizard steps to avoid redundant API calls
+- **Factory** (`cmd/util/factory.go`): DI for Prompter, Status, VerdaClient, Debug, AgentMode, OutputFormat
+- **Wizard engine** (`verdagostack/pkg/tui/wizard`): Multi-step interactive flows
+- **Lazy client** (`clientFunc`): API client resolved on first use, not at init
+- **API cache** (`apiCache`): Shared across wizard steps to avoid redundant calls
 
-### Dependencies (local dev)
+### Local Dependencies
 
-- `verdagostack` is replaced locally via `go.mod`: `replace github.com/verda-cloud/verdagostack => ../verdagostack`
-- Uses Bubble Tea v2 (`charm.land/bubbletea/v2`) and lipgloss v2 (`charm.land/lipgloss/v2`)
+- `verdagostack` replaced locally: `replace github.com/verda-cloud/verdagostack => ../verdagostack`
+- Bubble Tea v2 (`charm.land/bubbletea/v2`), lipgloss v2 (`charm.land/lipgloss/v2`)
+- Never use v1 imports — they won't compile
 
 ## Conventions
 
-- Every API-calling command must support `--debug` (global flag) -- see `.ai/skills/new-command.md`
-- Every API call must use a timeout context and show a spinner
-- Commands support both interactive (prompts) and non-interactive (flags) usage
-- Output to `ioStreams.Out`, prompts/warnings/debug to `ioStreams.ErrOut`
-- Destructive actions require confirmation with warning styling
-- Follow the checklist in `.ai/skills/new-command.md` when adding new commands
+### Every API-calling command MUST:
 
-## Pricing Model
+1. **Timeout context**: `ctx, cancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)`
+2. **Spinner**: Show spinner during API calls, stop before handling result
+3. **Debug output**: `cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), "label:", data)`
+4. **Dual mode**: Work with flags (non-interactive) AND prompts (interactive) — no partial wizard
+5. **Output separation**: Data → `ioStreams.Out`, prompts/warnings/debug → `ioStreams.ErrOut`
 
-- Instance `price_per_hour` from API is **per-unit** (per-GPU or per-vCPU). Total = `price_per_hour * units`.
-- Use `cmdutil.InstanceTotalHourlyCost(inst)` or `cmdutil.InstanceBillableUnits(inst)` from `cmd/util/pricing.go`.
-- Volume pricing is `price_per_month_per_gb`. Hourly = `ceil(monthly_per_gb * size / 730 * 10000) / 10000`
+### Destructive actions MUST:
 
-## Per-Command Knowledge
+- Show warning styling (red bold) before confirmation
+- Require `prompter.Confirm()` — return nil on cancel or Esc
+- In agent mode (`f.AgentMode()`): require `--yes` flag, never auto-confirm
 
-Each subcommand directory has its own docs:
-- `README.md` — Human-readable: usage, examples, flags, architecture
-- `CLAUDE.md` — AI context: gotchas, domain logic, relationships
+### Pricing — get this wrong and users get billed wrong:
 
-These are auto-maintained by a pre-commit hook. See `.ai/skills/update-command-knowledge.md`.
+- Instance `price_per_hour` from API is **per-unit** (per-GPU or per-vCPU)
+- Total = `price_per_hour * units` — use `cmdutil.InstanceTotalHourlyCost(inst)`
+- Volume: `price_per_month_per_gb` — hourly = `ceil(monthly * size / 730 * 10000) / 10000`
+- Never display raw API price as "total" without multiplying
 
-When modifying a command, the hook will auto-update its docs on commit.
-For manual update: `claude -p "/update-command-knowledge --all" --model sonnet --dangerously-skip-permissions`
+### Credentials
 
-## Credentials
-
-- AWS-style INI file at `~/.verda/credentials` with `verda_` prefixed keys
-- Keys: `verda_base_url`, `verda_client_id`, `verda_client_secret`, `verda_token`
+- AWS-style INI at `~/.verda/credentials` with `verda_` prefixed keys
 - Profile support via `[profile_name]` sections
+- `f.VerdaClient()` handles resolution — returns clear error if not authenticated
+
+## Before Editing Any Command
+
+1. Read the **nearest** `CLAUDE.md` in the command directory (e.g. `cmd/vm/CLAUDE.md`)
+2. Read the **nearest** `README.md` for usage examples and flag details
+3. Read `.ai/skills/new-command.md` for the full checklist when adding/modifying commands
+4. If touching pricing, auth, or agent-mode: plan first, don't code immediately
+
+Per-command docs are auto-maintained by a pre-commit hook.
+Manual update: `claude -p "/update-command-knowledge --all" --model sonnet --dangerously-skip-permissions`
+
+## Thinking Depth
+
+| Change Type | Approach |
+|-------------|----------|
+| Rename, typo, flag default | Just do it |
+| New list/describe command | Follow `.ai/skills/new-command.md` checklist |
+| New create/wizard flow | Plan first — wizard steps, cache strategy, step dependencies |
+| Refactor shared util | Check all callers, run full test suite |
+| Pricing logic | Deep think — verify formula against API docs, test with real numbers |
+| Auth flow changes | Deep think — test all profiles, expired tokens, missing creds |
+| Agent-mode (`--agent`) changes | Deep think — JSON output contract, structured errors, no prompts |
+
+## Validation
+
+Before considering any change complete:
+
+```bash
+make build                    # Must compile
+make test                     # Must pass (tests + lint)
+```
+
+If you modified a command, also verify:
+- `./bin/verda <command> --help` renders correctly
+- Interactive mode works (prompts appear)
+- Non-interactive mode works (flags only, no prompts)
+- `--agent -o json` mode works (structured output, no TUI)
+- `--debug` shows request/response payloads

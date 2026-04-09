@@ -20,6 +20,7 @@ import (
 	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/locations"
 	mcpcmd "github/verda-cloud/verda-cli/internal/verda-cli/cmd/mcp"
 	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/settings"
+	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/skills"
 	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/ssh"
 	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/sshkey"
 	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/startupscript"
@@ -130,6 +131,7 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) (*cobra.Command, *clioptions.Op
 			Message: "AI Agent Commands:",
 			Commands: []*cobra.Command{
 				mcpcmd.NewCmdMCP(f, ioStreams),
+				skills.NewCmdSkills(f, ioStreams),
 			},
 		},
 		{
@@ -162,6 +164,8 @@ func skipCredentialResolution(cmd *cobra.Command) bool {
 	case cmd.Name() == "show" && pName == "auth":
 		return true
 	case cmd.Name() == "use" && pName == "auth":
+		return true
+	case pName == "skills":
 		return true
 	}
 	return false

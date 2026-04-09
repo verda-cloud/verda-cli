@@ -1,0 +1,51 @@
+{
+  "version": "1.0.0",
+  "skills": [
+    "verda-cloud.md",
+    "verda-reference.md"
+  ],
+  "agents": {
+    "claude-code": {
+      "display_name": "Claude Code",
+      "scope": "global",
+      "target": "~/.claude/skills/",
+      "method": "copy"
+    },
+    "cursor": {
+      "display_name": "Cursor",
+      "scope": "project",
+      "target": ".cursor/rules/",
+      "method": "copy"
+    },
+    "windsurf": {
+      "display_name": "Windsurf",
+      "scope": "project",
+      "target": ".windsurf/rules/",
+      "method": "copy"
+    },
+    "codex": {
+      "display_name": "Codex",
+      "scope": "global",
+      "target": "~/.agents/skills/verda-cloud/",
+      "method": "copy",
+      "file_map": {
+        "verda-cloud.md": "SKILL.md"
+      }
+    },
+    "gemini": {
+      "display_name": "Gemini CLI",
+      "scope": "global",
+      "target": "~/.gemini/skills/verda-cloud/",
+      "method": "copy",
+      "file_map": {
+        "verda-cloud.md": "SKILL.md"
+      }
+    },
+    "copilot": {
+      "display_name": "Copilot",
+      "scope": "project",
+      "target": ".github/copilot-instructions.md",
+      "method": "append"
+    }
+  }
+}

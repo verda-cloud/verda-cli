@@ -1,62 +1,48 @@
-# AI Agent Guidelines for Verda CLI
+# AI Agent Contract
 
-This document provides instructions for AI coding agents (Claude Code, Codex, etc.) working on this codebase.
+Read `CLAUDE.md` first. This file defines how you execute, not what the project is.
 
-## Before You Start
+## Mandatory Read-First, Plan-First Workflow
 
-1. Read `CLAUDE.md` for project overview, build commands, and architecture
-2. Read the `CLAUDE.md` in the specific subcommand directory you're working on (e.g., `cmd/vm/CLAUDE.md`)
-3. Read `.ai/skills/new-command.md` when creating or modifying CLI commands
-4. Run `go build ./...` and `go test ./...` to verify your changes compile and pass
+Do NOT write code until you have completed all steps below. No exceptions.
 
-## Skills
+**Step 1 — Read** (always, every task):
+1. `CLAUDE.md` (root) — architecture, conventions, pricing rules
+2. `CLAUDE.md` in the target command directory (e.g. `cmd/vm/CLAUDE.md`) — domain gotchas
+3. `README.md` in the target command directory — usage, flags, examples
+4. `.ai/skills/new-command.md` if adding or modifying a command
 
-Skills are structured guides in `.ai/skills/` that document patterns and checklists:
+**Step 2 — Verify** (always):
+5. Run `make test` to confirm the repo is green before you start
 
-| Skill | When to Use |
-|-------|-------------|
-| [new-command.md](.ai/skills/new-command.md) | Adding a new subcommand or modifying an existing one |
-| [update-command-knowledge.md](.ai/skills/update-command-knowledge.md) | Auto-updating per-command README.md and CLAUDE.md docs |
+**Step 3 — Plan** (required for non-trivial changes):
+6. State what you will change and why before writing code
+7. For risky areas (see table below): write a plan, get approval, then code
+8. If superpowers skills are available: use `brainstorming` before creative work, `writing-plans` before multi-step tasks, `test-driven-development` before implementation
 
-## Key Rules
+Skipping these steps leads to pattern violations, broken dual-mode, and pricing bugs.
 
-### Always
+## Execution Rules
 
-- Support `--debug` flag on every command that calls the API (use `cmdutil.DebugJSON`)
-- Wrap API calls with spinner + timeout context
-- Support both interactive (prompts) and non-interactive (flags) modes
-- Add confirmation for destructive actions
-- Register new commands in their parent command file and `cmd/cmd.go` if new domain
-- Run `go build ./...` and `go test ./...` before finishing
+- **Follow existing patterns** — find the nearest similar command, match its structure
+- **Preserve dual mode** — every command must work interactive AND non-interactive. Never build one without the other
+- **Never modify `verdagostack`** directly — describe needed changes for the maintainer
+- **Commit only when asked** — don't auto-commit
 
-### Never
+## Risky Areas — Slow Down
 
-- Skip the `--debug` output pattern
-- Make API calls without a timeout context
-- Write to `ioStreams.Out` for non-data output (use `ioStreams.ErrOut` for prompts/warnings/debug)
-- Forget to handle user cancellation (Esc/Ctrl+C returns nil error)
-- Use lipgloss v1 imports (`github.com/charmbracelet/lipgloss`) -- use `charm.land/lipgloss/v2`
-- Use bubbletea v1 imports -- use `charm.land/bubbletea/v2`
+| Area | Risk | What To Do |
+|------|------|------------|
+| `cmd/util/pricing.go` | Wrong math = wrong bills | Verify formula, test with real numbers |
+| `options/credentials.go` | Break auth = break everything | Test all profiles, expired tokens |
+| Agent mode (`--agent`) | JSON contract change = break downstream | Check structured error format |
+| Wizard steps | Step ordering, cache invalidation | Map dependencies before coding |
+| `verdagostack` types | Shared across repos | Don't modify, describe changes needed |
 
-### Dependencies
+## Done Checklist
 
-When modifying `verdagostack` (local replace):
-- Bubble Tea v2 changed `tea.KeyMsg` to `tea.KeyPressMsg`
-- `KeyPressMsg.String()` returns `"space"` not `" "` for space key
-- `KeyPressMsg.String()` returns `"enter"`, `"esc"`, `"backspace"`, `"tab"` for special keys
-- Wizard API uses `ViewDef` (not `RegionDef`), `NewProgressView` (not `NewProgressRegion`)
-
-## Project Layout
-
-```
-cmd/verda/main.go                          # Entrypoint
-internal/verda-cli/
-  cmd/cmd.go                               # Root command, command groups
-  cmd/util/                                # Factory, IOStreams, helpers, hostname
-  cmd/vm/                                  # VM: create, list, action, wizard, status_view
-  cmd/auth/                                # Auth: login, show, use, wizard
-  cmd/sshkey/                              # SSH keys: list, add, delete
-  cmd/startupscript/                       # Startup scripts: list, add, delete
-  cmd/volume/                              # Volumes: list, create, action, trash
-  options/                                 # Global options, credentials
-```
+- [ ] `make build` passes
+- [ ] `make test` passes
+- [ ] `--help` renders correctly for changed commands
+- [ ] Interactive and non-interactive modes both work
+- [ ] No leftover debug code, TODOs, or commented-out blocks

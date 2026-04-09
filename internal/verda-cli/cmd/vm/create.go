@@ -175,7 +175,7 @@ func NewCmdCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 	_ = flags.MarkHidden("ssh-key-id")
 	_ = flags.MarkHidden("startup-script-id")
 	_ = flags.MarkHidden("spot")
-	opts.Wait.AddFlags(flags, true) // --wait defaults to true for vm create
+	opts.Wait.AddFlags(flags, !f.AgentMode()) // agents should poll with vm describe instead of blocking
 
 	return cmd
 }
