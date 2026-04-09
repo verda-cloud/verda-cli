@@ -18,6 +18,7 @@ Do NOT write code until you have completed all steps below. No exceptions.
 **Step 3 — Plan** (required for non-trivial changes):
 6. State what you will change and why before writing code
 7. For risky areas (see table below): write a plan, get approval, then code
+8. If superpowers skills are available: use `brainstorming` before creative work, `writing-plans` before multi-step tasks, `test-driven-development` before implementation
 
 Skipping these steps leads to pattern violations, broken dual-mode, and pricing bugs.
 
