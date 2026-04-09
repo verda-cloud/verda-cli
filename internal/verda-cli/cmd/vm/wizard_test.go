@@ -3,6 +3,7 @@ package vm
 import (
 	"context"
 	"errors"
+	"io"
 	"testing"
 
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
@@ -36,11 +37,12 @@ func TestBuildCreateFlowHappyPath(t *testing.T) {
 	mock.AddConfirm(true)       // confirm deploy
 
 	// errClient returns error — API steps skipped via IsSet, confirm step handles error gracefully.
+	ctx := context.Background()
 	errClient := func() (*verda.Client, error) { return nil, errors.New("no client in test") }
-	flow := buildCreateFlow(errClient, opts, WizardModeDeploy)
+	flow := buildCreateFlow(ctx, errClient, opts, WizardModeDeploy, io.Discard)
 	engine := wizard.NewEngine(mock, nil)
 
-	if err := engine.Run(context.Background(), flow); err != nil {
+	if err := engine.Run(ctx, flow); err != nil {
 		t.Fatalf("wizard Run failed: %v", err)
 	}
 
@@ -81,11 +83,12 @@ func TestBuildCreateFlowSpotSkipsContract(t *testing.T) {
 	mock.AddTextInput("")        // description
 	mock.AddConfirm(true)        // confirm deploy
 
+	ctx := context.Background()
 	errClient := func() (*verda.Client, error) { return nil, errors.New("no client in test") }
-	flow := buildCreateFlow(errClient, opts, WizardModeDeploy)
+	flow := buildCreateFlow(ctx, errClient, opts, WizardModeDeploy, io.Discard)
 	engine := wizard.NewEngine(mock, nil)
 
-	if err := engine.Run(context.Background(), flow); err != nil {
+	if err := engine.Run(ctx, flow); err != nil {
 		t.Fatalf("wizard Run failed: %v", err)
 	}
 

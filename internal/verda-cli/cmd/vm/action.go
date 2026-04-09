@@ -280,14 +280,9 @@ func runAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 	actionCtx, cancel := context.WithTimeout(ctx, f.Options().Timeout)
 	defer cancel()
 
-	var sp interface{ Stop(string) }
-	if status := f.Status(); status != nil {
-		sp, _ = status.Spinner(actionCtx, fmt.Sprintf("%s %s...", action.Label, inst.Hostname))
-	}
-	err = action.Execute(actionCtx, client, inst)
-	if sp != nil {
-		sp.Stop("")
-	}
+	err = cmdutil.RunWithSpinner(actionCtx, f.Status(), fmt.Sprintf("%s %s...", action.Label, inst.Hostname), func() error {
+		return action.Execute(actionCtx, client, inst)
+	})
 	if err != nil {
 		return err
 	}
@@ -383,30 +378,9 @@ func resolveInstanceInteractive(cmd *cobra.Command, f cmdutil.Factory, ioStreams
 }
 
 func selectInstance(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client *verda.Client, statusFilter ...string) (string, error) {
-	var sp interface{ Stop(string) }
-	if status := f.Status(); status != nil {
-		sp, _ = status.Spinner(ctx, "Loading instances...")
-	}
-	instances, err := client.Instances.Get(ctx, "")
-	if sp != nil {
-		sp.Stop("")
-	}
+	instances, err := fetchInstances(ctx, f, client, statusFilter...)
 	if err != nil {
 		return "", err
-	}
-
-	// Filter by status when the caller restricts to specific statuses.
-	if len(statusFilter) > 0 {
-		filtered := instances[:0]
-		for i := range instances {
-			for _, s := range statusFilter {
-				if instances[i].Status == s {
-					filtered = append(filtered, instances[i])
-					break
-				}
-			}
-		}
-		instances = filtered
 	}
 
 	if len(instances) == 0 {
@@ -498,14 +472,9 @@ func runDeleteFlow(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOS
 	deleteCtx, cancel := context.WithTimeout(ctx, f.Options().Timeout)
 	defer cancel()
 
-	var sp interface{ Stop(string) }
-	if status := f.Status(); status != nil {
-		sp, _ = status.Spinner(deleteCtx, fmt.Sprintf("Deleting %s...", inst.Hostname))
-	}
-	err = client.Instances.Delete(deleteCtx, []string{inst.ID}, volumeIDs, false)
-	if sp != nil {
-		sp.Stop("")
-	}
+	err = cmdutil.RunWithSpinner(deleteCtx, f.Status(), fmt.Sprintf("Deleting %s...", inst.Hostname), func() error {
+		return client.Instances.Delete(deleteCtx, []string{inst.ID}, volumeIDs, false)
+	})
 	if err != nil {
 		return err
 	}

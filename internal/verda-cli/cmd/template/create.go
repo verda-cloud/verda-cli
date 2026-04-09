@@ -2,7 +2,6 @@ package template
 
 import (
 	"fmt"
-	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -10,7 +9,6 @@ import (
 
 	cmdutil "github/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/vm"
-	clioptions "github/verda-cloud/verda-cli/internal/verda-cli/options"
 )
 
 var resourceTypes = []string{"Instance (VM)"}
@@ -73,11 +71,10 @@ func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 	resource := resourceMap[idx]
 
 	// 2. Resolve templates directory.
-	verdaDir, err := clioptions.VerdaDir()
+	baseDir, err := cmdutil.TemplatesBaseDir()
 	if err != nil {
 		return err
 	}
-	baseDir := filepath.Join(verdaDir, "templates")
 
 	// 3. Get and validate template name (re-prompt on invalid input).
 	for {

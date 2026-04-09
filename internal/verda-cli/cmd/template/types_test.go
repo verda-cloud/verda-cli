@@ -585,7 +585,7 @@ func TestValidateName_EdgeCases(t *testing.T) {
 		{"123", false, "numbers only"},
 		{"a-b-c-d-e-f-g-h-i-j-k-l-m-n-o-p", false, "long name with hyphens"},
 		{"abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnopqrstuvwxyz", false, "very long name"},
-		{"bad-", false, "trailing hyphen is valid per regex"}, // nameRe = ^[a-z0-9][a-z0-9-]*$
+		{"bad-", true, "trailing hyphen rejected"},
 		{"-bad", true, "leading hyphen is invalid"},
 		{"", true, "empty name"},
 		{"UPPER", true, "uppercase letters"},

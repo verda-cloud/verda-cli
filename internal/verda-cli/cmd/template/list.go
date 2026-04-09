@@ -2,12 +2,10 @@ package template
 
 import (
 	"fmt"
-	"path/filepath"
 
 	"github.com/spf13/cobra"
 
 	cmdutil "github/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
-	clioptions "github/verda-cloud/verda-cli/internal/verda-cli/options"
 )
 
 // NewCmdList creates the template list command.
@@ -43,11 +41,10 @@ func NewCmdList(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 }
 
 func runList(f cmdutil.Factory, ioStreams cmdutil.IOStreams, resourceType string) error {
-	verdaDir, err := clioptions.VerdaDir()
+	baseDir, err := cmdutil.TemplatesBaseDir()
 	if err != nil {
 		return err
 	}
-	baseDir := filepath.Join(verdaDir, "templates")
 
 	var entries []Entry
 	if resourceType != "" {

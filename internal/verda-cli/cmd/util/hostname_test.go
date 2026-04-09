@@ -28,7 +28,8 @@ func TestValidateHostname(t *testing.T) {
 		{"-bad", "start"},
 		{"bad-", "end"},
 		{"123-456", "letter"},
-		{"bad_host", "letters, digits"},
+		{"bad_host", "letters, digits, and hyphens"},
+		{"has space", "letters, digits, and hyphens"},
 	}
 	for _, tc := range invalid {
 		err := ValidateHostname(tc.input)

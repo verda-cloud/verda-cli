@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
+	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
 
 	cmdutil "github/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
@@ -57,14 +58,9 @@ func runDescribe(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStre
 	ctx, cancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
 	defer cancel()
 
-	var sp interface{ Stop(string) }
-	if status := f.Status(); status != nil {
-		sp, _ = status.Spinner(ctx, "Loading instance...")
-	}
-	inst, err := client.Instances.GetByID(ctx, instanceID)
-	if sp != nil {
-		sp.Stop("")
-	}
+	inst, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading instance...", func() (*verda.Instance, error) {
+		return client.Instances.GetByID(ctx, instanceID)
+	})
 	if err != nil {
 		return fmt.Errorf("fetching instance: %w", err)
 	}

@@ -6,9 +6,15 @@ Parent command for creating and managing Verda Cloud VM instances (GPU and CPU).
 
 | Command | Description | Key Flags |
 |---------|-------------|-----------|
-| `verda vm create` | Create a VM instance | `--kind`, `--instance-type`, `--os`, `--hostname`, `--location`, `--is-spot`, `--contract`, `--ssh-key`, `--os-volume-size`, `--storage-size`, `--volume`, `--existing-volume`, `--startup-script`, `--coupon`, `--description`, `--pricing` |
-| `verda vm list` | List VM instances | `--status` |
+| `verda vm create` | Create a VM instance | `--kind`, `--instance-type`, `--os`, `--hostname`, `--location`, `--is-spot`, `--contract`, `--ssh-key`, `--os-volume-size`, `--storage-size`, `--volume`, `--existing-volume`, `--startup-script`, `--coupon`, `--description`, `--pricing`, `--from` |
+| `verda vm list` | List VM instances | `--status`, `--location` |
+| `verda vm describe` | Show instance details | _(positional ID or interactive picker)_ |
+| `verda vm availability` | Show instance type pricing + availability | `--location`, `--type`, `--kind`, `--spot` |
 | `verda vm action` | Perform actions on a VM instance | `--id` |
+| `verda vm start` | Start an offline instance | `--all`, `--status`, `--hostname` |
+| `verda vm shutdown` | Shutdown a running instance | `--all`, `--status`, `--hostname` |
+| `verda vm hibernate` | Hibernate a running instance | `--all`, `--status`, `--hostname` |
+| `verda vm delete` | Delete an instance | `--all`, `--status`, `--hostname`, `--with-volumes` |
 
 Aliases: `verda instance`, `verda instances`
 
@@ -19,6 +25,12 @@ Aliases: `verda instance`, `verda instances`
 ```bash
 # Interactive (wizard launches when required fields are missing)
 verda vm create
+
+# From a saved template (only prompts for hostname + confirm)
+verda vm create --from gpu-training
+
+# Pick template from list
+verda vm create --from
 
 # Non-interactive GPU instance
 verda vm create \
@@ -61,7 +73,7 @@ verda vm list
 verda vm list --status running
 ```
 
-### Action
+### Action / Shortcuts
 
 ```bash
 # Interactive: select instance then action
@@ -69,6 +81,11 @@ verda vm action
 
 # Specify instance ID directly
 verda vm action --id abc-123
+
+# Shortcut commands (batch-capable)
+verda vm start
+verda vm shutdown --all --status running
+verda vm delete --all --hostname "gpu-*" --with-volumes
 ```
 
 ## Interactive vs Non-Interactive
@@ -115,12 +132,21 @@ Destructive actions (Shutdown, Force shutdown, Delete) show confirmation prompts
 
 ### Files
 
-- **vm.go** -- Parent command definition, registers subcommands
-- **create.go** -- `vm create` command, flag definitions, request building, contract normalization, volume spec parsing, kind validation
-- **wizard.go** -- 13-step interactive wizard using the wizard engine; includes `apiCache` for deduplicating API calls, `clientFunc` lazy client pattern, pricing calculations, and inline sub-flows for adding SSH keys and startup scripts
-- **list.go** -- `vm list` command with interactive instance selector and detail card viewer
-- **action.go** -- `vm action` command with status-filtered action menu, confirmation flows, delete sub-flow with volume selection
-- **status_view.go** -- Animated polling status view, instance card renderer, status-to-color mappings, terminal status detection
+- **vm.go** -- Parent command definition, registers subcommands and shortcut commands
+- **create.go** -- `vm create` command, flag definitions, `createOptions` struct (with 5-stage mutation lifecycle), request building, contract normalization, volume spec parsing, kind validation
+- **wizard.go** -- 13 wizard step definitions using the wizard engine; `clientFunc` lazy client pattern; `WizardMode` (Deploy vs Template); `RunTemplateWizard`; step Default functions for pre-selection
+- **wizard_cache.go** -- `apiCache` struct for deduplicating API calls, `ensurePricingCache`, pricing helpers (`volumeHourlyPrice`, `instanceUnits`), instance type matching (`matchesKind`, `formatGPU`, `formatMemory`)
+- **wizard_subflows.go** -- Interactive sub-flows for SSH key creation, startup script creation, storage volume management; choice builders for multi-select prompts
+- **wizard_summary.go** -- `renderDeploymentSummary` with full cost breakdown (accepts `io.Writer`)
+- **template_apply.go** -- `resolveCreateInputs` orchestration, `applyTemplate`, `resolveTemplateNames` (with warnings), `printTemplateSummary`, `pickTemplate`
+- **list.go** -- `vm list` command with interactive instance selector, parallel volume fetching (bounded concurrency)
+- **describe.go** -- `vm describe` with optional interactive picker
+- **availability.go** -- `vm availability` with pricing table and spot price column
+- **action.go** -- `vm action` command, `instanceAction` data-driven action definitions, status-filtered action menu, confirmation flows, delete sub-flow with volume selection
+- **batch.go** -- Batch operations (`--all`, `--hostname` glob), per-instance error reporting, agent-mode structured JSON output
+- **shortcuts.go** -- Generated shortcut commands (`vm start`, `vm shutdown`, `vm hibernate`, `vm delete`) from `shortcutDef` structs
+- **instances.go** -- Shared `fetchInstances` helper with spinner and status filtering, `filterByStatus`
+- **status_view.go** -- Instance card renderer, status-to-color mappings
 
 ### API Endpoints / SDK Methods
 
@@ -129,6 +155,7 @@ Destructive actions (Shutdown, Force shutdown, Delete) show confirmation prompts
 - `client.Instances.GetByID` -- Get instance details
 - `client.Instances.Start` / `Shutdown` / `ForceShutdown` / `Hibernate` -- Instance lifecycle
 - `client.Instances.Delete` -- Delete instance with optional volume IDs
+- `client.Instances.Action` -- Bulk action on multiple instances
 - `client.InstanceAvailability.GetAllAvailabilities` -- Location/instance type availability
 - `client.InstanceTypes.Get` -- Instance type catalog with pricing
 - `client.Images.Get` -- OS image catalog
@@ -148,3 +175,4 @@ Destructive actions (Shutdown, Force shutdown, Delete) show confirmation prompts
 - **Kind validation**: `--kind cpu` requires instance type starting with `CPU.`; `--kind gpu` rejects `CPU.`-prefixed types.
 - **Volume specs**: `--volume` flag uses `name:size:type[:location[:on-spot-discontinue]]` format.
 - **Status polling**: After create or action, polls every 5s (up to 5 min timeout) with animated spinner showing elapsed time. Terminal statuses: running, offline, error, discontinued, not_found, no_capacity.
+- **Parallel volume fetching**: `fetchInstanceVolumes` uses goroutines with bounded concurrency (max 5) instead of sequential N+1 queries.

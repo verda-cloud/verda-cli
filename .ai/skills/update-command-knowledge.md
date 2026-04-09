@@ -10,7 +10,7 @@ This skill generates and updates per-subcommand knowledge docs (README.md + CLAU
 ## Step 1: Determine which command directories to process
 
 If the argument contains `--all`, process ALL command directories:
-- auth, vm, sshkey, startupscript, volume, settings, version, update
+- auth, vm, template, sshkey, startupscript, volume, settings, version, update, status, ssh, cost, images, instancetypes, locations, availability, completion, mcp
 
 Otherwise, detect changed dirs from staged files:
 

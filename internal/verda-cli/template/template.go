@@ -42,10 +42,10 @@ type StorageSpec struct {
 
 // Entry represents a template listing entry with metadata.
 type Entry struct {
-	Resource    string
-	Name        string
-	Description string
-	Path        string
+	Resource    string `json:"resource" yaml:"resource"`
+	Name        string `json:"name" yaml:"name"`
+	Description string `json:"description" yaml:"description"`
+	Path        string `json:"path" yaml:"path"`
 }
 
 // ExpandHostnamePattern expands placeholders in a hostname pattern:
@@ -55,18 +55,16 @@ type Entry struct {
 // Example: "gpu-{random}-{location}" → "gpu-cold-cable-smiles-fin-03".
 func ExpandHostnamePattern(pattern, locationCode string) string {
 	s := pattern
-	if strings.Contains(s, "{random}") {
+	for strings.Contains(s, "{random}") {
 		words := generateRandomWords()
-		s = strings.ReplaceAll(s, "{random}", words)
+		s = strings.Replace(s, "{random}", words, 1)
 	}
-	if strings.Contains(s, "{location}") {
-		s = strings.ReplaceAll(s, "{location}", strings.ToLower(locationCode))
-	}
+	s = strings.ReplaceAll(s, "{location}", strings.ToLower(locationCode))
 	return s
 }
 
 // nameRe matches valid template names: lowercase alphanumeric and hyphens.
-var nameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+var nameRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
 
 // ValidateName checks that name is non-empty and contains only lowercase
 // alphanumeric characters and hyphens.
@@ -94,8 +92,13 @@ func Save(baseDir, resource, name string, tmpl *Template) error {
 	}
 
 	path := filepath.Join(dir, name+".yaml")
-	if err := os.WriteFile(path, data, 0o644); err != nil { //nolint:gosec // templates are not secrets
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil { //nolint:gosec // templates are not secrets
 		return fmt.Errorf("writing template file: %w", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp) // best-effort cleanup
+		return fmt.Errorf("saving template file: %w", err)
 	}
 	return nil
 }

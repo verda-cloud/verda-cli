@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/spf13/cobra"
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
@@ -54,14 +55,9 @@ func runList(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams,
 	ctx, cancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
 	defer cancel()
 
-	var sp interface{ Stop(string) }
-	if status := f.Status(); status != nil {
-		sp, _ = status.Spinner(ctx, "Loading instances...")
-	}
-	instances, err := client.Instances.Get(ctx, opts.Status)
-	if sp != nil {
-		sp.Stop("")
-	}
+	instances, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading instances...", func() ([]verda.Instance, error) {
+		return client.Instances.Get(ctx, opts.Status)
+	})
 	if err != nil {
 		return err
 	}
@@ -128,15 +124,33 @@ func runList(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams,
 // fetchInstanceVolumes fetches volume details for an instance's attached volumes.
 func fetchInstanceVolumes(ctx context.Context, client *verda.Client, inst *verda.Instance) []verda.Volume {
 	ids := cmdutil.UniqueVolumeIDs(inst)
-	volumes := make([]verda.Volume, 0, len(ids))
-	for _, id := range ids {
-		vol, err := client.Volumes.GetVolume(ctx, id)
-		if err != nil {
-			continue
-		}
-		volumes = append(volumes, *vol)
+	if len(ids) == 0 {
+		return nil
 	}
-	return volumes
+
+	var mu sync.Mutex
+	var result []verda.Volume
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 5) // max 5 concurrent requests
+
+	for _, id := range ids {
+		wg.Add(1)
+		go func(volID string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			vol, err := client.Volumes.GetVolume(ctx, volID)
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			result = append(result, *vol)
+			mu.Unlock()
+		}(id)
+	}
+	wg.Wait()
+	return result
 }
 
 func printInstanceTable(ioStreams cmdutil.IOStreams, instances []verda.Instance) error {

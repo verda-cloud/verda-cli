@@ -88,28 +88,25 @@ func runAvailability(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IO
 	ctx, cancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
 	defer cancel()
 
-	var sp interface{ Stop(string) }
-	if status := f.Status(); status != nil {
-		sp, _ = status.Spinner(ctx, "Loading availability and pricing...")
+	type availData struct {
+		types []verda.InstanceTypeInfo
+		avail []verda.LocationAvailability
 	}
-
-	// Fetch instance types with pricing.
-	types, err := client.InstanceTypes.Get(ctx, "usd")
-	if err != nil {
-		if sp != nil {
-			sp.Stop("")
+	data, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading availability and pricing...", func() (availData, error) {
+		types, typesErr := client.InstanceTypes.Get(ctx, "usd")
+		if typesErr != nil {
+			return availData{}, fmt.Errorf("fetching instance types: %w", typesErr)
 		}
-		return fmt.Errorf("fetching instance types: %w", err)
-	}
-
-	// Fetch availability per location.
-	avail, err := client.InstanceAvailability.GetAllAvailabilities(ctx, opts.IsSpot, opts.Location)
-	if sp != nil {
-		sp.Stop("")
-	}
+		avail, availErr := client.InstanceAvailability.GetAllAvailabilities(ctx, opts.IsSpot, opts.Location)
+		if availErr != nil {
+			return availData{}, fmt.Errorf("fetching availability: %w", availErr)
+		}
+		return availData{types: types, avail: avail}, nil
+	})
 	if err != nil {
-		return fmt.Errorf("fetching availability: %w", err)
+		return err
 	}
+	types, avail := data.types, data.avail
 
 	// Index instance types by name.
 	typeMap := make(map[string]*verda.InstanceTypeInfo, len(types))

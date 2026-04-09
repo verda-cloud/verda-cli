@@ -40,7 +40,7 @@ func runBatchAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOS
 
 	ctx := cmd.Context()
 
-	instances, err := fetchBatchInstances(ctx, f, ioStreams, client, opts)
+	instances, err := fetchBatchInstances(ctx, f, client, opts)
 	if err != nil {
 		return err
 	}
@@ -92,17 +92,12 @@ func runBatchAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOS
 	actionCtx, cancel := context.WithTimeout(ctx, f.Options().Timeout)
 	defer cancel()
 
-	var sp interface{ Stop(string) }
-	if status := f.Status(); status != nil {
-		sp, _ = status.Spinner(actionCtx, fmt.Sprintf("%s %d instances...", action.Label, len(instances)))
-	}
-	results, err := client.Instances.Action(actionCtx, verda.InstanceActionRequest{
-		Action: actionNameToAPI(opts.Action),
-		ID:     ids,
+	results, err := cmdutil.WithSpinner(actionCtx, f.Status(), fmt.Sprintf("%s %d instances...", action.Label, len(instances)), func() ([]verda.InstanceActionResult, error) {
+		return client.Instances.Action(actionCtx, verda.InstanceActionRequest{
+			Action: actionNameToAPI(opts.Action),
+			ID:     ids,
+		})
 	})
-	if sp != nil {
-		sp.Stop("")
-	}
 	if err != nil {
 		return err
 	}
@@ -170,18 +165,13 @@ func runBatchDelete(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOS
 	deleteCtx, cancel := context.WithTimeout(ctx, f.Options().Timeout)
 	defer cancel()
 
-	var sp interface{ Stop(string) }
-	if status := f.Status(); status != nil {
-		sp, _ = status.Spinner(deleteCtx, fmt.Sprintf("Deleting %d instances...", len(instances)))
-	}
-	results, err := client.Instances.Action(deleteCtx, verda.InstanceActionRequest{
-		Action:    verda.ActionDelete,
-		ID:        ids,
-		VolumeIDs: volumeIDs,
+	results, err := cmdutil.WithSpinner(deleteCtx, f.Status(), fmt.Sprintf("Deleting %d instances...", len(instances)), func() ([]verda.InstanceActionResult, error) {
+		return client.Instances.Action(deleteCtx, verda.InstanceActionRequest{
+			Action:    verda.ActionDelete,
+			ID:        ids,
+			VolumeIDs: volumeIDs,
+		})
 	})
-	if sp != nil {
-		sp.Stop("")
-	}
 	if err != nil {
 		return err
 	}
@@ -318,30 +308,9 @@ func writeBatchAgentOutput(ioStreams cmdutil.IOStreams, format, action string, i
 // selectInstances shows a multi-select picker for choosing one or more instances.
 // Returns the selected Instance structs (empty if canceled).
 func selectInstances(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client *verda.Client, statusFilter ...string) ([]verda.Instance, error) {
-	var sp interface{ Stop(string) }
-	if status := f.Status(); status != nil {
-		sp, _ = status.Spinner(ctx, "Loading instances...")
-	}
-	instances, err := client.Instances.Get(ctx, "")
-	if sp != nil {
-		sp.Stop("")
-	}
+	instances, err := fetchInstances(ctx, f, client, statusFilter...)
 	if err != nil {
 		return nil, err
-	}
-
-	// Filter by status.
-	if len(statusFilter) > 0 {
-		filtered := instances[:0]
-		for i := range instances {
-			for _, s := range statusFilter {
-				if instances[i].Status == s {
-					filtered = append(filtered, instances[i])
-					break
-				}
-			}
-		}
-		instances = filtered
 	}
 
 	if len(instances) == 0 {
@@ -417,17 +386,12 @@ func runBatchWithInstances(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdu
 	actionCtx, cancel := context.WithTimeout(ctx, f.Options().Timeout)
 	defer cancel()
 
-	var actionSp interface{ Stop(string) }
-	if status := f.Status(); status != nil {
-		actionSp, _ = status.Spinner(actionCtx, fmt.Sprintf("%s %d instances...", action.Label, len(instances)))
-	}
-	results, err := client.Instances.Action(actionCtx, verda.InstanceActionRequest{
-		Action: actionNameToAPI(opts.Action),
-		ID:     ids,
+	results, err := cmdutil.WithSpinner(actionCtx, f.Status(), fmt.Sprintf("%s %d instances...", action.Label, len(instances)), func() ([]verda.InstanceActionResult, error) {
+		return client.Instances.Action(actionCtx, verda.InstanceActionRequest{
+			Action: actionNameToAPI(opts.Action),
+			ID:     ids,
+		})
 	})
-	if actionSp != nil {
-		actionSp.Stop("")
-	}
 	if err != nil {
 		return err
 	}
@@ -438,23 +402,18 @@ func runBatchWithInstances(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdu
 
 // fetchBatchInstances loads instances from the API and filters them to those
 // valid for the requested action.
-func fetchBatchInstances(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client *verda.Client, opts *actionOptions) ([]verda.Instance, error) {
-	var sp interface{ Stop(string) }
-	if status := f.Status(); status != nil {
-		sp, _ = status.Spinner(ctx, "Loading instances...")
+func fetchBatchInstances(ctx context.Context, f cmdutil.Factory, client *verda.Client, opts *actionOptions) ([]verda.Instance, error) {
+	// Build status filter: use explicit --status if set, otherwise derive from action.
+	var statusFilter []string
+	if opts.Status != "" {
+		statusFilter = []string{opts.Status}
+	} else {
+		statusFilter = validFromForAction(opts.Action)
 	}
 
-	instances, err := client.Instances.Get(ctx, opts.Status)
-	if sp != nil {
-		sp.Stop("")
-	}
+	instances, err := fetchInstances(ctx, f, client, statusFilter...)
 	if err != nil {
 		return nil, err
-	}
-
-	// When no explicit --status filter is set, filter to statuses valid for this action.
-	if opts.Status == "" {
-		instances = filterByValidFrom(instances, opts.Action)
 	}
 
 	// Apply hostname glob filter.
@@ -463,26 +422,6 @@ func fetchBatchInstances(ctx context.Context, f cmdutil.Factory, ioStreams cmdut
 	}
 
 	return instances, nil
-}
-
-// filterByValidFrom keeps only instances whose status is valid for the given action.
-// If the action has no status restriction (e.g. delete), all instances are returned.
-func filterByValidFrom(instances []verda.Instance, action string) []verda.Instance {
-	validStatuses := validFromForAction(action)
-	if len(validStatuses) == 0 {
-		return instances
-	}
-
-	filtered := make([]verda.Instance, 0, len(instances))
-	for i := range instances {
-		for _, s := range validStatuses {
-			if instances[i].Status == s {
-				filtered = append(filtered, instances[i])
-				break
-			}
-		}
-	}
-	return filtered
 }
 
 // filterByHostname keeps only instances whose hostname matches the glob pattern.

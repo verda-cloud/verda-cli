@@ -22,6 +22,34 @@ var validSpotPolicies = map[string]struct{}{
 	verda.SpotDiscontinueDeletePermanent: {},
 }
 
+// createOptions holds all configuration for vm create. Fields are populated
+// in a defined sequence — each stage may read fields set by prior stages:
+//
+// Stage 1 — Flag parsing (cobra):
+//
+//	Sets all public fields from CLI flags. LocationCode defaults to FIN-01.
+//
+// Stage 2 — Template application (applyTemplate):
+//
+//	Overwrites empty fields with template values. Sets billingTypeSet,
+//	locationSet, storageSkip, startupScriptSkip coordination flags.
+//	Expands HostnamePattern into Hostname.
+//
+// Stage 3 — Name resolution (resolveTemplateNames):
+//
+//	Resolves sshKeyNames → SSHKeyIDs, startupScriptName → StartupScriptID
+//	via API calls. On failure, leaves IDs empty for wizard to prompt.
+//
+// Stage 4 — Wizard (buildCreateFlow steps):
+//
+//	Fills remaining gaps interactively. Steps check IsSet to skip pre-filled
+//	values. Steps 8/9/10 (storage, ssh-keys, startup-script) manage state
+//	directly via their Loader closures.
+//
+// Stage 5 — Request building (request()):
+//
+//	Reads all fields to assemble CreateInstanceRequest. Auto-sets
+//	Contract="SPOT" when IsSpot && Contract is empty.
 type createOptions struct {
 	InstanceType string
 	Image        string
@@ -179,14 +207,9 @@ func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 	createCtx, createCancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
 	defer createCancel()
 
-	var sp interface{ Stop(string) }
-	if status := f.Status(); status != nil {
-		sp, _ = status.Spinner(createCtx, "Creating VM instance...")
-	}
-	instance, err := client.Instances.Create(createCtx, req)
-	if sp != nil {
-		sp.Stop("")
-	}
+	instance, err := cmdutil.WithSpinner(createCtx, f.Status(), "Creating VM instance...", func() (*verda.Instance, error) {
+		return client.Instances.Create(createCtx, req)
+	})
 	if err != nil {
 		return err
 	}
@@ -237,7 +260,7 @@ func missingCreateFlags(opts *createOptions) []string {
 }
 
 func runWizard(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *createOptions) error {
-	flow := buildCreateFlow(f.VerdaClient, opts, WizardModeDeploy)
+	flow := buildCreateFlow(ctx, f.VerdaClient, opts, WizardModeDeploy, ioStreams.ErrOut)
 	engine := wizard.NewEngine(f.Prompter(), f.Status(), wizard.WithOutput(ioStreams.ErrOut))
 	return engine.Run(ctx, flow)
 }
