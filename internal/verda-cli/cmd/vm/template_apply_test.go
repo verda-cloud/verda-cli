@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"strings"
 	"testing"
 
 	"github/verda-cloud/verda-cli/internal/verda-cli/template"
@@ -125,5 +126,134 @@ func TestApplyTemplate_SkipFlags(t *testing.T) {
 	}
 	if !opts.startupScriptSkip {
 		t.Error("expected startupScriptSkip=true")
+	}
+}
+
+func TestApplyTemplate_HostnamePattern(t *testing.T) {
+	t.Parallel()
+
+	tmpl := &template.Template{
+		Resource:        "vm",
+		InstanceType:    "1V100.6V",
+		Location:        "FIN-03",
+		HostnamePattern: "gpu-{random}-{location}",
+	}
+
+	opts := &createOptions{}
+	applyTemplate(tmpl, opts)
+
+	// Location should be applied first, then hostname pattern expanded.
+	if opts.LocationCode != "FIN-03" {
+		t.Errorf("LocationCode = %q, want FIN-03", opts.LocationCode)
+	}
+
+	// Hostname should start with "gpu-", end with "-fin-03", and have random words in between.
+	if !strings.HasPrefix(opts.Hostname, "gpu-") {
+		t.Errorf("Hostname = %q, expected prefix %q", opts.Hostname, "gpu-")
+	}
+	if !strings.HasSuffix(opts.Hostname, "-fin-03") {
+		t.Errorf("Hostname = %q, expected suffix %q", opts.Hostname, "-fin-03")
+	}
+	// Should be longer than just "gpu-" + "-fin-03" = 11 chars, since {random} produces words.
+	if len(opts.Hostname) <= 11 {
+		t.Errorf("Hostname = %q, expected longer string with random words", opts.Hostname)
+	}
+}
+
+func TestApplyTemplate_HostnamePatternNoOverwrite(t *testing.T) {
+	t.Parallel()
+
+	tmpl := &template.Template{
+		Resource:        "vm",
+		InstanceType:    "1V100.6V",
+		Location:        "FIN-01",
+		HostnamePattern: "gpu-{random}-{location}",
+	}
+
+	opts := &createOptions{
+		Hostname: "my-existing-hostname",
+	}
+	applyTemplate(tmpl, opts)
+
+	// The pre-existing hostname should NOT be overwritten by the pattern.
+	if opts.Hostname != "my-existing-hostname" {
+		t.Errorf("Hostname = %q, want %q (should not overwrite)", opts.Hostname, "my-existing-hostname")
+	}
+}
+
+func TestApplyTemplate_HostnamePatternStaticName(t *testing.T) {
+	t.Parallel()
+
+	tmpl := &template.Template{
+		Resource:        "vm",
+		InstanceType:    "CPU.4V.16G",
+		HostnamePattern: "my-worker",
+	}
+
+	opts := &createOptions{}
+	applyTemplate(tmpl, opts)
+
+	// A pattern without placeholders should set the hostname exactly.
+	if opts.Hostname != "my-worker" {
+		t.Errorf("Hostname = %q, want %q", opts.Hostname, "my-worker")
+	}
+}
+
+func TestApplyTemplate_StorageSkipAndStartupSkip(t *testing.T) {
+	t.Parallel()
+
+	tmpl := &template.Template{
+		Resource:          "vm",
+		InstanceType:      "A100x4",
+		StorageSkip:       true,
+		StartupScriptSkip: true,
+	}
+
+	opts := &createOptions{}
+	applyTemplate(tmpl, opts)
+
+	if !opts.storageSkip {
+		t.Error("expected storageSkip=true")
+	}
+	if !opts.startupScriptSkip {
+		t.Error("expected startupScriptSkip=true")
+	}
+}
+
+func TestApplyTemplate_BillingTypeSetFlag(t *testing.T) {
+	t.Parallel()
+
+	tmpl := &template.Template{
+		Resource:    "vm",
+		BillingType: "on-demand",
+	}
+
+	opts := &createOptions{}
+	applyTemplate(tmpl, opts)
+
+	if !opts.billingTypeSet {
+		t.Error("expected billingTypeSet=true when template has billing_type")
+	}
+	if opts.IsSpot {
+		t.Error("expected IsSpot=false for billing_type=on-demand")
+	}
+}
+
+func TestApplyTemplate_LocationSetFlag(t *testing.T) {
+	t.Parallel()
+
+	tmpl := &template.Template{
+		Resource: "vm",
+		Location: "US-EAST-1",
+	}
+
+	opts := &createOptions{}
+	applyTemplate(tmpl, opts)
+
+	if !opts.locationSet {
+		t.Error("expected locationSet=true when template has location")
+	}
+	if opts.LocationCode != "US-EAST-1" {
+		t.Errorf("LocationCode = %q, want US-EAST-1", opts.LocationCode)
 	}
 }

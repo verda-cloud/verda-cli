@@ -411,6 +411,280 @@ func TestResolveTemplatePath(t *testing.T) {
 	}
 }
 
+func TestTemplateSaveAndLoad_AllFields(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	tmpl := &Template{
+		Resource:          "vm",
+		BillingType:       "spot",
+		Contract:          "PAY_AS_YOU_GO",
+		Kind:              "gpu",
+		InstanceType:      "H100x8",
+		Location:          "FIN-03",
+		Image:             "ubuntu-24.04-cuda-12.8",
+		OSVolumeSize:      200,
+		Storage:           []StorageSpec{{Type: "NVMe", Size: 500}, {Type: "HDD", Size: 2000}},
+		StorageSkip:       true,
+		SSHKeys:           []string{"key-a", "key-b", "key-c"},
+		StartupScript:     "my-startup.sh",
+		StartupScriptSkip: true,
+		HostnamePattern:   "gpu-{random}-{location}",
+	}
+
+	if err := Save(dir, "vm", "all-fields", tmpl); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	loaded, err := Load(dir, "vm", "all-fields")
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	assertStr(t, "Resource", loaded.Resource, tmpl.Resource)
+	assertStr(t, "BillingType", loaded.BillingType, tmpl.BillingType)
+	assertStr(t, "Contract", loaded.Contract, tmpl.Contract)
+	assertStr(t, "Kind", loaded.Kind, tmpl.Kind)
+	assertStr(t, "InstanceType", loaded.InstanceType, tmpl.InstanceType)
+	assertStr(t, "Location", loaded.Location, tmpl.Location)
+	assertStr(t, "Image", loaded.Image, tmpl.Image)
+	assertInt(t, "OSVolumeSize", loaded.OSVolumeSize, tmpl.OSVolumeSize)
+	assertStr(t, "StartupScript", loaded.StartupScript, tmpl.StartupScript)
+	assertStr(t, "HostnamePattern", loaded.HostnamePattern, tmpl.HostnamePattern)
+
+	if !loaded.StorageSkip {
+		t.Error("StorageSkip = false, want true")
+	}
+	if !loaded.StartupScriptSkip {
+		t.Error("StartupScriptSkip = false, want true")
+	}
+
+	if len(loaded.Storage) != 2 {
+		t.Fatalf("Storage length = %d, want 2", len(loaded.Storage))
+	}
+	if loaded.Storage[0].Type != "NVMe" || loaded.Storage[0].Size != 500 {
+		t.Errorf("Storage[0] = %+v, want {NVMe 500}", loaded.Storage[0])
+	}
+	if loaded.Storage[1].Type != "HDD" || loaded.Storage[1].Size != 2000 {
+		t.Errorf("Storage[1] = %+v, want {HDD 2000}", loaded.Storage[1])
+	}
+
+	if len(loaded.SSHKeys) != 3 {
+		t.Fatalf("SSHKeys length = %d, want 3", len(loaded.SSHKeys))
+	}
+	for i, want := range []string{"key-a", "key-b", "key-c"} {
+		if loaded.SSHKeys[i] != want {
+			t.Errorf("SSHKeys[%d] = %q, want %q", i, loaded.SSHKeys[i], want)
+		}
+	}
+}
+
+func TestTemplateSaveAndLoad_SkipFlags(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	tmpl := &Template{
+		Resource:          "vm",
+		InstanceType:      "A100x4",
+		Location:          "FIN-01",
+		Image:             "ubuntu-22.04",
+		StorageSkip:       true,
+		StartupScriptSkip: true,
+	}
+
+	if err := Save(dir, "vm", "skip-flags", tmpl); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	loaded, err := Load(dir, "vm", "skip-flags")
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if !loaded.StorageSkip {
+		t.Error("StorageSkip = false, want true")
+	}
+	if !loaded.StartupScriptSkip {
+		t.Error("StartupScriptSkip = false, want true")
+	}
+	// Verify other fields are still correct.
+	assertStr(t, "InstanceType", loaded.InstanceType, "A100x4")
+	assertStr(t, "Location", loaded.Location, "FIN-01")
+}
+
+func TestTemplateSaveAndLoad_HostnamePattern(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	tmpl := &Template{
+		Resource:        "vm",
+		InstanceType:    "H100x8",
+		HostnamePattern: "gpu-{random}-{location}",
+	}
+
+	if err := Save(dir, "vm", "hostname-pat", tmpl); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	loaded, err := Load(dir, "vm", "hostname-pat")
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	assertStr(t, "HostnamePattern", loaded.HostnamePattern, "gpu-{random}-{location}")
+}
+
+func TestList_MultipleResourceTypes(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+
+	// Save templates in vm/ and cluster/ subdirs.
+	save := func(resource, name string) {
+		tmpl := &Template{Resource: resource, InstanceType: "type-" + name}
+		if err := Save(dir, resource, name, tmpl); err != nil {
+			t.Fatalf("Save(%q/%q) error = %v", resource, name, err)
+		}
+	}
+	save("vm", "dev-vm")
+	save("vm", "prod-vm")
+	save("cluster", "small-cluster")
+	save("cluster", "large-cluster")
+
+	// ListAll should return entries from both resource types.
+	entries, err := ListAll(dir)
+	if err != nil {
+		t.Fatalf("ListAll() error = %v", err)
+	}
+
+	if len(entries) != 4 {
+		t.Fatalf("ListAll() returned %d entries, want 4", len(entries))
+	}
+
+	resources := map[string]int{}
+	for _, e := range entries {
+		resources[e.Resource]++
+	}
+	if resources["vm"] != 2 {
+		t.Errorf("ListAll() vm count = %d, want 2", resources["vm"])
+	}
+	if resources["cluster"] != 2 {
+		t.Errorf("ListAll() cluster count = %d, want 2", resources["cluster"])
+	}
+}
+
+func TestValidateName_EdgeCases(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		input   string
+		wantErr bool
+		desc    string
+	}{
+		{"a", false, "single char"},
+		{"123", false, "numbers only"},
+		{"a-b-c-d-e-f-g-h-i-j-k-l-m-n-o-p", false, "long name with hyphens"},
+		{"abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnopqrstuvwxyz", false, "very long name"},
+		{"bad-", false, "trailing hyphen is valid per regex"}, // nameRe = ^[a-z0-9][a-z0-9-]*$
+		{"-bad", true, "leading hyphen is invalid"},
+		{"", true, "empty name"},
+		{"UPPER", true, "uppercase letters"},
+		{"has space", true, "contains space"},
+		{"has.dot", true, "contains dot"},
+		{"has_underscore", true, "contains underscore"},
+		{"has/slash", true, "contains slash"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.desc, func(t *testing.T) {
+			t.Parallel()
+			err := ValidateName(tt.input)
+			if tt.wantErr && err == nil {
+				t.Errorf("ValidateName(%q) = nil, want error", tt.input)
+			}
+			if !tt.wantErr && err != nil {
+				t.Errorf("ValidateName(%q) = %v, want nil", tt.input, err)
+			}
+		})
+	}
+}
+
+func TestAutoDescription_WithSkips(t *testing.T) {
+	t.Parallel()
+
+	// A template with StorageSkip=true should still generate description
+	// from InstanceType, Image, and Location.
+	tmpl := Template{
+		InstanceType:      "A100x4",
+		Image:             "ubuntu-22.04",
+		Location:          "FIN-01",
+		StorageSkip:       true,
+		StartupScriptSkip: true,
+	}
+	got := tmpl.AutoDescription()
+	want := "A100x4, ubuntu-22.04, FIN-01"
+	if got != want {
+		t.Errorf("AutoDescription() = %q, want %q", got, want)
+	}
+}
+
+func TestResolve_FilePathWithYamlSuffix(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	tmpl := &Template{Resource: "vm", InstanceType: "A100x4"}
+
+	if err := Save(dir, "vm", "my-template", tmpl); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	// "my-template.yaml" without a directory prefix is treated as a file path
+	// (because it ends with .yaml), so it should fail since the file doesn't
+	// exist at that relative path.
+	_, err := Resolve(dir, "vm", "my-template.yaml")
+	if err == nil {
+		t.Fatal("Resolve() with bare .yaml suffix expected error, got nil")
+	}
+
+	// An absolute path with .yaml suffix should succeed.
+	absPath := filepath.Join(dir, "vm", "my-template.yaml")
+	path, err := Resolve(dir, "vm", absPath)
+	if err != nil {
+		t.Fatalf("Resolve() with absolute .yaml path error = %v", err)
+	}
+	if path != absPath {
+		t.Errorf("Resolve() = %q, want %q", path, absPath)
+	}
+}
+
+func TestResolve_RelativePathWithSlash(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	tmpl := &Template{Resource: "vm", InstanceType: "H100x8"}
+
+	if err := Save(dir, "vm", "test", tmpl); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	// A reference containing "/" is treated as a file path.
+	// Use the actual absolute path to simulate "path with slash".
+	refWithSlash := dir + "/vm/test.yaml"
+	path, err := Resolve(dir, "vm", refWithSlash)
+	if err != nil {
+		t.Fatalf("Resolve() with slash error = %v", err)
+	}
+	if path != refWithSlash {
+		t.Errorf("Resolve() = %q, want %q", path, refWithSlash)
+	}
+
+	// A nonexistent path with slash should fail.
+	_, err = Resolve(dir, "vm", "./templates/nonexistent.yaml")
+	if err == nil {
+		t.Fatal("Resolve() expected error for nonexistent path with slash, got nil")
+	}
+}
+
 func TestExpandHostnamePattern(t *testing.T) {
 	t.Parallel()
 
