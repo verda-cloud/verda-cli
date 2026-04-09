@@ -199,6 +199,52 @@ func TestApplyTemplate_HostnamePatternStaticName(t *testing.T) {
 	}
 }
 
+func TestApplyTemplate_WithStorage(t *testing.T) {
+	t.Parallel()
+
+	tmpl := &template.Template{
+		Resource:     "vm",
+		InstanceType: "H100x8",
+		Storage:      []template.StorageSpec{{Type: "NVMe", Size: 500}},
+	}
+
+	opts := &createOptions{
+		StorageType: "NVMe", // default
+	}
+	applyTemplate(tmpl, opts)
+
+	if opts.StorageSize != 500 {
+		t.Errorf("StorageSize = %d, want 500", opts.StorageSize)
+	}
+	if opts.StorageType != "NVMe" {
+		t.Errorf("StorageType = %q, want NVMe", opts.StorageType)
+	}
+	if opts.storageSkip {
+		t.Error("storageSkip should be false when storage is provided")
+	}
+}
+
+func TestApplyTemplate_WithStorageHDD(t *testing.T) {
+	t.Parallel()
+
+	tmpl := &template.Template{
+		Resource: "vm",
+		Storage:  []template.StorageSpec{{Type: "HDD", Size: 2000}},
+	}
+
+	opts := &createOptions{
+		StorageType: "NVMe", // default should be overwritten
+	}
+	applyTemplate(tmpl, opts)
+
+	if opts.StorageSize != 2000 {
+		t.Errorf("StorageSize = %d, want 2000", opts.StorageSize)
+	}
+	if opts.StorageType != "HDD" {
+		t.Errorf("StorageType = %q, want HDD", opts.StorageType)
+	}
+}
+
 func TestApplyTemplate_StorageSkipAndStartupSkip(t *testing.T) {
 	t.Parallel()
 
