@@ -110,6 +110,22 @@ func TestAgentDisplayLabel(t *testing.T) {
 	}
 }
 
+func TestAgentDestName(t *testing.T) {
+	t.Parallel()
+	a := &Agent{Name: "codex", FileMap: map[string]string{"verda-cloud.md": "SKILL.md"}}
+	if got := a.DestName("verda-cloud.md"); got != "SKILL.md" {
+		t.Fatalf("expected SKILL.md, got %q", got)
+	}
+	if got := a.DestName("verda-reference.md"); got != "verda-reference.md" {
+		t.Fatalf("expected verda-reference.md (no mapping), got %q", got)
+	}
+	// No file_map
+	b := &Agent{Name: "cursor"}
+	if got := b.DestName("verda-cloud.md"); got != "verda-cloud.md" {
+		t.Fatalf("expected verda-cloud.md (nil map), got %q", got)
+	}
+}
+
 func TestExpandHome(t *testing.T) {
 	t.Parallel()
 	if p := expandHome(".cursor/rules/"); p != ".cursor/rules/" {

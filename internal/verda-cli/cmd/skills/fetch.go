@@ -22,11 +22,12 @@ type Manifest struct {
 // Agent describes an AI coding agent target for skill installation.
 // Agent definitions come from the embedded manifest and optional user overrides.
 type Agent struct {
-	Name        string `json:"-"` // set from the map key
-	DisplayName string `json:"display_name"`
-	Scope       string `json:"scope"`  // "global" or "project"
-	Target      string `json:"target"` // path with ~ expansion, or filename for append
-	Method      string `json:"method"` // "copy" or "append"
+	Name        string            `json:"-"` // set from the map key
+	DisplayName string            `json:"display_name"`
+	Scope       string            `json:"scope"`              // "global" or "project"
+	Target      string            `json:"target"`             // path with ~ expansion, or filename for append
+	Method      string            `json:"method"`             // "copy" or "append"
+	FileMap     map[string]string `json:"file_map,omitempty"` // optional: rename files during install (src -> dst)
 }
 
 // TargetDir returns the resolved directory path for this agent.
@@ -48,6 +49,17 @@ func (a *Agent) TargetFile() string {
 // DisplayLabel returns a human-readable label for prompts.
 func (a *Agent) DisplayLabel() string {
 	return a.DisplayName + " (" + a.Target + ")"
+}
+
+// DestName returns the destination filename for a skill file, applying
+// the agent's FileMap rename if one exists.
+func (a *Agent) DestName(src string) string {
+	if a.FileMap != nil {
+		if dst, ok := a.FileMap[src]; ok {
+			return dst
+		}
+	}
+	return src
 }
 
 // expandHome replaces a leading ~ with the user's home directory.

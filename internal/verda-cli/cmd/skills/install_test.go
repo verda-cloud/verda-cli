@@ -83,6 +83,35 @@ func TestInstallAppend_Idempotent(t *testing.T) {
 	}
 }
 
+func TestInstallCopy_FileMap(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	skillFiles := map[string]string{
+		"verda-cloud.md":     "# Verda Cloud\ncontent",
+		"verda-reference.md": "# Reference\ncontent",
+	}
+	agent := &Agent{
+		Name: "codex", DisplayName: "Codex",
+		Scope: "global", Method: "copy", Target: dir,
+		FileMap: map[string]string{"verda-cloud.md": "SKILL.md"},
+	}
+	if err := installForAgent(agent, skillFiles, nil); err != nil {
+		t.Fatalf("install error: %v", err)
+	}
+	// verda-cloud.md should be installed as SKILL.md
+	if _, err := os.Stat(filepath.Join(dir, "SKILL.md")); err != nil {
+		t.Fatal("expected SKILL.md to exist")
+	}
+	// verda-reference.md keeps its name (not in file_map)
+	if _, err := os.Stat(filepath.Join(dir, "verda-reference.md")); err != nil {
+		t.Fatal("expected verda-reference.md to exist")
+	}
+	// verda-cloud.md should NOT exist (it was renamed)
+	if _, err := os.Stat(filepath.Join(dir, "verda-cloud.md")); !os.IsNotExist(err) {
+		t.Fatal("verda-cloud.md should not exist — should be SKILL.md")
+	}
+}
+
 func TestInstallCopy_CleansUpStaleFiles(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

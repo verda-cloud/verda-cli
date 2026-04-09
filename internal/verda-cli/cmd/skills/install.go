@@ -181,7 +181,7 @@ func installAndPrint(ioStreams cmdutil.IOStreams, selectedAgents []*Agent, manif
 			_, _ = fmt.Fprintf(ioStreams.Out, "  %s: %s\n", agent.DisplayName, filepath.Join(dir, agent.TargetFile()))
 		} else {
 			for _, name := range manifest.Skills {
-				_, _ = fmt.Fprintf(ioStreams.Out, "  %s: %s\n", agent.DisplayName, filepath.Join(dir, name))
+				_, _ = fmt.Fprintf(ioStreams.Out, "  %s: %s\n", agent.DisplayName, filepath.Join(dir, agent.DestName(name)))
 			}
 		}
 	}
@@ -292,24 +292,32 @@ func installForAgent(agent *Agent, skillFiles map[string]string, previousSkills 
 		return installAppend(agent, dir, skillFiles)
 	}
 	// Remove stale files from a previous install (e.g. renamed skills).
-	cleanupStaleFiles(dir, skillFiles, previousSkills)
-	return installCopy(dir, skillFiles)
+	cleanupStaleFiles(dir, agent, skillFiles, previousSkills)
+	return installCopy(dir, agent, skillFiles)
 }
 
 // cleanupStaleFiles removes previously installed skill files that are no longer
 // in the current manifest. This handles file renames across CLI versions.
-func cleanupStaleFiles(dir string, currentFiles map[string]string, previousSkills []string) {
+func cleanupStaleFiles(dir string, agent *Agent, currentFiles map[string]string, previousSkills []string) {
+	// Build set of current destination filenames.
+	current := make(map[string]bool, len(currentFiles))
+	for name := range currentFiles {
+		current[agent.DestName(name)] = true
+	}
 	for _, old := range previousSkills {
-		if _, exists := currentFiles[old]; exists {
+		// Apply file_map to resolve destination name (handles both plain
+		// names and mapped names like verda-cloud.md → SKILL.md).
+		oldDest := agent.DestName(old)
+		if current[oldDest] {
 			continue // still in current manifest
 		}
-		_ = os.Remove(filepath.Join(dir, old)) // best-effort
+		_ = os.Remove(filepath.Join(dir, oldDest)) // best-effort
 	}
 }
 
-func installCopy(dir string, skillFiles map[string]string) error {
+func installCopy(dir string, agent *Agent, skillFiles map[string]string) error {
 	for name, content := range skillFiles {
-		path := filepath.Join(dir, name)
+		path := filepath.Join(dir, agent.DestName(name))
 		if err := os.WriteFile(path, []byte(content), 0o644); err != nil { //nolint:gosec // non-sensitive skill files
 			return fmt.Errorf("writing %s: %w", path, err)
 		}

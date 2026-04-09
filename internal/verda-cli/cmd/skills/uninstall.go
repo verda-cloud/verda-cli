@@ -219,7 +219,7 @@ func uninstallForAgent(agent *Agent, skillNames []string) error {
 func uninstallCopy(agent *Agent, skillNames []string) error {
 	dir := agent.TargetDir()
 	for _, name := range skillNames {
-		path := filepath.Join(dir, name)
+		path := filepath.Join(dir, agent.DestName(name))
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("removing %s: %w", path, err)
 		}

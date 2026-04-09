@@ -25,9 +25,12 @@
     },
     "codex": {
       "display_name": "Codex",
-      "scope": "project",
-      "target": "AGENTS.md",
-      "method": "append"
+      "scope": "global",
+      "target": "~/.agents/skills/verda-cloud/",
+      "method": "copy",
+      "file_map": {
+        "verda-cloud.md": "SKILL.md"
+      }
     },
     "gemini": {
       "display_name": "Gemini CLI",
