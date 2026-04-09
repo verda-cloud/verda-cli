@@ -19,7 +19,6 @@ type uninstallOptions struct {
 	statePath      string
 	skillNames     []string
 	agentOverrides map[string]*Agent
-	fetcher        *fetcher
 }
 
 func NewCmdUninstall(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
@@ -71,8 +70,8 @@ func runUninstall(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOSt
 		return nil
 	}
 
-	// Fetch manifest to resolve agent definitions.
-	manifest, _ := fetchManifestForUninstall(ctx, opts)
+	// Load manifest to resolve agent definitions.
+	manifest, _ := fetchManifestForUninstall()
 
 	selectedAgents, err := resolveUninstallAgents(ctx, f, ioStreams, opts, state, manifest)
 	if err != nil {
@@ -126,12 +125,8 @@ func runUninstall(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOSt
 	return nil
 }
 
-func fetchManifestForUninstall(ctx context.Context, opts *uninstallOptions) (*Manifest, error) {
-	ft := opts.fetcher
-	if ft == nil {
-		ft = NewFetcher()
-	}
-	return ft.FetchManifest(ctx)
+func fetchManifestForUninstall() (*Manifest, error) {
+	return LoadManifest()
 }
 
 func resolveUninstallAgents(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *uninstallOptions, state *State, manifest *Manifest) ([]*Agent, error) {

@@ -3,8 +3,6 @@ package skills
 import (
 	"bytes"
 	"context"
-	"net/http"
-	"net/http/httptest"
 	"path/filepath"
 	"testing"
 	"time"
@@ -16,10 +14,6 @@ import (
 
 func TestRunStatus_Installed(t *testing.T) {
 	t.Parallel()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`{"version":"1.1.0","skills":["verda-cloud.md"],"agents":{"claude-code":{"display_name":"Claude Code","scope":"global","target":"~/.claude/skills/","method":"copy"},"cursor":{"display_name":"Cursor","scope":"project","target":".cursor/rules/","method":"copy"}}}`))
-	}))
-	defer srv.Close()
 
 	statePath := filepath.Join(t.TempDir(), "skills.json")
 	_ = SaveState(statePath, &State{
@@ -35,7 +29,6 @@ func TestRunStatus_Installed(t *testing.T) {
 
 	opts := &statusOptions{
 		statePath: statePath,
-		fetcher:   &fetcher{baseURL: srv.URL, client: srv.Client()},
 	}
 
 	if err := runStatus(context.Background(), f, ioStreams, opts); err != nil {
@@ -48,9 +41,6 @@ func TestRunStatus_Installed(t *testing.T) {
 	}
 	if !bytes.Contains(out.Bytes(), []byte("Claude Code")) {
 		t.Fatalf("expected Claude Code in output, got:\n%s", output)
-	}
-	if !bytes.Contains(out.Bytes(), []byte("1.1.0")) {
-		t.Fatalf("expected latest version in output, got:\n%s", output)
 	}
 }
 

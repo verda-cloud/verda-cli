@@ -27,7 +27,6 @@ type installOptions struct {
 	agents         []string
 	force          bool
 	statePath      string
-	fetcher        *fetcher
 	agentOverrides map[string]*Agent
 }
 
@@ -76,12 +75,7 @@ func NewCmdInstall(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Comman
 }
 
 func runInstall(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *installOptions) error {
-	ft := opts.fetcher
-	if ft == nil {
-		ft = NewFetcher()
-	}
-
-	manifest, err := fetchManifestWithSpinner(ctx, f, ft)
+	manifest, err := loadManifestWithSpinner(ctx, f)
 	if err != nil {
 		return err
 	}
@@ -102,7 +96,7 @@ func runInstall(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStre
 		return err
 	}
 
-	skillFiles, err := downloadSkillFiles(ctx, f, ft, manifest)
+	skillFiles, err := LoadSkillFiles(manifest)
 	if err != nil {
 		return err
 	}
@@ -121,18 +115,17 @@ func runInstall(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStre
 	return nil
 }
 
-func fetchManifestWithSpinner(ctx context.Context, f cmdutil.Factory, ft *fetcher) (*Manifest, error) {
+func loadManifestWithSpinner(ctx context.Context, f cmdutil.Factory) (*Manifest, error) {
 	var sp interface{ Stop(string) }
 	if status := f.Status(); status != nil {
-		sp, _ = status.Spinner(ctx, "Fetching skills manifest...")
+		sp, _ = status.Spinner(ctx, "Loading skills manifest...")
 	}
-	manifest, err := ft.FetchManifest(ctx)
+	manifest, err := LoadManifest()
 	if sp != nil {
 		sp.Stop("")
 	}
 	if err != nil {
-		return nil, fmt.Errorf("could not fetch skills: %w\n\n"+
-			"Check your internet connection or visit https://github.com/verda-cloud/verda-ai-skills", err)
+		return nil, fmt.Errorf("could not load skills: %w", err)
 	}
 	return manifest, nil
 }
@@ -155,28 +148,6 @@ func confirmInstall(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IO
 		return errCanceled
 	}
 	return nil
-}
-
-func downloadSkillFiles(ctx context.Context, f cmdutil.Factory, ft *fetcher, manifest *Manifest) (map[string]string, error) {
-	var sp interface{ Stop(string) }
-	if status := f.Status(); status != nil {
-		sp, _ = status.Spinner(ctx, "Downloading skill files...")
-	}
-	skillFiles := make(map[string]string, len(manifest.Skills))
-	for _, name := range manifest.Skills {
-		content, fetchErr := ft.FetchSkillFile(ctx, name)
-		if fetchErr != nil {
-			if sp != nil {
-				sp.Stop("")
-			}
-			return nil, fetchErr
-		}
-		skillFiles[name] = content
-	}
-	if sp != nil {
-		sp.Stop("")
-	}
-	return skillFiles, nil
 }
 
 func installAndPrint(ioStreams cmdutil.IOStreams, selectedAgents []*Agent, manifest *Manifest, skillFiles map[string]string) error {

@@ -3,8 +3,6 @@ package skills
 import (
 	"bytes"
 	"context"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -13,22 +11,6 @@ import (
 
 	cmdutil "github/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
-
-func newTestServer(t *testing.T) *httptest.Server {
-	t.Helper()
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/verda-cloud/verda-ai-skills/main/manifest.json":
-			w.Write([]byte(`{"version":"1.0.0","skills":["verda-cloud.md","verda-commands.md"],"agents":{"claude-code":{"display_name":"Claude Code","scope":"global","target":"~/.claude/skills/","method":"copy"}}}`))
-		case "/verda-cloud/verda-ai-skills/main/skills/verda-cloud.md":
-			w.Write([]byte("# Verda Cloud\nDecision engine content"))
-		case "/verda-cloud/verda-ai-skills/main/skills/verda-commands.md":
-			w.Write([]byte("# Verda Commands\nCommand reference content"))
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-}
 
 func TestInstallCopy(t *testing.T) {
 	t.Parallel()
@@ -103,8 +85,6 @@ func TestInstallAppend_Idempotent(t *testing.T) {
 
 func TestRunInstall_NonInteractive(t *testing.T) {
 	t.Parallel()
-	srv := newTestServer(t)
-	defer srv.Close()
 
 	targetDir := t.TempDir()
 	statePath := filepath.Join(t.TempDir(), "skills.json")
@@ -117,7 +97,6 @@ func TestRunInstall_NonInteractive(t *testing.T) {
 	opts := &installOptions{
 		agents:    []string{"claude-code"},
 		statePath: statePath,
-		fetcher:   &fetcher{baseURL: srv.URL, client: srv.Client()},
 		agentOverrides: map[string]*Agent{
 			"claude-code": {
 				Name: "claude-code", DisplayName: "Claude Code",
@@ -136,8 +115,8 @@ func TestRunInstall_NonInteractive(t *testing.T) {
 		t.Fatal("verda-commands.md not installed")
 	}
 	state, _ := LoadState(statePath)
-	if state.Version != "1.0.0" {
-		t.Fatalf("expected version 1.0.0, got %q", state.Version)
+	if state.Version == "" {
+		t.Fatal("expected non-empty version in state")
 	}
 	if !state.HasAgent("claude-code") {
 		t.Fatal("expected claude-code in state")
@@ -146,8 +125,6 @@ func TestRunInstall_NonInteractive(t *testing.T) {
 
 func TestRunInstall_UserCancels(t *testing.T) {
 	t.Parallel()
-	srv := newTestServer(t)
-	defer srv.Close()
 
 	mock := tuitest.New().AddConfirm(false)
 	f := cmdutil.NewTestFactory(mock)
@@ -157,7 +134,6 @@ func TestRunInstall_UserCancels(t *testing.T) {
 	opts := &installOptions{
 		agents:    []string{"claude-code"},
 		statePath: filepath.Join(t.TempDir(), "skills.json"),
-		fetcher:   &fetcher{baseURL: srv.URL, client: srv.Client()},
 	}
 
 	if err := runInstall(context.Background(), f, ioStreams, opts); err != nil {

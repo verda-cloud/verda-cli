@@ -1,26 +1,18 @@
 package skills
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
+
+	embeddedskills "github/verda-cloud/verda-cli/internal/skills"
 )
 
-const (
-	skillsRepo       = "verda-cloud/verda-ai-skills"
-	defaultBaseURL   = "https://raw.githubusercontent.com"
-	branch           = "main"
-	fetchTimeout     = 30 * time.Second
-	defaultAgentName = "claude-code"
-)
+const defaultAgentName = "claude-code"
 
-// Manifest describes the structure of the remote skill repository manifest.
+// Manifest describes the structure of the skill repository manifest.
 type Manifest struct {
 	Version string            `json:"version"`
 	Skills  []string          `json:"skills"`
@@ -28,7 +20,7 @@ type Manifest struct {
 }
 
 // Agent describes an AI coding agent target for skill installation.
-// Agent definitions are fetched from the manifest, not hardcoded.
+// Agent definitions come from the embedded manifest and optional user overrides.
 type Agent struct {
 	Name        string `json:"-"` // set from the map key
 	DisplayName string `json:"display_name"`
@@ -103,59 +95,56 @@ func (m *Manifest) AgentDisplayLabels() []string {
 	return labels
 }
 
-type fetcher struct {
-	baseURL string
-	client  *http.Client
-}
-
-// NewFetcher creates a fetcher configured for the production skills repository.
-func NewFetcher() *fetcher {
-	return &fetcher{
-		baseURL: defaultBaseURL,
-		client:  &http.Client{Timeout: fetchTimeout},
-	}
-}
-
-// FetchManifest downloads and parses manifest.json from the skills repository.
-func (f *fetcher) FetchManifest(ctx context.Context) (*Manifest, error) {
-	url := fmt.Sprintf("%s/%s/%s/manifest.json", f.baseURL, skillsRepo, branch)
-	data, err := f.get(ctx, url)
-	if err != nil {
-		return nil, fmt.Errorf("fetching manifest: %w", err)
-	}
+// LoadManifest parses the embedded manifest and merges user-defined agents.
+func LoadManifest() (*Manifest, error) {
 	var m Manifest
-	if err := json.Unmarshal(data, &m); err != nil {
+	if err := json.Unmarshal(embeddedskills.ManifestData(), &m); err != nil {
 		return nil, fmt.Errorf("parsing manifest: %w", err)
 	}
 	// Populate agent Name field from map keys.
 	for name, agent := range m.Agents {
 		agent.Name = name
 	}
+	mergeUserAgents(&m)
 	return &m, nil
 }
 
-// FetchSkillFile downloads a single skill file by name from the skills repository.
-func (f *fetcher) FetchSkillFile(ctx context.Context, name string) (string, error) {
-	url := fmt.Sprintf("%s/%s/%s/skills/%s", f.baseURL, skillsRepo, branch, name)
-	data, err := f.get(ctx, url)
-	if err != nil {
-		return "", fmt.Errorf("fetching skill %s: %w", name, err)
+// LoadSkillFiles reads all skill files listed in the manifest from the embedded filesystem.
+func LoadSkillFiles(m *Manifest) (map[string]string, error) {
+	files := make(map[string]string, len(m.Skills))
+	for _, name := range m.Skills {
+		content, err := embeddedskills.ReadSkillFile(name)
+		if err != nil {
+			return nil, fmt.Errorf("reading skill %s: %w", name, err)
+		}
+		files[name] = content
 	}
-	return string(data), nil
+	return files, nil
 }
 
-func (f *fetcher) get(ctx context.Context, url string) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
+// userAgentsFile is the structure of ~/.verda/agents.json.
+type userAgentsFile struct {
+	Agents map[string]*Agent `json:"agents"`
+}
+
+// mergeUserAgents reads ~/.verda/agents.json and merges user-defined agents into
+// the manifest. User entries override built-in agents with the same key.
+// Silent no-op if the file doesn't exist or is malformed.
+func mergeUserAgents(m *Manifest) {
+	home, err := os.UserHomeDir()
 	if err != nil {
-		return nil, err
+		return
 	}
-	resp, err := f.client.Do(req)
+	data, err := os.ReadFile(filepath.Join(home, ".verda", "agents.json"))
 	if err != nil {
-		return nil, err
+		return
 	}
-	defer resp.Body.Close() //nolint:errcheck // best-effort close
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HTTP %d for %s", resp.StatusCode, url)
+	var uf userAgentsFile
+	if err := json.Unmarshal(data, &uf); err != nil {
+		return
 	}
-	return io.ReadAll(resp.Body)
+	for name, agent := range uf.Agents {
+		agent.Name = name
+		m.Agents[name] = agent
+	}
 }

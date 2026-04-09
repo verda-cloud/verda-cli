@@ -11,7 +11,6 @@ import (
 
 type statusOptions struct {
 	statePath string
-	fetcher   *fetcher
 }
 
 type statusOutput struct {
@@ -64,14 +63,10 @@ func runStatus(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStrea
 		Agents:    state.Agents,
 	}
 
-	// Check for updates (best-effort). Also used to resolve agent display names.
+	// Load manifest to resolve agent display names and check version.
 	var manifest *Manifest
 	if out.Installed {
-		ft := opts.fetcher
-		if ft == nil {
-			ft = NewFetcher()
-		}
-		if m, fetchErr := ft.FetchManifest(ctx); fetchErr == nil {
+		if m, loadErr := LoadManifest(); loadErr == nil {
 			manifest = m
 			out.Latest = m.Version
 			out.UpdateAvailable = m.Version != state.Version

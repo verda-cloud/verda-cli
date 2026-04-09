@@ -1,88 +1,66 @@
 package skills
 
 import (
-	"context"
-	"net/http"
-	"net/http/httptest"
 	"testing"
 )
 
-const testManifestJSON = `{
-	"version":"1.2.0",
-	"skills":["verda-cloud.md","verda-commands.md"],
-	"agents":{
-		"claude-code":{"display_name":"Claude Code","scope":"global","target":"~/.claude/skills/","method":"copy"},
-		"cursor":{"display_name":"Cursor","scope":"project","target":".cursor/rules/","method":"copy"},
-		"codex":{"display_name":"Codex","scope":"project","target":"AGENTS.md","method":"append"}
-	}
-}`
-
-func TestFetchManifest(t *testing.T) {
+func TestLoadManifest(t *testing.T) {
 	t.Parallel()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/verda-cloud/verda-ai-skills/main/manifest.json" {
-			http.NotFound(w, r)
-			return
-		}
-		w.Write([]byte(testManifestJSON))
-	}))
-	defer srv.Close()
-
-	f := &fetcher{baseURL: srv.URL, client: srv.Client()}
-	m, err := f.FetchManifest(context.Background())
+	m, err := LoadManifest()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if m.Version != "1.2.0" {
-		t.Fatalf("expected version 1.2.0, got %q", m.Version)
+	if m.Version == "" {
+		t.Fatal("expected non-empty version")
 	}
-	if len(m.Skills) != 2 {
-		t.Fatalf("expected 2 skills, got %d", len(m.Skills))
+	if len(m.Skills) == 0 {
+		t.Fatal("expected at least one skill")
 	}
-	if len(m.Agents) != 3 {
-		t.Fatalf("expected 3 agents, got %d", len(m.Agents))
+	if len(m.Agents) == 0 {
+		t.Fatal("expected at least one agent")
 	}
-	cc := m.Agents["claude-code"]
+	cc, ok := m.Agents["claude-code"]
+	if !ok {
+		t.Fatal("expected claude-code agent")
+	}
 	if cc.Name != "claude-code" {
 		t.Fatalf("expected agent Name 'claude-code', got %q", cc.Name)
 	}
-	if cc.DisplayName != "Claude Code" {
-		t.Fatalf("expected display name 'Claude Code', got %q", cc.DisplayName)
-	}
 }
 
-func TestFetchSkillFile(t *testing.T) {
+func TestLoadSkillFiles(t *testing.T) {
 	t.Parallel()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/verda-cloud/verda-ai-skills/main/skills/verda-cloud.md" {
-			http.NotFound(w, r)
-			return
-		}
-		w.Write([]byte("# Verda Cloud Skill\ntest content"))
-	}))
-	defer srv.Close()
-
-	f := &fetcher{baseURL: srv.URL, client: srv.Client()}
-	content, err := f.FetchSkillFile(context.Background(), "verda-cloud.md")
+	m, err := LoadManifest()
+	if err != nil {
+		t.Fatalf("loading manifest: %v", err)
+	}
+	files, err := LoadSkillFiles(m)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if content != "# Verda Cloud Skill\ntest content" {
-		t.Fatalf("unexpected content: %q", content)
+	if len(files) != len(m.Skills) {
+		t.Fatalf("expected %d files, got %d", len(m.Skills), len(files))
+	}
+	for name, content := range files {
+		if content == "" {
+			t.Fatalf("expected non-empty content for skill %q", name)
+		}
 	}
 }
 
-func TestFetchManifest_HTTPError(t *testing.T) {
+func TestMergeUserAgents(t *testing.T) {
 	t.Parallel()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
-	}))
-	defer srv.Close()
-
-	f := &fetcher{baseURL: srv.URL, client: srv.Client()}
-	_, err := f.FetchManifest(context.Background())
-	if err == nil {
-		t.Fatal("expected error for 404 response")
+	// mergeUserAgents should be a no-op when ~/.verda/agents.json doesn't exist.
+	// Verify the manifest still has its built-in agents after the call.
+	m, err := LoadManifest()
+	if err != nil {
+		t.Fatalf("loading manifest: %v", err)
+	}
+	if _, ok := m.Agents["claude-code"]; !ok {
+		t.Fatal("expected claude-code agent to survive mergeUserAgents")
+	}
+	if len(m.Agents) == 0 {
+		t.Fatal("expected agents to survive mergeUserAgents")
 	}
 }
 
