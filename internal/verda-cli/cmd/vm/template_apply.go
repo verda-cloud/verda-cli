@@ -24,16 +24,10 @@ func resolveCreateInputs(
 	client *verda.Client,
 	opts *createOptions,
 ) (done bool, err error) {
-	fromFlagSet := cmd.Flags().Changed("from")
-
-	// Only load templates when --from is explicitly used.
-	if fromFlagSet {
-		applied, err := handleTemplateFrom(cmd.Context(), f, ioStreams, client, opts)
-		if err != nil {
+	// Load template when --from is provided.
+	if opts.From != "" {
+		if err := applyTemplateFrom(cmd.Context(), f, ioStreams, client, opts); err != nil {
 			return true, err
-		}
-		if !applied {
-			return true, nil // user canceled picker
 		}
 	}
 
@@ -47,28 +41,28 @@ func resolveCreateInputs(
 	return false, nil
 }
 
-// handleTemplateFrom loads a template (by ref or picker), applies it to opts,
-// resolves SSH key / startup script names to IDs, and prints the summary.
-//
-// handleTemplateFrom loads a template (by name/path or via picker when --from
-// has no value), applies it to opts, resolves names, and prints a summary.
-// Returns true if a template was applied, false if the user canceled.
-func handleTemplateFrom(
+// applyTemplateFrom loads a template by name or path, applies its values
+// to opts, resolves SSH key / startup script names to IDs, and prints a summary.
+func applyTemplateFrom(
 	ctx context.Context,
 	f cmdutil.Factory,
 	ioStreams cmdutil.IOStreams,
 	client *verda.Client,
 	opts *createOptions,
-) (applied bool, err error) {
-	// NoOptDefVal=" " is the sentinel for --from without a value.
-	ref := strings.TrimSpace(opts.From)
-
-	tmpl, err := loadTemplate(ctx, f, ref, false)
+) error {
+	verdaDir, err := clioptions.VerdaDir()
 	if err != nil {
-		return false, err
+		return err
 	}
-	if tmpl == nil {
-		return false, nil // user canceled picker
+	baseDir := filepath.Join(verdaDir, "templates")
+
+	path, err := template.Resolve(baseDir, "vm", opts.From)
+	if err != nil {
+		return err
+	}
+	tmpl, err := template.LoadFromPath(path)
+	if err != nil {
+		return err
 	}
 
 	applyTemplate(tmpl, opts)
@@ -82,65 +76,7 @@ func handleTemplateFrom(
 		_, _ = fmt.Fprintf(ioStreams.ErrOut, "  Warning: %s -- will prompt during wizard\n", w)
 	}
 
-	return true, nil
-}
-
-// loadTemplate resolves and loads a template.
-// - If ref is non-empty: resolve by name or path using template.Resolve()
-// - If ref is empty: show a picker of available VM templates
-//   - If allowScratch is true: add "Start from scratch" option at the end
-//   - If allowScratch is false and no templates exist: return error
-//
-// Returns nil if user cancels or selects "Start from scratch".
-func loadTemplate(ctx context.Context, f cmdutil.Factory, ref string, allowScratch bool) (*template.Template, error) {
-	verdaDir, err := clioptions.VerdaDir()
-	if err != nil {
-		return nil, err
-	}
-	baseDir := filepath.Join(verdaDir, "templates")
-
-	if ref != "" {
-		path, err := template.Resolve(baseDir, "vm", ref)
-		if err != nil {
-			return nil, err
-		}
-		return template.LoadFromPath(path)
-	}
-
-	// No ref: show a picker.
-	entries, err := template.List(baseDir, "vm")
-	if err != nil {
-		return nil, err
-	}
-
-	if len(entries) == 0 {
-		if !allowScratch {
-			return nil, fmt.Errorf("no VM templates found in %s", filepath.Join(baseDir, "vm"))
-		}
-		// No templates and scratch allowed: skip picker, treat as scratch.
-		return nil, nil
-	}
-
-	// Build labels for the picker.
-	labels := make([]string, 0, len(entries)+1)
-	for _, e := range entries {
-		labels = append(labels, fmt.Sprintf("%-20s  %s", e.Name, e.Description))
-	}
-	if allowScratch {
-		labels = append(labels, "Start from scratch")
-	}
-
-	idx, err := f.Prompter().Select(ctx, "Select a template:", labels)
-	if err != nil {
-		return nil, err
-	}
-
-	// "Start from scratch" is the last entry when allowScratch is true.
-	if allowScratch && idx == len(entries) {
-		return nil, nil
-	}
-
-	return template.LoadFromPath(entries[idx].Path)
+	return nil
 }
 
 // applyTemplate pre-fills createOptions from a template.
