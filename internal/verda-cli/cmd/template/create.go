@@ -3,6 +3,8 @@ package template
 import (
 	"fmt"
 	"path/filepath"
+	"regexp"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -68,10 +70,18 @@ func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 	// 3. Get and validate template name (re-prompt on invalid input).
 	for {
 		if name == "" {
-			name, err = prompter.TextInput(ctx, "Template name (lowercase, hyphens)")
+			name, err = prompter.TextInput(ctx, "Template name")
 			if err != nil {
 				return nil //nolint:nilerr // user cancellation (Ctrl+C) is not an error
 			}
+		}
+
+		// Auto-format: lowercase, replace spaces/underscores with hyphens,
+		// strip invalid characters.
+		normalized := normalizeName(name)
+		if normalized != name {
+			_, _ = fmt.Fprintf(ioStreams.ErrOut, "  Reformatted: %s\n", normalized)
+			name = normalized
 		}
 
 		if err := ValidateName(name); err != nil {
@@ -136,4 +146,22 @@ func vmResultToTemplate(r *vm.TemplateResult) *Template {
 		}}
 	}
 	return tmpl
+}
+
+// invalidChars matches anything that is not lowercase alphanumeric or hyphen.
+var invalidChars = regexp.MustCompile(`[^a-z0-9-]+`)
+
+// normalizeName auto-formats a template name: lowercases, replaces
+// spaces and underscores with hyphens, strips other invalid characters,
+// and collapses multiple hyphens.
+func normalizeName(name string) string {
+	s := strings.ToLower(strings.TrimSpace(name))
+	s = strings.NewReplacer(" ", "-", "_", "-").Replace(s)
+	s = invalidChars.ReplaceAllString(s, "")
+	// Collapse multiple hyphens.
+	for strings.Contains(s, "--") {
+		s = strings.ReplaceAll(s, "--", "-")
+	}
+	s = strings.Trim(s, "-")
+	return s
 }
