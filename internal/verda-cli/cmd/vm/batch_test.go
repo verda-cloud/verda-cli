@@ -30,7 +30,7 @@ func TestBatchRejectsAllWithID(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when combining --all with --id")
 	}
-	if !strings.Contains(err.Error(), "cannot combine --all/--hostname with --id") {
+	if !strings.Contains(err.Error(), "cannot combine --all with --id") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -50,8 +50,55 @@ func TestBatchRejectsAllWithPositionalArg(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when combining --all with positional arg")
 	}
-	if !strings.Contains(err.Error(), "cannot combine --all/--hostname with --id") {
+	if !strings.Contains(err.Error(), "cannot combine --all with --id") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestFiltersRequireAll(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	ioStreams := cmdutil.IOStreams{Out: &buf, ErrOut: &buf}
+	f := &cmdutil.TestFactory{AgentModeOverride: true}
+
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "hostname without all",
+			args: []string{"vm", "shutdown", "--hostname", "test-*"},
+			want: "--hostname can only be used with --all",
+		},
+		{
+			name: "status without all",
+			args: []string{"vm", "shutdown", "--status", "running"},
+			want: "--status can only be used with --all",
+		},
+		{
+			name: "both filters without all",
+			args: []string{"vm", "shutdown", "--status", "running", "--hostname", "test-*"},
+			want: "--status and --hostname can only be used with --all",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			root := &cobra.Command{Use: "verda", SilenceUsage: true, SilenceErrors: true}
+			root.AddCommand(NewCmdVM(f, ioStreams))
+			root.SetArgs(tt.args)
+
+			err := root.Execute()
+			if err == nil {
+				t.Fatal("expected error for filter without --all")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("expected %q, got: %v", tt.want, err)
+			}
+		})
 	}
 }
 

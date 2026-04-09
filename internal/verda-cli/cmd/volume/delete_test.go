@@ -2,6 +2,7 @@ package volume
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -57,6 +58,26 @@ func TestDeleteAgentModeRequiresYes(t *testing.T) {
 	err := root.Execute()
 	if err == nil {
 		t.Fatal("expected error: agent mode batch requires --yes")
+	}
+}
+
+func TestDeleteStatusRequiresAll(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	ioStreams := cmdutil.IOStreams{Out: &buf, ErrOut: &buf}
+	f := cmdutil.NewTestFactory(nil)
+
+	root := &cobra.Command{Use: "verda", SilenceUsage: true, SilenceErrors: true}
+	root.AddCommand(NewCmdVolume(f, ioStreams))
+	root.SetArgs([]string{"volume", "delete", "--status", "detached"})
+
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("expected error for --status without --all")
+	}
+	if !strings.Contains(err.Error(), "--status can only be used with --all") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
