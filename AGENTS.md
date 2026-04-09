@@ -2,18 +2,27 @@
 
 Read `CLAUDE.md` first. This file defines how you execute, not what the project is.
 
-## Startup Sequence
+## Mandatory Read-First, Plan-First Workflow
 
-Before writing any code:
+Do NOT write code until you have completed all steps below. No exceptions.
 
-1. Read `CLAUDE.md` (root) — architecture, conventions, pricing rules
-2. Read `CLAUDE.md` in the target command directory — domain-specific gotchas
-3. Read `.ai/skills/new-command.md` if adding or modifying a command
-4. Run `make test` to confirm the repo is green before you start
+**Step 1 — Read** (always, every task):
+1. `CLAUDE.md` (root) — architecture, conventions, pricing rules
+2. `CLAUDE.md` in the target command directory (e.g. `cmd/vm/CLAUDE.md`) — domain gotchas
+3. `README.md` in the target command directory — usage, flags, examples
+4. `.ai/skills/new-command.md` if adding or modifying a command
+
+**Step 2 — Verify** (always):
+5. Run `make test` to confirm the repo is green before you start
+
+**Step 3 — Plan** (required for non-trivial changes):
+6. State what you will change and why before writing code
+7. For risky areas (see table below): write a plan, get approval, then code
+
+Skipping these steps leads to pattern violations, broken dual-mode, and pricing bugs.
 
 ## Execution Rules
 
-- **Plan before coding** when touching: pricing, auth, wizard flows, agent-mode, or shared utilities
 - **Follow existing patterns** — find the nearest similar command, match its structure
 - **Preserve dual mode** — every command must work interactive AND non-interactive. Never build one without the other
 - **Never modify `verdagostack`** directly — describe needed changes for the maintainer
