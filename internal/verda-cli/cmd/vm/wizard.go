@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -114,7 +115,7 @@ func RunTemplateWizard(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil
 		StorageType:  verda.VolumeTypeNVMe,
 	}
 
-	flow := buildCreateFlow(f.VerdaClient, opts, WizardModeTemplate)
+	flow := buildCreateFlow(ctx, f.VerdaClient, opts, WizardModeTemplate, ioStreams.ErrOut)
 	engine := wizard.NewEngine(f.Prompter(), f.Status(), wizard.WithOutput(ioStreams.ErrOut))
 	if err := engine.Run(ctx, flow); err != nil {
 		return nil, err
@@ -152,7 +153,7 @@ func optsToTemplateResult(opts *createOptions) *TemplateResult {
 //	billing-type → contract → kind → instance-type → location →
 //	image → os-volume-size → storage-size → ssh-keys →
 //	startup-script → hostname → description
-func buildCreateFlow(getClient clientFunc, opts *createOptions, mode WizardMode) *wizard.Flow {
+func buildCreateFlow(ctx context.Context, getClient clientFunc, opts *createOptions, mode WizardMode, errOut io.Writer) *wizard.Flow {
 	cache := &apiCache{}
 
 	steps := []wizard.Step{
@@ -171,7 +172,7 @@ func buildCreateFlow(getClient clientFunc, opts *createOptions, mode WizardMode)
 		steps = append(steps,
 			stepHostname(opts),
 			stepDescription(opts),
-			stepConfirmDeploy(getClient, cache, opts),
+			stepConfirmDeploy(ctx, errOut, getClient, cache, opts),
 		)
 	}
 
@@ -1155,7 +1156,7 @@ func withSpinner[T any](ctx context.Context, status tui.Status, msg string, fn f
 
 // --- Step 13: Deployment Summary & Confirm ---
 
-func stepConfirmDeploy(getClient clientFunc, cache *apiCache, opts *createOptions) wizard.Step {
+func stepConfirmDeploy(ctx context.Context, errOut io.Writer, getClient clientFunc, cache *apiCache, opts *createOptions) wizard.Step {
 	return wizard.Step{
 		Name:        "confirm-deploy",
 		Description: "Deploy now?",
@@ -1164,8 +1165,8 @@ func stepConfirmDeploy(getClient clientFunc, cache *apiCache, opts *createOption
 		Default: func(_ map[string]any) any {
 			// Ensure pricing data is available (may be missing when
 			// steps were skipped via --from template pre-fill).
-			ensurePricingCache(getClient, cache, opts)
-			renderDeploymentSummary(opts, cache)
+			ensurePricingCache(ctx, getClient, cache)
+			renderDeploymentSummary(errOut, opts, cache)
 			return true
 		},
 		Setter: func(v any) {
@@ -1182,12 +1183,11 @@ func stepConfirmDeploy(getClient clientFunc, cache *apiCache, opts *createOption
 // ensurePricingCache populates the apiCache with instance type and volume
 // type pricing data if it's missing. This happens when wizard steps were
 // skipped because a template pre-filled the values.
-func ensurePricingCache(getClient clientFunc, cache *apiCache, _ *createOptions) {
+func ensurePricingCache(ctx context.Context, getClient clientFunc, cache *apiCache) {
 	client, err := getClient()
 	if err != nil {
 		return
 	}
-	ctx := context.Background()
 
 	// Fetch instance types if missing.
 	if cache.instanceTypes == nil {
@@ -1218,7 +1218,7 @@ func volumeHourlyPrice(monthlyPerGB float64, sizeGB int) float64 {
 	return math.Ceil(monthlyPerGB*float64(sizeGB)/hoursInMonth*10000) / 10000
 }
 
-func renderDeploymentSummary(opts *createOptions, cache *apiCache) {
+func renderDeploymentSummary(w io.Writer, opts *createOptions, cache *apiCache) {
 	bold := lipgloss.NewStyle().Bold(true)
 	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 	accent := lipgloss.NewStyle().Foreground(lipgloss.Color("14"))
@@ -1282,17 +1282,17 @@ func renderDeploymentSummary(opts *createOptions, cache *apiCache) {
 	}
 
 	// Print summary.
-	_, _ = fmt.Fprintf(os.Stderr, "\n  %s\n", bold.Render("Deployment Summary"))
+	_, _ = fmt.Fprintf(w, "\n  %s\n", bold.Render("Deployment Summary"))
 
 	billing := "On-Demand"
 	if opts.IsSpot {
 		billing = "Spot Instance"
 	}
-	_, _ = fmt.Fprintf(os.Stderr, "  %s\n", dim.Render(billing))
-	_, _ = fmt.Fprintf(os.Stderr, "  %s\n\n", dim.Render(strings.Repeat("─", 50)))
+	_, _ = fmt.Fprintf(w, "  %s\n", dim.Render(billing))
+	_, _ = fmt.Fprintf(w, "  %s\n\n", dim.Render(strings.Repeat("─", 50)))
 
 	// Instance.
-	_, _ = fmt.Fprintf(os.Stderr, "  %s\n", accent.Render("Instance"))
+	_, _ = fmt.Fprintf(w, "  %s\n", accent.Render("Instance"))
 	var computePriceStr string
 	if instUnits > 1 {
 		perUnit := computeHourly / float64(instUnits)
@@ -1300,38 +1300,38 @@ func renderDeploymentSummary(opts *createOptions, cache *apiCache) {
 	} else {
 		computePriceStr = fmt.Sprintf("$%.4f/hr", computeHourly)
 	}
-	_, _ = fmt.Fprintf(os.Stderr, "    %-40s %s\n", instLabel, priceStyle.Render(computePriceStr))
-	_, _ = fmt.Fprintf(os.Stderr, "    %s\n\n", dim.Render(opts.LocationCode))
+	_, _ = fmt.Fprintf(w, "    %-40s %s\n", instLabel, priceStyle.Render(computePriceStr))
+	_, _ = fmt.Fprintf(w, "    %s\n\n", dim.Render(opts.LocationCode))
 
 	// OS.
-	_, _ = fmt.Fprintf(os.Stderr, "  %s\n", accent.Render("Operating System"))
+	_, _ = fmt.Fprintf(w, "  %s\n", accent.Render("Operating System"))
 	osLine := fmt.Sprintf("%s  %dGB NVMe", opts.Image, opts.OSVolumeSize)
 	osPrice := fmt.Sprintf("($%.2f/GB/mo)  $%.4f/hr", osVolUnitPrice, osVolPrice)
-	_, _ = fmt.Fprintf(os.Stderr, "    %-40s %s\n\n", osLine, priceStyle.Render(osPrice))
+	_, _ = fmt.Fprintf(w, "    %-40s %s\n\n", osLine, priceStyle.Render(osPrice))
 
 	// Storage volumes.
 	if len(volDetails) > 0 {
-		_, _ = fmt.Fprintf(os.Stderr, "  %s\n", accent.Render("Storage"))
+		_, _ = fmt.Fprintf(w, "  %s\n", accent.Render("Storage"))
 		for _, v := range volDetails {
 			line := fmt.Sprintf("%s  %dGB %s", v.name, v.size, v.volType)
 			vPrice := fmt.Sprintf("($%.2f/GB/mo)  $%.4f/hr", v.unitPrice, v.hourly)
-			_, _ = fmt.Fprintf(os.Stderr, "    %-40s %s\n", line, priceStyle.Render(vPrice))
+			_, _ = fmt.Fprintf(w, "    %-40s %s\n", line, priceStyle.Render(vPrice))
 		}
-		_, _ = fmt.Fprintln(os.Stderr)
+		_, _ = fmt.Fprintln(w)
 	}
 
 	// SSH keys.
 	if len(opts.SSHKeyIDs) > 0 {
-		_, _ = fmt.Fprintf(os.Stderr, "  %s  %d key(s)\n\n", accent.Render("SSH Keys"), len(opts.SSHKeyIDs))
+		_, _ = fmt.Fprintf(w, "  %s  %d key(s)\n\n", accent.Render("SSH Keys"), len(opts.SSHKeyIDs))
 	}
 
 	// Cost breakdown.
-	_, _ = fmt.Fprintf(os.Stderr, "  %s\n", dim.Render(strings.Repeat("─", 50)))
-	_, _ = fmt.Fprintf(os.Stderr, "  %-40s %s\n", "Compute total", fmt.Sprintf("$%.4f/hr", computeHourly))
-	_, _ = fmt.Fprintf(os.Stderr, "  %-40s %s\n", "Storage total", fmt.Sprintf("$%.4f/hr", storageHourly))
+	_, _ = fmt.Fprintf(w, "  %s\n", dim.Render(strings.Repeat("─", 50)))
+	_, _ = fmt.Fprintf(w, "  %-40s %s\n", "Compute total", fmt.Sprintf("$%.4f/hr", computeHourly))
+	_, _ = fmt.Fprintf(w, "  %-40s %s\n", "Storage total", fmt.Sprintf("$%.4f/hr", storageHourly))
 	total := computeHourly + storageHourly
-	_, _ = fmt.Fprintf(os.Stderr, "  %s  %s\n", bold.Render(fmt.Sprintf("%-40s", "Total")), bold.Render(fmt.Sprintf("$%.4f/hr", total)))
-	_, _ = fmt.Fprintf(os.Stderr, "  %s\n\n", dim.Render(strings.Repeat("─", 50)))
+	_, _ = fmt.Fprintf(w, "  %s  %s\n", bold.Render(fmt.Sprintf("%-40s", "Total")), bold.Render(fmt.Sprintf("$%.4f/hr", total)))
+	_, _ = fmt.Fprintf(w, "  %s\n\n", dim.Render(strings.Repeat("─", 50)))
 }
 
 // --- Helpers ---
