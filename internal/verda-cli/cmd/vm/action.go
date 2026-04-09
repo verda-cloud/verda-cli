@@ -378,25 +378,9 @@ func resolveInstanceInteractive(cmd *cobra.Command, f cmdutil.Factory, ioStreams
 }
 
 func selectInstance(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client *verda.Client, statusFilter ...string) (string, error) {
-	instances, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading instances...", func() ([]verda.Instance, error) {
-		return client.Instances.Get(ctx, "")
-	})
+	instances, err := fetchInstances(ctx, f, client, statusFilter...)
 	if err != nil {
 		return "", err
-	}
-
-	// Filter by status when the caller restricts to specific statuses.
-	if len(statusFilter) > 0 {
-		filtered := instances[:0]
-		for i := range instances {
-			for _, s := range statusFilter {
-				if instances[i].Status == s {
-					filtered = append(filtered, instances[i])
-					break
-				}
-			}
-		}
-		instances = filtered
 	}
 
 	if len(instances) == 0 {

@@ -146,7 +146,7 @@ func TestBatchAgentModeRequiresYes(t *testing.T) {
 // Part B: Instance Fetching and Filtering (Task 3)
 // ---------------------------------------------------------------------------
 
-func TestFilterByValidFrom(t *testing.T) {
+func TestFilterByStatus(t *testing.T) {
 	t.Parallel()
 
 	instances := []verda.Instance{
@@ -158,7 +158,8 @@ func TestFilterByValidFrom(t *testing.T) {
 
 	t.Run("shutdown filters to running only", func(t *testing.T) {
 		t.Parallel()
-		filtered := filterByValidFrom(instances, "shutdown")
+		statuses := validFromForAction("shutdown")
+		filtered := filterByStatus(instances, statuses)
 		if len(filtered) != 2 {
 			t.Fatalf("expected 2 running instances, got %d", len(filtered))
 		}
@@ -169,17 +170,18 @@ func TestFilterByValidFrom(t *testing.T) {
 		}
 	})
 
-	t.Run("delete returns all instances", func(t *testing.T) {
+	t.Run("delete has no status restriction", func(t *testing.T) {
 		t.Parallel()
-		filtered := filterByValidFrom(instances, "delete")
-		if len(filtered) != len(instances) {
-			t.Fatalf("expected %d instances (all), got %d", len(instances), len(filtered))
+		statuses := validFromForAction("delete")
+		if len(statuses) != 0 {
+			t.Fatalf("expected no status filter for delete, got %v", statuses)
 		}
 	})
 
 	t.Run("start filters to offline only", func(t *testing.T) {
 		t.Parallel()
-		filtered := filterByValidFrom(instances, "start")
+		statuses := validFromForAction("start")
+		filtered := filterByStatus(instances, statuses)
 		if len(filtered) != 1 {
 			t.Fatalf("expected 1 offline instance, got %d", len(filtered))
 		}

@@ -40,7 +40,7 @@ func runBatchAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOS
 
 	ctx := cmd.Context()
 
-	instances, err := fetchBatchInstances(ctx, f, ioStreams, client, opts)
+	instances, err := fetchBatchInstances(ctx, f, client, opts)
 	if err != nil {
 		return err
 	}
@@ -308,25 +308,9 @@ func writeBatchAgentOutput(ioStreams cmdutil.IOStreams, format, action string, i
 // selectInstances shows a multi-select picker for choosing one or more instances.
 // Returns the selected Instance structs (empty if canceled).
 func selectInstances(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client *verda.Client, statusFilter ...string) ([]verda.Instance, error) {
-	instances, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading instances...", func() ([]verda.Instance, error) {
-		return client.Instances.Get(ctx, "")
-	})
+	instances, err := fetchInstances(ctx, f, client, statusFilter...)
 	if err != nil {
 		return nil, err
-	}
-
-	// Filter by status.
-	if len(statusFilter) > 0 {
-		filtered := instances[:0]
-		for i := range instances {
-			for _, s := range statusFilter {
-				if instances[i].Status == s {
-					filtered = append(filtered, instances[i])
-					break
-				}
-			}
-		}
-		instances = filtered
 	}
 
 	if len(instances) == 0 {
@@ -418,17 +402,18 @@ func runBatchWithInstances(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdu
 
 // fetchBatchInstances loads instances from the API and filters them to those
 // valid for the requested action.
-func fetchBatchInstances(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client *verda.Client, opts *actionOptions) ([]verda.Instance, error) {
-	instances, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading instances...", func() ([]verda.Instance, error) {
-		return client.Instances.Get(ctx, opts.Status)
-	})
-	if err != nil {
-		return nil, err
+func fetchBatchInstances(ctx context.Context, f cmdutil.Factory, client *verda.Client, opts *actionOptions) ([]verda.Instance, error) {
+	// Build status filter: use explicit --status if set, otherwise derive from action.
+	var statusFilter []string
+	if opts.Status != "" {
+		statusFilter = []string{opts.Status}
+	} else {
+		statusFilter = validFromForAction(opts.Action)
 	}
 
-	// When no explicit --status filter is set, filter to statuses valid for this action.
-	if opts.Status == "" {
-		instances = filterByValidFrom(instances, opts.Action)
+	instances, err := fetchInstances(ctx, f, client, statusFilter...)
+	if err != nil {
+		return nil, err
 	}
 
 	// Apply hostname glob filter.
@@ -437,26 +422,6 @@ func fetchBatchInstances(ctx context.Context, f cmdutil.Factory, ioStreams cmdut
 	}
 
 	return instances, nil
-}
-
-// filterByValidFrom keeps only instances whose status is valid for the given action.
-// If the action has no status restriction (e.g. delete), all instances are returned.
-func filterByValidFrom(instances []verda.Instance, action string) []verda.Instance {
-	validStatuses := validFromForAction(action)
-	if len(validStatuses) == 0 {
-		return instances
-	}
-
-	filtered := make([]verda.Instance, 0, len(instances))
-	for i := range instances {
-		for _, s := range validStatuses {
-			if instances[i].Status == s {
-				filtered = append(filtered, instances[i])
-				break
-			}
-		}
-	}
-	return filtered
 }
 
 // filterByHostname keeps only instances whose hostname matches the glob pattern.
