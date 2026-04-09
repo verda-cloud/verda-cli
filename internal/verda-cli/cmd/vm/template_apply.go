@@ -94,7 +94,11 @@ func handleTemplateFrom(
 	}
 
 	applyTemplate(tmpl, opts)
-	warnings := resolveTemplateNames(ctx, client, tmpl, opts)
+
+	resolveCtx, resolveCancel := context.WithTimeout(ctx, f.Options().Timeout)
+	defer resolveCancel()
+	warnings := resolveTemplateNames(resolveCtx, client, tmpl, opts)
+
 	printTemplateSummary(ioStreams, tmpl)
 	for _, w := range warnings {
 		_, _ = fmt.Fprintf(ioStreams.ErrOut, "  Warning: %s -- will prompt during wizard\n", w)
@@ -185,6 +189,8 @@ func applyTemplate(tmpl *template.Template, opts *createOptions) {
 		opts.OSVolumeSize = tmpl.OSVolumeSize
 	}
 	if len(tmpl.Storage) > 0 {
+		// Only the first storage entry is applied — the wizard's convenience
+		// flags (StorageSize/StorageType) support a single additional volume.
 		opts.StorageSize = tmpl.Storage[0].Size
 		opts.StorageType = tmpl.Storage[0].Type
 	}
