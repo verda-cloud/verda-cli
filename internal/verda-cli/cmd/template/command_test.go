@@ -3,7 +3,7 @@ package template
 import (
 	"testing"
 
-	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/vm"
+	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/vm"
 )
 
 func TestNormalizeName(t *testing.T) {

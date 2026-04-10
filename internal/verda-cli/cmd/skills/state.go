@@ -9,7 +9,7 @@ import (
 	"slices"
 	"time"
 
-	clioptions "github/verda-cloud/verda-cli/internal/verda-cli/options"
+	clioptions "github.com/verda-cloud/verda-cli/internal/verda-cli/options"
 )
 
 // State tracks which skills version is installed and for which agents.

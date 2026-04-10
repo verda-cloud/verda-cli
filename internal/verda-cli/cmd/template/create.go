@@ -7,8 +7,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	cmdutil "github/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
-	"github/verda-cloud/verda-cli/internal/verda-cli/cmd/vm"
+	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
+	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/vm"
 )
 
 var resourceTypes = []string{"Instance (VM)"}

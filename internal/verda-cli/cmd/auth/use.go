@@ -7,8 +7,8 @@ import (
 	"github.com/spf13/cobra"
 	"go.yaml.in/yaml/v3"
 
-	cmdutil "github/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
-	"github/verda-cloud/verda-cli/internal/verda-cli/options"
+	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
+	"github.com/verda-cloud/verda-cli/internal/verda-cli/options"
 )
 
 // NewCmdUse creates the auth use command.

@@ -9,8 +9,8 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
 
-	cmdutil "github/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
-	"github/verda-cloud/verda-cli/internal/verda-cli/template"
+	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
+	"github.com/verda-cloud/verda-cli/internal/verda-cli/template"
 )
 
 // resolveCreateInputs handles template loading and wizard invocation.

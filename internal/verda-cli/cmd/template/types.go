@@ -1,7 +1,7 @@
 package template
 
 import (
-	tmpl "github/verda-cloud/verda-cli/internal/verda-cli/template"
+	tmpl "github.com/verda-cloud/verda-cli/internal/verda-cli/template"
 )
 
 // Re-export types from the shared template package so that existing

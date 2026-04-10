@@ -9,7 +9,7 @@ import (
 	"github.com/verda-cloud/verdagostack/pkg/tui"
 	tuitest "github.com/verda-cloud/verdagostack/pkg/tui/testing"
 
-	clioptions "github/verda-cloud/verda-cli/internal/verda-cli/options"
+	clioptions "github.com/verda-cloud/verda-cli/internal/verda-cli/options"
 )
 
 // TestFactory is a configurable Factory for use in tests. It implements the

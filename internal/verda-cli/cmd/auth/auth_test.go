@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github/verda-cloud/verda-cli/internal/verda-cli/options"
+	"github.com/verda-cloud/verda-cli/internal/verda-cli/options"
 )
 
 func TestWriteActiveProfile(t *testing.T) {

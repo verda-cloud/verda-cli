@@ -9,7 +9,7 @@ import (
 
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
 
-	cmdutil "github/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
+	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
 
 // testHarness bundles a mock API server, a TestFactory, and captured IOStreams

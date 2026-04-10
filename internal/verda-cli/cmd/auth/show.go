@@ -6,8 +6,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	cmdutil "github/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
-	"github/verda-cloud/verda-cli/internal/verda-cli/options"
+	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
+	"github.com/verda-cloud/verda-cli/internal/verda-cli/options"
 )
 
 // NewCmdShow creates the auth show command.

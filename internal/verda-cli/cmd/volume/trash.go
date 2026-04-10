@@ -10,7 +10,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/verda-cloud/verdagostack/pkg/tui"
 
-	cmdutil "github/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
+	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
 
 // NewCmdTrash creates the volume trash command.
