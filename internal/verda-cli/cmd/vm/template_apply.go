@@ -174,29 +174,44 @@ func resolveTemplateNames(ctx context.Context, ioStreams cmdutil.IOStreams, clie
 	return warnings
 }
 
-// resolveImageName resolves an image name to its ID via the API.
-// For backward compatibility, if the name matches an existing image ID directly,
-// it is used as-is (handles templates created before name-based storage).
+// resolveImageName resolves an image name to its image_type slug via the API.
+// The API expects image_type (e.g. "ubuntu-24.04-cuda-13.0-open-docker"), not
+// the image ID. Filters by instance type when available so incompatible images
+// (e.g. CUDA on CPU) are rejected early with a clear warning.
 func resolveImageName(ctx context.Context, client *verda.Client, name string, opts *createOptions) (warnings []string) {
 	if name == "" {
 		return nil
 	}
-	images, err := client.Images.Get(ctx)
+	var images []verda.Image
+	var err error
+	if opts.InstanceType != "" {
+		images, err = client.Images.GetImagesByInstanceType(ctx, opts.InstanceType)
+	} else {
+		images, err = client.Images.Get(ctx)
+	}
 	if err != nil {
 		return []string{fmt.Sprintf("failed to resolve image name: %v", err)}
 	}
 	// Try matching by name first.
 	for _, img := range images {
 		if img.Name == name {
-			opts.Image = img.ID
+			opts.Image = img.ImageType
 			opts.imageName = img.Name
 			return nil
 		}
 	}
-	// Backward compat: if the value matches an image ID, use it directly.
+	// Match by image_type slug (templates may store this directly).
+	for _, img := range images {
+		if img.ImageType == name {
+			opts.Image = img.ImageType
+			opts.imageName = img.Name
+			return nil
+		}
+	}
+	// Backward compat: if the value matches an image ID, resolve to image_type.
 	for _, img := range images {
 		if img.ID == name {
-			opts.Image = img.ID
+			opts.Image = img.ImageType
 			opts.imageName = img.Name
 			return nil
 		}

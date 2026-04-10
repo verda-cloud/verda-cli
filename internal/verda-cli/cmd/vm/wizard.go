@@ -379,37 +379,43 @@ func stepLocation(getClient clientFunc, cache *apiCache, opts *createOptions, mo
 // --- Step 6: OS Image ---
 
 func stepImage(getClient clientFunc, opts *createOptions) wizard.Step {
-	var imagesByID map[string]string // ID → Name lookup, built by Loader
+	var imageNames map[string]string // ImageType → Name lookup, built by Loader
 	return wizard.Step{
 		Name:        "image",
 		Description: "Operating system image",
 		Prompt:      wizard.SelectPrompt,
 		Required:    true,
-		Loader: func(ctx context.Context, _ tui.Prompter, status tui.Status, _ *wizard.Store) ([]wizard.Choice, error) {
+		DependsOn:   []string{"instance-type"},
+		Loader: func(ctx context.Context, _ tui.Prompter, status tui.Status, store *wizard.Store) ([]wizard.Choice, error) {
 			client, err := getClient()
 			if err != nil {
 				return nil, err
 			}
+			// Filter images by instance type when available.
+			instType, _ := store.Collected()["instance-type"].(string)
 			images, err := cmdutil.WithSpinner(ctx, status, "Loading OS images...", func() ([]verda.Image, error) {
+				if instType != "" {
+					return client.Images.GetImagesByInstanceType(ctx, instType)
+				}
 				return client.Images.Get(ctx)
 			})
 			if err != nil {
 				return nil, fmt.Errorf("fetching images: %w", err)
 			}
-			imagesByID = make(map[string]string, len(images))
+			imageNames = make(map[string]string, len(images))
 			var choices []wizard.Choice
 			for _, img := range images {
 				if img.IsCluster {
 					continue
 				}
-				imagesByID[img.ID] = img.Name
+				imageNames[img.ImageType] = img.Name
 				desc := ""
 				if len(img.Details) > 0 {
 					desc = strings.Join(img.Details, ", ")
 				}
 				choices = append(choices, wizard.Choice{
 					Label:       img.Name,
-					Value:       img.ID,
+					Value:       img.ImageType,
 					Description: desc,
 				})
 			}
@@ -417,10 +423,10 @@ func stepImage(getClient clientFunc, opts *createOptions) wizard.Step {
 		},
 		Default: func(_ map[string]any) any { return opts.Image },
 		Setter: func(v any) {
-			id := v.(string)
-			opts.Image = id
-			if imagesByID != nil {
-				opts.imageName = imagesByID[id]
+			slug := v.(string)
+			opts.Image = slug
+			if imageNames != nil {
+				opts.imageName = imageNames[slug]
 			}
 		},
 		Resetter: func() { opts.Image = ""; opts.imageName = "" },

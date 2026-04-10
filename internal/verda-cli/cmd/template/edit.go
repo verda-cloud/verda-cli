@@ -144,6 +144,13 @@ func buildFieldMenu(tmpl *Template) []editableField {
 					return nil //nolint:nilerr // user canceled
 				}
 				t.Kind = choices[idx]
+				// Clear instance type and image when kind changes — they
+				// may not be compatible with the new kind (e.g. CUDA images
+				// are invalid for CPU instances).
+				if t.InstanceType != "" && !matchKind(t.InstanceType, t.Kind) {
+					t.InstanceType = ""
+				}
+				t.Image = ""
 				return nil
 			},
 		},
@@ -281,9 +288,10 @@ func editInstanceType(ctx context.Context, f cmdutil.Factory, t *Template) error
 		return errors.New("no instance types available")
 	}
 
+	choices = append(choices, "← Back")
 	idx, selErr := f.Prompter().Select(ctx, "Instance type", choices)
-	if selErr != nil {
-		return nil //nolint:nilerr // user canceled
+	if selErr != nil || idx == len(values) {
+		return nil //nolint:nilerr // user canceled or back
 	}
 	t.InstanceType = values[idx]
 	return nil
@@ -323,7 +331,11 @@ func editImage(ctx context.Context, f cmdutil.Factory, t *Template) error {
 	if err != nil {
 		return err
 	}
+	// Filter images by instance type when available.
 	images, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading images...", func() ([]verda.Image, error) {
+		if t.InstanceType != "" {
+			return client.Images.GetImagesByInstanceType(ctx, t.InstanceType)
+		}
 		return client.Images.Get(ctx)
 	})
 	if err != nil {
