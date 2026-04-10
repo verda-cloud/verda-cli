@@ -33,14 +33,24 @@ description: Use when the user mentions Verda Cloud, GPU/CPU VMs, cloud instance
 | **Explore** | "what's available", "show me", "how much" | Discovery only. Do NOT create anything |
 | **Deploy** | "create", "deploy", "spin up", "launch" | Deploy workflow below |
 | **Manage** | "start", "stop", "delete", "SSH" | Find VM first, then act |
-| **Status** | "overview", "status", "what's wrong" | `verda --agent status -o json` for overview; `vm describe` for specific VM |
+| **VM Info** | "my VMs", "instances", "what's running", "what's offline" | `verda --agent vm list -o json` (add `--status` to filter). Use `vm describe <id>` for a specific VM |
+| **Cost** | "balance", "burn rate", "spending", "how much" | `verda --agent cost balance -o json` and/or `cost running -o json` |
+| **Storage** | "volumes", "disks", "storage" | `verda --agent volume list -o json` |
 
-### Explore
+### Explore — Use Specific Commands, Not `status`
 
-- What's available now: `verda --agent vm availability -o json` → shows what's **in stock** with location and pricing. Filter with `--kind gpu` or `--kind cpu` (NOT `--type gpu`). If result is empty or null, tell the user **nothing is in stock** for that kind — do NOT fall back to showing a different kind. **Stop.**
-- Full catalog (all types, not just in stock): `verda --agent instance-types [--gpu|--cpu] -o json` → specs and pricing. **Stop.**
-- Overview/dashboard: `verda --agent status -o json` → instances, volumes, balance, burn rate. **Stop.**
-- Running costs: `verda --agent cost running -o json` → per-instance breakdown. **Stop.**
+Prefer the most specific command for the question. Do NOT use `verda status` as a catch-all.
+
+| Question | Command |
+|----------|---------|
+| What's available / in stock? | `vm availability -o json` (filter: `--kind gpu\|cpu`) |
+| Full catalog / specs / pricing? | `instance-types [--gpu\|--cpu] -o json` |
+| My VMs / instances? | `vm list -o json` (filter: `--status running\|offline`) |
+| Specific VM details? | `vm describe <id> -o json` |
+| Balance / credits? | `cost balance -o json` |
+| Running costs / spend? | `cost running -o json` |
+| My volumes / storage? | `volume list -o json` |
+| Overview / dashboard? | Combine: `vm list` + `cost balance` + `volume list` |
 
 ## Deploy Workflow
 
