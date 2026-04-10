@@ -1,6 +1,11 @@
 # Changelog
 
 
+## [v1.6.2] - 2026-04-10
+- [`1f75209`] Fix: filter images by instance type and use image_type slug
+- [`b313e1b`] Fix: apply template description and improve description default
+- [`5ccbcb7`] Fix: image type in template issue
+
 ## [v1.6.1] - 2026-04-10
 - [`fac64c7`] Fix/skills install claude code dir structure
 
