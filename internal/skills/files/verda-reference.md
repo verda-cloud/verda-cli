@@ -96,13 +96,17 @@ Tell user to run in their terminal:
 
 | Command | Notes |
 |---------|-------|
-| `verda template list -o json` | Lists saved templates |
-| `verda template show vm/<name> -o json` | Note: `vm/` prefix required |
+| `verda template list -o json` | Fields: `resource`, `name`, `description` |
+| `verda template show vm/<name> -o json` | Fields: `InstanceType`, `Location`, `Image`, `SSHKeys[]`, `HostnamePattern`, `Description`. Note: `vm/` prefix required |
 | `verda template delete vm/<name>` | Confirm first |
 | `verda template create` | Interactive — tell user to run |
-| `verda template edit <name>` | Interactive — tell user to run |
+| `verda template edit <name>` | Interactive field editor — tell user to run |
 
-Deploy: `verda --agent vm create --from <name> --hostname <name> --wait --wait-timeout 2m -o json`
+Deploy from template (flags override template values):
+```bash
+verda --agent vm create --from <name> --hostname <name> --wait --wait-timeout 2m -o json
+verda --agent vm create --from <name> --location FIN-03 -o json   # override location
+```
 Hostname patterns: `{random}` → random words, `{location}` → location code
 
 ## Volumes
