@@ -19,6 +19,7 @@ import (
 const (
 	billingTypeSpot = "spot"
 	kindGPU         = "gpu"
+	kindCPU         = "cpu"
 
 	contractPayAsYouGo = "PAY_AS_YOU_GO"
 	contractSpot       = "SPOT"
@@ -78,7 +79,7 @@ func RunTemplateWizard(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil
 
 func runTemplateWizardWithOpts(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *createOptions) (*TemplateResult, error) {
 	flow := buildCreateFlow(ctx, f.VerdaClient, opts, WizardModeTemplate, ioStreams.ErrOut)
-	engine := wizard.NewEngine(f.Prompter(), f.Status(), wizard.WithOutput(ioStreams.ErrOut))
+	engine := wizard.NewEngine(f.Prompter(), f.Status(), wizard.WithOutput(ioStreams.ErrOut), wizard.WithExitConfirmation())
 	if err := engine.Run(ctx, flow); err != nil {
 		return nil, err
 	}
@@ -104,7 +105,7 @@ func optsToTemplateResult(opts *createOptions) *TemplateResult {
 		Description:       opts.templateDescription,
 	}
 	if opts.IsSpot {
-		result.BillingType = "spot"
+		result.BillingType = billingTypeSpot
 	} else {
 		result.BillingType = billingTypeOnDemand
 	}
@@ -258,7 +259,7 @@ func stepKind(opts *createOptions) wizard.Step {
 		Required:    true,
 		Loader: wizard.StaticChoices(
 			wizard.Choice{Label: "GPU", Value: kindGPU, Description: "GPU-accelerated instances"},
-			wizard.Choice{Label: "CPU", Value: "cpu", Description: "CPU-only instances"},
+			wizard.Choice{Label: "CPU", Value: kindCPU, Description: "CPU-only instances"},
 		),
 		Default:  func(_ map[string]any) any { return opts.Kind },
 		Setter:   func(v any) { opts.Kind = v.(string) },
@@ -318,51 +319,17 @@ func stepInstanceType(getClient clientFunc, cache *apiCache, opts *createOptions
 				}
 			}
 
-			var choices []wizard.Choice
-			for i := range types {
-				t := &types[i]
-				if !matchesKind(t.InstanceType, kind) {
-					continue
+			choices := buildInstanceTypeChoices(types, kind, isSpot, availLocs, cache)
+			if len(choices) == 0 {
+				kindLabel := "GPU"
+				if kind == kindCPU {
+					kindLabel = "CPU"
 				}
-				if availLocs != nil && len(availLocs[t.InstanceType]) == 0 {
-					continue // skip unavailable instance types (deploy mode only)
-				}
-				totalPrice := float64(t.PricePerHour)
+				pricingLabel := "on-demand"
 				if isSpot {
-					totalPrice = float64(t.SpotPrice)
+					pricingLabel = "spot"
 				}
-				units := instanceUnits(t)
-				var priceStr string
-				if units > 1 {
-					unitLabel := unitLabelGPU
-					if t.GPU.NumberOfGPUs == 0 {
-						unitLabel = unitLabelVCPU
-					}
-					perUnit := totalPrice / float64(units)
-					priceStr = fmt.Sprintf("$%.3f/%s/hr  $%.3f/hr", perUnit, unitLabel, totalPrice)
-				} else {
-					priceStr = fmt.Sprintf("$%.3f/hr", totalPrice)
-				}
-				label := fmt.Sprintf("%s — %s, %s  %s",
-					t.InstanceType, formatGPU(t), formatMemory(t), priceStr)
-				var desc string
-				if availLocs != nil {
-					locs := availLocs[t.InstanceType]
-					locNames := make([]string, len(locs))
-					for j, code := range locs {
-						if loc, ok := cache.locations[code]; ok {
-							locNames[j] = loc.Code
-						} else {
-							locNames[j] = code
-						}
-					}
-					desc = fmt.Sprintf("[%s]", strings.Join(locNames, ", "))
-				}
-				choices = append(choices, wizard.Choice{
-					Label:       label,
-					Value:       t.InstanceType,
-					Description: desc,
-				})
+				return nil, fmt.Errorf("no %s %s instances are available right now — try a different compute type or billing type", kindLabel, pricingLabel)
 			}
 			return choices, nil
 		},

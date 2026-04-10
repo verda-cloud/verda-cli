@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
-	tuitest "github.com/verda-cloud/verdagostack/pkg/tui/testing"
 	"github.com/verda-cloud/verdagostack/pkg/tui/wizard"
 )
 
@@ -27,20 +26,21 @@ func TestBuildCreateFlowHappyPath(t *testing.T) {
 	}
 
 	// The wizard will prompt for: billing-type, kind, os-volume-size,
-	// hostname, description.
-	mock := tuitest.New()
-	mock.AddSelect(0)           // billing-type: On-Demand
-	mock.AddSelect(0)           // kind: GPU
-	mock.AddTextInput("100")    // os-volume-size
-	mock.AddTextInput("my-gpu") // hostname
-	mock.AddTextInput("")       // description (use default = hostname)
-	mock.AddConfirm(true)       // confirm deploy
-
-	// errClient returns error — API steps skipped via IsSet, confirm step handles error gracefully.
+	// hostname, description, confirm-deploy.
 	ctx := context.Background()
 	errClient := func() (*verda.Client, error) { return nil, errors.New("no client in test") }
 	flow := buildCreateFlow(ctx, errClient, opts, WizardModeDeploy, io.Discard)
-	engine := wizard.NewEngine(mock, nil)
+	engine := wizard.NewEngine(nil, nil,
+		wizard.WithOutput(io.Discard),
+		wizard.WithTestResults(
+			wizard.SelectResult(0),      // billing-type: On-Demand
+			wizard.SelectResult(0),      // kind: GPU
+			wizard.TextResult("100"),    // os-volume-size
+			wizard.TextResult("my-gpu"), // hostname
+			wizard.TextResult(""),       // description (use default = hostname)
+			wizard.ConfirmResult(true),  // confirm deploy
+		),
+	)
 
 	if err := engine.Run(ctx, flow); err != nil {
 		t.Fatalf("wizard Run failed: %v", err)
@@ -75,18 +75,20 @@ func TestBuildCreateFlowSpotSkipsContract(t *testing.T) {
 		VolumeSpecs:     []string{"data:100:NVMe"}, // pre-fill so storage step is skipped
 	}
 
-	mock := tuitest.New()
-	mock.AddSelect(1)            // billing-type: Spot Instance
-	mock.AddSelect(0)            // kind: GPU
-	mock.AddTextInput("50")      // os-volume-size
-	mock.AddTextInput("spot-vm") // hostname
-	mock.AddTextInput("")        // description
-	mock.AddConfirm(true)        // confirm deploy
-
 	ctx := context.Background()
 	errClient := func() (*verda.Client, error) { return nil, errors.New("no client in test") }
 	flow := buildCreateFlow(ctx, errClient, opts, WizardModeDeploy, io.Discard)
-	engine := wizard.NewEngine(mock, nil)
+	engine := wizard.NewEngine(nil, nil,
+		wizard.WithOutput(io.Discard),
+		wizard.WithTestResults(
+			wizard.SelectResult(1),       // billing-type: Spot Instance
+			wizard.SelectResult(0),       // kind: GPU
+			wizard.TextResult("50"),      // os-volume-size
+			wizard.TextResult("spot-vm"), // hostname
+			wizard.TextResult(""),        // description
+			wizard.ConfirmResult(true),   // confirm deploy
+		),
+	)
 
 	if err := engine.Run(ctx, flow); err != nil {
 		t.Fatalf("wizard Run failed: %v", err)
