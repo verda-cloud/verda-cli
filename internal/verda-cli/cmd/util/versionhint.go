@@ -44,7 +44,7 @@ func VersionCachePath() (string, error) {
 // LoadVersionCache reads the version cache from disk.
 // Returns an empty cache (no error) if the file is missing or corrupt.
 func LoadVersionCache(path string) (*VersionCache, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		// Missing file is not an error — just return empty cache.
 		return &VersionCache{}, nil //nolint:nilerr // intentional: missing file → empty cache
