@@ -1,6 +1,9 @@
 # Changelog
 
 
+## [v1.6.0] - 2026-04-10
+- [`820fa11`] Feat: wizard Ctrl+C exit with confirmation
+
 ## [v1.5.1] - 2026-04-10
 - [`08eae30`] Fix: remove RELEASE_NOTES.md from repo and add to .gitignore
 - [`fef8653`] Feat: template improvements — image names, description field, wizard steps
