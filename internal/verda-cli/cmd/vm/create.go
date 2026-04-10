@@ -269,7 +269,7 @@ func missingCreateFlags(opts *createOptions) []string {
 
 func runWizard(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *createOptions) error {
 	flow := buildCreateFlow(ctx, f.VerdaClient, opts, WizardModeDeploy, ioStreams.ErrOut)
-	engine := wizard.NewEngine(f.Prompter(), f.Status(), wizard.WithOutput(ioStreams.ErrOut))
+	engine := wizard.NewEngine(f.Prompter(), f.Status(), wizard.WithOutput(ioStreams.ErrOut), wizard.WithExitConfirmation())
 	return engine.Run(ctx, flow)
 }
 

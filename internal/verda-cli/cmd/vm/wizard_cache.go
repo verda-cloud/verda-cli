@@ -148,6 +148,59 @@ func loadAvailableLocations(ctx context.Context, cache *apiCache, getClient clie
 	return choices, nil
 }
 
+// --- Instance type choices ---
+
+// buildInstanceTypeChoices filters and formats instance types into wizard choices.
+func buildInstanceTypeChoices(types []verda.InstanceTypeInfo, kind string, isSpot bool, availLocs map[string][]string, cache *apiCache) []wizard.Choice {
+	choices := make([]wizard.Choice, 0, len(types))
+	for i := range types {
+		t := &types[i]
+		if !matchesKind(t.InstanceType, kind) {
+			continue
+		}
+		if availLocs != nil && len(availLocs[t.InstanceType]) == 0 {
+			continue
+		}
+		totalPrice := float64(t.PricePerHour)
+		if isSpot {
+			totalPrice = float64(t.SpotPrice)
+		}
+		units := instanceUnits(t)
+		var priceStr string
+		if units > 1 {
+			unitLabel := unitLabelGPU
+			if t.GPU.NumberOfGPUs == 0 {
+				unitLabel = unitLabelVCPU
+			}
+			perUnit := totalPrice / float64(units)
+			priceStr = fmt.Sprintf("$%.3f/%s/hr  $%.3f/hr", perUnit, unitLabel, totalPrice)
+		} else {
+			priceStr = fmt.Sprintf("$%.3f/hr", totalPrice)
+		}
+		label := fmt.Sprintf("%s — %s, %s  %s",
+			t.InstanceType, formatGPU(t), formatMemory(t), priceStr)
+		var desc string
+		if availLocs != nil {
+			locs := availLocs[t.InstanceType]
+			locNames := make([]string, len(locs))
+			for j, code := range locs {
+				if loc, ok := cache.locations[code]; ok {
+					locNames[j] = loc.Code
+				} else {
+					locNames[j] = code
+				}
+			}
+			desc = fmt.Sprintf("[%s]", strings.Join(locNames, ", "))
+		}
+		choices = append(choices, wizard.Choice{
+			Label:       label,
+			Value:       t.InstanceType,
+			Description: desc,
+		})
+	}
+	return choices
+}
+
 // --- Helpers ---
 
 // instanceUnits returns the number of billable units (GPUs or vCPUs).

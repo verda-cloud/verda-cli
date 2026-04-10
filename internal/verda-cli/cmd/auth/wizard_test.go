@@ -2,9 +2,9 @@ package auth
 
 import (
 	"context"
+	"io"
 	"testing"
 
-	tuitest "github.com/verda-cloud/verdagostack/pkg/tui/testing"
 	"github.com/verda-cloud/verdagostack/pkg/tui/wizard"
 )
 
@@ -16,14 +16,16 @@ func TestBuildLoginFlowHappyPath(t *testing.T) {
 		BaseURL: defaultBaseURL,
 	}
 
-	mock := tuitest.New()
-	mock.AddTextInput("staging")                       // profile
-	mock.AddTextInput("https://staging-api.verda.com") // base-url
-	mock.AddTextInput("my-id")                         // client-id
-	mock.AddPassword("my-secret")                      // client-secret
-
 	flow := buildLoginFlow(opts)
-	engine := wizard.NewEngine(mock, nil)
+	engine := wizard.NewEngine(nil, nil,
+		wizard.WithOutput(io.Discard),
+		wizard.WithTestResults(
+			wizard.TextResult("staging"),                       // profile
+			wizard.TextResult("https://staging-api.verda.com"), // base-url
+			wizard.TextResult("my-id"),                         // client-id
+			wizard.TextResult("my-secret"),                     // client-secret (password prompt returns text too)
+		),
+	)
 
 	if err := engine.Run(context.Background(), flow); err != nil {
 		t.Fatalf("wizard Run failed: %v", err)
@@ -53,11 +55,13 @@ func TestBuildLoginFlowWithPresetFlags(t *testing.T) {
 	}
 
 	// Only client-secret needs prompting (profile, base-url, client-id are preset via IsSet).
-	mock := tuitest.New()
-	mock.AddPassword("the-secret")
-
 	flow := buildLoginFlow(opts)
-	engine := wizard.NewEngine(mock, nil)
+	engine := wizard.NewEngine(nil, nil,
+		wizard.WithOutput(io.Discard),
+		wizard.WithTestResults(
+			wizard.TextResult("the-secret"), // client-secret
+		),
+	)
 
 	if err := engine.Run(context.Background(), flow); err != nil {
 		t.Fatalf("wizard Run failed: %v", err)
