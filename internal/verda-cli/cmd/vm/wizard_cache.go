@@ -152,7 +152,7 @@ func loadAvailableLocations(ctx context.Context, cache *apiCache, getClient clie
 
 // buildInstanceTypeChoices filters and formats instance types into wizard choices.
 func buildInstanceTypeChoices(types []verda.InstanceTypeInfo, kind string, isSpot bool, availLocs map[string][]string, cache *apiCache) []wizard.Choice {
-	var choices []wizard.Choice
+	choices := make([]wizard.Choice, 0, len(types))
 	for i := range types {
 		t := &types[i]
 		if !matchesKind(t.InstanceType, kind) {
