@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	cmdutil "github/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
+	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 
 	tuitest "github.com/verda-cloud/verdagostack/pkg/tui/testing"
 )

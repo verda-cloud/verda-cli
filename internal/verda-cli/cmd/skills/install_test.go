@@ -9,7 +9,7 @@ import (
 
 	tuitest "github.com/verda-cloud/verdagostack/pkg/tui/testing"
 
-	cmdutil "github/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
+	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
 
 func TestInstallCopy(t *testing.T) {

@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	embeddedskills "github/verda-cloud/verda-cli/internal/skills"
+	embeddedskills "github.com/verda-cloud/verda-cli/internal/skills"
 )
 
 const defaultAgentName = "claude-code"

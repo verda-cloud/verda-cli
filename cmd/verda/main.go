@@ -6,8 +6,8 @@ import (
 	"os"
 	"strings"
 
-	cmd "github/verda-cloud/verda-cli/internal/verda-cli/cmd"
-	cmdutil "github/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
+	cmd "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd"
+	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
 
 func main() {

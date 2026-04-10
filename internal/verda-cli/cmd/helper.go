@@ -6,7 +6,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
-	"github/verda-cloud/verda-cli/internal/verda-cli/options"
+	"github.com/verda-cloud/verda-cli/internal/verda-cli/options"
 )
 
 const defaultConfigName = "config"

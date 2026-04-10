@@ -10,7 +10,7 @@ import (
 	_ "github.com/verda-cloud/verdagostack/pkg/tui/bubbletea" // registers bubbletea TUI backend
 	"github.com/verda-cloud/verdagostack/pkg/version"
 
-	clioptions "github/verda-cloud/verda-cli/internal/verda-cli/options"
+	clioptions "github.com/verda-cloud/verda-cli/internal/verda-cli/options"
 )
 
 // Factory provides shared resources that are created once in the root command

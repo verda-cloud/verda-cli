@@ -4,7 +4,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github/verda-cloud/verda-cli/internal/verda-cli/options"
+	"github.com/verda-cloud/verda-cli/internal/verda-cli/options"
 )
 
 func defaultConfigFilePath() (string, error) {

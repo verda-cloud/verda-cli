@@ -12,7 +12,7 @@ import (
 	"github.com/verda-cloud/verdagostack/pkg/tui/bubbletea"
 	"github.com/verda-cloud/verdagostack/pkg/tui/wizard"
 
-	cmdutil "github/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
+	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
 
 const (

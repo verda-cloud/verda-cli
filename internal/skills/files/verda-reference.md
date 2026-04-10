@@ -20,7 +20,7 @@ All commands: `--agent -o json` (except `verda ssh` and `verda auth show`).
 | "delete VM", "delete instance", "remove", "destroy", "terminate" | `vm delete <id>` (alias: `rm`) |
 | "template", "saved config", "preset", "my templates" | `template list` (alias: `tmpl`) |
 | "deploy from template", "use template", "quick deploy" | `vm create --from <name>` |
-| "status", "overview", "dashboard", "summary" | `status` (alias: `dash`) |
+| "status", "overview", "dashboard", "summary" | Prefer `vm list` + `cost balance` + `volume list`. Use `status` only if user explicitly wants a single dashboard summary |
 | "what's available", "in stock", "can I get", "available right now" | `vm availability` (real-time stock + pricing by location) |
 | "instance types", "GPU types", "CPU types", "specs", "flavors", "catalog" | `instance-types` (full catalog, not filtered by stock) |
 | "pricing", "how much", "cost per hour" | `instance-types` or `cost estimate` |
@@ -71,14 +71,21 @@ Example: `verda --agent vm shutdown --all --status running --yes --wait -o json`
 
 Note: `shutdown` alias is `stop`. `delete` alias is `rm`.
 
-## Status & Cost
+## Cost
+
+| Command | Key Flags | Output Fields |
+|---------|-----------|---------------|
+| `verda cost balance -o json` | — | `amount`, `currency` |
+| `verda cost estimate -o json` | `--type` (required), `--os-volume`, `--storage`, `--storage-type`, `--spot`, `--location` | `total.hourly`, `instance.hourly`, `os_volume.hourly` |
+| `verda cost running -o json` | — | `instances[]` (each: `hostname`, `hourly`, `daily`, `monthly`), `total.hourly` |
+
+## Status (Low Priority)
+
+Prefer specific commands (`vm list`, `cost balance`, `volume list`) over `status`. Only use `status` when the user explicitly asks for a dashboard summary.
 
 | Command | Key Flags | Output Fields |
 |---------|-----------|---------------|
 | `verda status -o json` | — | `instances` (total, running, offline, spot), `volumes` (total, attached, detached, total_size_gb), `financials` (burn_rate_hourly, balance, runway_days), `locations[]` |
-| `verda cost balance -o json` | — | `amount`, `currency` |
-| `verda cost estimate -o json` | `--type` (required), `--os-volume`, `--storage`, `--storage-type`, `--spot`, `--location` | `total.hourly`, `instance.hourly`, `os_volume.hourly` |
-| `verda cost running -o json` | — | `instances[]` (each: `hostname`, `hourly`, `daily`, `monthly`), `total.hourly` |
 
 ## SSH (Interactive — Do NOT Run)
 

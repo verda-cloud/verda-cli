@@ -3,7 +3,7 @@ package sshkey
 import (
 	"github.com/spf13/cobra"
 
-	cmdutil "github/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
+	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
 
 // NewCmdSSHKey creates the parent ssh-key command.

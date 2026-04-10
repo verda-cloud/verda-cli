@@ -21,9 +21,9 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/verda-cloud/verdagostack/pkg/version"
 
-	skillscmd "github/verda-cloud/verda-cli/internal/verda-cli/cmd/skills"
-	cmdutil "github/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
-	"github/verda-cloud/verda-cli/internal/verda-cli/options"
+	skillscmd "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/skills"
+	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
+	"github.com/verda-cloud/verda-cli/internal/verda-cli/options"
 )
 
 const (

@@ -3,7 +3,7 @@ package util
 import (
 	"path/filepath"
 
-	clioptions "github/verda-cloud/verda-cli/internal/verda-cli/options"
+	clioptions "github.com/verda-cloud/verda-cli/internal/verda-cli/options"
 )
 
 // TemplatesBaseDir returns the base directory for template storage (~/.verda/templates).

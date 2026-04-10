@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github/verda-cloud/verda-cli/internal/verda-cli/template"
+	"github.com/verda-cloud/verda-cli/internal/verda-cli/template"
 )
 
 func TestApplyTemplate(t *testing.T) {

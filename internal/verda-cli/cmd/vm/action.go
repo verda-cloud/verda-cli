@@ -10,7 +10,7 @@ import (
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
 	"github.com/verda-cloud/verdagostack/pkg/tui"
 
-	cmdutil "github/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
+	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
 
 // actionNameMap maps CLI flag values to action labels.
