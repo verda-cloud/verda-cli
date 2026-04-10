@@ -1,6 +1,9 @@
 # Changelog
 
 
+## [v1.6.1] - 2026-04-10
+- [`fac64c7`] Fix/skills install claude code dir structure
+
 ## [v1.6.0] - 2026-04-10
 - [`820fa11`] Feat: wizard Ctrl+C exit with confirmation
 
