@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"slices"
 	"strings"
 
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
+	"github.com/verda-cloud/verdagostack/pkg/tui/wizard"
 )
 
 // apiCache holds data fetched from the API, shared across wizard steps
@@ -48,6 +50,26 @@ func (c *apiCache) fetchAvailability(ctx context.Context, getClient clientFunc, 
 	return c.avail, c.locations, nil
 }
 
+// fetchLocations loads location data without availability, caching the result.
+func (c *apiCache) fetchLocations(ctx context.Context, getClient clientFunc) (map[string]verda.Location, error) {
+	if c.locations != nil {
+		return c.locations, nil
+	}
+	client, err := getClient()
+	if err != nil {
+		return nil, err
+	}
+	locations, err := client.Locations.Get(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("fetching locations: %w", err)
+	}
+	c.locations = make(map[string]verda.Location, len(locations))
+	for _, loc := range locations {
+		c.locations[loc.Code] = loc
+	}
+	return c.locations, nil
+}
+
 // ensurePricingCache populates the apiCache with instance type and volume
 // type pricing data if it's missing. This happens when wizard steps were
 // skipped because a template pre-filled the values.
@@ -84,6 +106,46 @@ const hoursInMonth = 730
 // volumeHourlyPrice calculates hourly price: monthlyPerGB * size / 730, rounded up to 4 decimals.
 func volumeHourlyPrice(monthlyPerGB float64, sizeGB int) float64 {
 	return math.Ceil(monthlyPerGB*float64(sizeGB)/hoursInMonth*10000) / 10000
+}
+
+// --- Location loaders ---
+
+// loadAllLocations returns all locations with a skip option (for template mode).
+func loadAllLocations(ctx context.Context, cache *apiCache, getClient clientFunc) ([]wizard.Choice, error) {
+	choices := []wizard.Choice{{Label: "None (decide at deploy time)", Value: ""}}
+	locMap, err := cache.fetchLocations(ctx, getClient)
+	if err != nil {
+		return nil, err
+	}
+	for _, loc := range locMap {
+		choices = append(choices, wizard.Choice{
+			Label: fmt.Sprintf("%s (%s)", loc.Code, loc.Name),
+			Value: loc.Code,
+		})
+	}
+	return choices, nil
+}
+
+// loadAvailableLocations returns locations where instType is available (for deploy mode).
+func loadAvailableLocations(ctx context.Context, cache *apiCache, getClient clientFunc, isSpot bool, instType string) ([]wizard.Choice, error) {
+	avail, locMap, err := cache.fetchAvailability(ctx, getClient, isSpot)
+	if err != nil {
+		return nil, err
+	}
+	var choices []wizard.Choice
+	for _, la := range avail {
+		if slices.Contains(la.Availabilities, instType) {
+			loc := locMap[la.LocationCode]
+			choices = append(choices, wizard.Choice{
+				Label: fmt.Sprintf("%s (%s)", loc.Code, loc.Name),
+				Value: loc.Code,
+			})
+		}
+	}
+	if len(choices) == 0 {
+		return nil, fmt.Errorf("instance type %s is not available in any location right now — try again later or choose a different instance type", instType)
+	}
+	return choices, nil
 }
 
 // --- Helpers ---

@@ -32,7 +32,10 @@ func resolveCreateInputs(
 	}
 
 	// Run wizard for any remaining missing fields.
-	if opts.InstanceType == "" || opts.Image == "" || opts.Hostname == "" {
+	// When a template was used but didn't specify a location, prompt the user
+	// so they can pick where to deploy instead of silently defaulting to FIN-01.
+	templateWithoutLocation := cmd.Flags().Changed("from") && !opts.locationSet
+	if opts.InstanceType == "" || opts.Image == "" || opts.Hostname == "" || templateWithoutLocation {
 		if err := runWizard(cmd.Context(), f, ioStreams, opts); err != nil {
 			return true, err
 		}

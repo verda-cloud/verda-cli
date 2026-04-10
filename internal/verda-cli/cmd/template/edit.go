@@ -301,16 +301,20 @@ func editLocation(ctx context.Context, f cmdutil.Factory, t *Template) error {
 		return err
 	}
 
-	choices := make([]string, len(locations))
-	for i, loc := range locations {
-		choices[i] = loc.Code
+	choices := []string{"None (decide at deploy time)"}
+	for _, loc := range locations {
+		choices = append(choices, loc.Code)
 	}
 
 	idx, selErr := f.Prompter().Select(ctx, "Location", choices)
 	if selErr != nil {
 		return nil //nolint:nilerr // user canceled
 	}
-	t.Location = locations[idx].Code
+	if idx == 0 {
+		t.Location = ""
+	} else {
+		t.Location = locations[idx-1].Code
+	}
 	return nil
 }
 
