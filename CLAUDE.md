@@ -20,10 +20,37 @@ cmd/verda/                    # Entrypoint
 internal/verda-cli/
   cmd/cmd.go                  # Root command, command groups
   cmd/util/                   # Factory, IOStreams, helpers, pricing, hostname
-  cmd/<domain>/               # One dir per domain (vm, volume, auth, skills, ...)
+  cmd/<domain>/               # One dir per domain (see per-command docs below)
+    CLAUDE.md                 # Domain knowledge, gotchas, edge cases
+    README.md                 # Usage examples, flags, architecture notes
   options/                    # Global CLI options, credentials
 internal/skills/              # Embedded AI skill files (go:embed)
 ```
+
+### Per-Command Documentation
+
+Each command directory has its own `CLAUDE.md` (domain knowledge) and `README.md` (usage/architecture). These are the source of truth for command-specific behavior.
+
+| Directory | Docs | Description |
+|-----------|------|-------------|
+| `cmd/vm/` | CLAUDE.md, README.md | VM create/list/describe/action, wizard, templates |
+| `cmd/template/` | CLAUDE.md, README.md | Template create/edit/list/show/delete |
+| `cmd/auth/` | CLAUDE.md, README.md | Login, logout, show credentials |
+| `cmd/volume/` | CLAUDE.md, README.md | Volume lifecycle, trash, actions |
+| `cmd/sshkey/` | CLAUDE.md, README.md | SSH key management |
+| `cmd/startupscript/` | CLAUDE.md, README.md | Startup script management |
+| `cmd/update/` | CLAUDE.md, README.md | CLI self-update |
+| `cmd/settings/` | CLAUDE.md, README.md | CLI settings management |
+| `cmd/availability/` | — | Instance availability by location |
+| `cmd/cost/` | — | Balance, running costs, estimates |
+| `cmd/images/` | — | OS image listing |
+| `cmd/instancetypes/` | — | Instance type catalog |
+| `cmd/locations/` | — | Datacenter locations |
+| `cmd/status/` | — | Status dashboard |
+| `cmd/ssh/` | — | SSH into instances |
+| `cmd/mcp/` | — | MCP server |
+| `cmd/skills/` | — | AI skills management |
+| `cmd/completion/` | — | Shell completions |
 
 ### Core Patterns
 
@@ -69,12 +96,12 @@ internal/skills/              # Embedded AI skill files (go:embed)
 
 ## Before Editing Any Command
 
-1. Read the **nearest** `CLAUDE.md` in the command directory (e.g. `cmd/vm/CLAUDE.md`)
-2. Read the **nearest** `README.md` for usage examples and flag details
+1. Read the **nearest** `CLAUDE.md` in the command directory (e.g. `cmd/vm/CLAUDE.md`) — domain knowledge, gotchas, edge cases
+2. Read the **nearest** `README.md` in the command directory — usage examples, flags, architecture
 3. Read `.ai/skills/new-command.md` for the full checklist when adding/modifying commands
 4. If touching pricing, auth, or agent-mode: plan first, don't code immediately
 
-Per-command docs are auto-maintained by a pre-commit hook.
+Per-command docs are auto-maintained by `/update-command-knowledge` skill.
 Manual update: `claude -p "/update-command-knowledge --all" --model sonnet --dangerously-skip-permissions`
 
 ## Thinking Depth

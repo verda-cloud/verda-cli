@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -125,8 +124,8 @@ func buildCreateFlow(ctx context.Context, getClient clientFunc, opts *createOpti
 		stepBillingType(opts),
 		stepContract(getClient, opts),
 		stepKind(opts),
-		stepInstanceType(getClient, cache, opts),
-		stepLocation(getClient, cache, opts),
+		stepInstanceType(getClient, cache, opts, mode),
+		stepLocation(getClient, cache, opts, mode),
 		stepImage(getClient, opts),
 		stepOSVolumeSize(opts),
 		stepStorage(getClient, cache, opts),
@@ -271,7 +270,7 @@ func stepKind(opts *createOptions) wizard.Step {
 
 // --- Step 4: Instance Type ---
 
-func stepInstanceType(getClient clientFunc, cache *apiCache, opts *createOptions) wizard.Step {
+func stepInstanceType(getClient clientFunc, cache *apiCache, opts *createOptions, mode WizardMode) wizard.Step {
 	return wizard.Step{
 		Name:        "instance-type",
 		Description: "Instance type",
@@ -302,16 +301,20 @@ func stepInstanceType(getClient clientFunc, cache *apiCache, opts *createOptions
 				cache.instanceTypes[types[i].InstanceType] = types[i]
 			}
 
-			avail, locMap, err := cache.fetchAvailability(ctx, getClient, isSpot)
-			if err != nil {
-				return nil, err
-			}
-
-			// Build a map: instance type → list of location codes where it's available.
-			availLocs := make(map[string][]string)
-			for _, la := range avail {
-				for _, a := range la.Availabilities {
-					availLocs[a] = append(availLocs[a], la.LocationCode)
+			// In deploy mode, filter by real-time availability.
+			// In template mode, show all instance types (templates are saved configs,
+			// not real-time purchases — availability can change by deploy time).
+			var availLocs map[string][]string
+			if mode == WizardModeDeploy {
+				avail, _, err := cache.fetchAvailability(ctx, getClient, isSpot)
+				if err != nil {
+					return nil, err
+				}
+				availLocs = make(map[string][]string)
+				for _, la := range avail {
+					for _, a := range la.Availabilities {
+						availLocs[a] = append(availLocs[a], la.LocationCode)
+					}
 				}
 			}
 
@@ -321,21 +324,12 @@ func stepInstanceType(getClient clientFunc, cache *apiCache, opts *createOptions
 				if !matchesKind(t.InstanceType, kind) {
 					continue
 				}
-				locs := availLocs[t.InstanceType]
-				if len(locs) == 0 {
-					continue // skip unavailable instance types
+				if availLocs != nil && len(availLocs[t.InstanceType]) == 0 {
+					continue // skip unavailable instance types (deploy mode only)
 				}
 				totalPrice := float64(t.PricePerHour)
 				if isSpot {
 					totalPrice = float64(t.SpotPrice)
-				}
-				locNames := make([]string, len(locs))
-				for j, code := range locs {
-					if loc, ok := locMap[code]; ok {
-						locNames[j] = loc.Code
-					} else {
-						locNames[j] = code
-					}
 				}
 				units := instanceUnits(t)
 				var priceStr string
@@ -351,7 +345,19 @@ func stepInstanceType(getClient clientFunc, cache *apiCache, opts *createOptions
 				}
 				label := fmt.Sprintf("%s — %s, %s  %s",
 					t.InstanceType, formatGPU(t), formatMemory(t), priceStr)
-				desc := fmt.Sprintf("[%s]", strings.Join(locNames, ", "))
+				var desc string
+				if availLocs != nil {
+					locs := availLocs[t.InstanceType]
+					locNames := make([]string, len(locs))
+					for j, code := range locs {
+						if loc, ok := cache.locations[code]; ok {
+							locNames[j] = loc.Code
+						} else {
+							locNames[j] = code
+						}
+					}
+					desc = fmt.Sprintf("[%s]", strings.Join(locNames, ", "))
+				}
 				choices = append(choices, wizard.Choice{
 					Label:       label,
 					Value:       t.InstanceType,
@@ -370,38 +376,31 @@ func stepInstanceType(getClient clientFunc, cache *apiCache, opts *createOptions
 
 // --- Step 5: Location ---
 
-func stepLocation(getClient clientFunc, cache *apiCache, opts *createOptions) wizard.Step {
+func stepLocation(getClient clientFunc, cache *apiCache, opts *createOptions, mode WizardMode) wizard.Step {
 	return wizard.Step{
 		Name:        "location",
 		Description: "Datacenter location",
 		Prompt:      wizard.SelectPrompt,
-		Required:    true,
+		Required:    mode == WizardModeDeploy,
 		DependsOn:   []string{"instance-type", "billing-type"},
 		Loader: func(ctx context.Context, _ tui.Prompter, _ tui.Status, store *wizard.Store) ([]wizard.Choice, error) {
 			c := store.Collected()
 			isSpot := c["billing-type"] == billingTypeSpot
 			instType := c["instance-type"].(string)
 
-			// Usually a cache hit — instance-type step already fetched this.
-			avail, locMap, err := cache.fetchAvailability(ctx, getClient, isSpot)
-			if err != nil {
-				return nil, err
+			// Template mode: show all locations (availability can change by deploy time).
+			if mode == WizardModeTemplate {
+				return loadAllLocations(ctx, cache, getClient)
 			}
 
-			var choices []wizard.Choice
-			for _, la := range avail {
-				if slices.Contains(la.Availabilities, instType) {
-					loc := locMap[la.LocationCode]
-					label := fmt.Sprintf("%s (%s)", loc.Code, loc.Name)
-					choices = append(choices, wizard.Choice{
-						Label: label,
-						Value: loc.Code,
-					})
-				}
-			}
-			return choices, nil
+			// Deploy mode: only show locations where the instance type is available.
+			return loadAvailableLocations(ctx, cache, getClient, isSpot, instType)
 		},
-		Setter:   func(v any) { opts.LocationCode = v.(string) },
+		Setter: func(v any) {
+			if s := v.(string); s != "" {
+				opts.LocationCode = s
+			}
+		},
 		Resetter: func() { opts.LocationCode = verda.LocationFIN01 },
 		IsSet: func() bool {
 			return opts.locationSet || (opts.LocationCode != "" && opts.LocationCode != verda.LocationFIN01)

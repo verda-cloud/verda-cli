@@ -7,10 +7,12 @@ Read `CLAUDE.md` first. This file defines how you execute, not what the project 
 Do NOT write code until you have completed all steps below. No exceptions.
 
 **Step 1 — Read** (always, every task):
-1. `CLAUDE.md` (root) — architecture, conventions, pricing rules
-2. `CLAUDE.md` in the target command directory (e.g. `cmd/vm/CLAUDE.md`) — domain gotchas
-3. `README.md` in the target command directory — usage, flags, examples
+1. `CLAUDE.md` (root) — architecture, conventions, pricing rules, per-command doc index
+2. `cmd/<domain>/CLAUDE.md` in the target command directory — domain knowledge, gotchas, edge cases
+3. `cmd/<domain>/README.md` in the target command directory — usage examples, flags, architecture
 4. `.ai/skills/new-command.md` if adding or modifying a command
+
+Per-command docs exist in: `auth`, `vm`, `template`, `volume`, `sshkey`, `startupscript`, `update`, `settings`. For commands without docs, read the source files directly.
 
 **Step 2 — Verify** (always):
 5. Run `make test` to confirm the repo is green before you start
