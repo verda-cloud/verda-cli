@@ -21,8 +21,8 @@ All commands: `--agent -o json` (except `verda ssh` and `verda auth show`).
 | "template", "saved config", "preset", "my templates" | `template list` (alias: `tmpl`) |
 | "deploy from template", "use template", "quick deploy" | `vm create --from <name>` |
 | "status", "overview", "dashboard", "summary" | `status` (alias: `dash`) |
-| "what's available", "stock", "capacity" | `availability` |
-| "instance types", "GPU types", "CPU types", "specs", "flavors" | `instance-types` |
+| "what's available", "in stock", "can I get", "available right now" | `vm availability` (real-time stock + pricing by location) |
+| "instance types", "GPU types", "CPU types", "specs", "flavors", "catalog" | `instance-types` (full catalog, not filtered by stock) |
 | "pricing", "how much", "cost per hour" | `instance-types` or `cost estimate` |
 | "images", "OS", "Ubuntu", "CUDA" | `images` (NOT `images list`) with `--type` (NOT `--instance-type`) |
 | "locations", "regions", "datacenters" | `locations` |
@@ -41,8 +41,8 @@ All commands: `--agent -o json` (except `verda ssh` and `verda auth show`).
 |---------|-----------|---------------|
 | `verda locations -o json` | — | `code`, `city`, `country` |
 | `verda instance-types -o json` | `--gpu`, `--cpu`, `--spot` | `name`, `price_per_hour`, `spot_price`, `gpu.number_of_gpus`, `gpu_memory.size_in_gigabytes`, `memory.size_in_gigabytes` |
-| `verda availability -o json` | `--type`, `--location`, `--spot` | `location_code`, `available` |
-| `verda images -o json` | `--type` (NOT `--instance-type`) | `slug` (use in --os), `name`, `category` |
+| `verda vm availability -o json` | `--kind` (gpu/cpu), `--type`, `--location`, `--spot`. Use `--kind gpu` NOT `--type gpu` | `location`, `instance_type`, `gpu`, `ram`, `cpu_cores`, `price_per_hour`, `spot_price` |
+| `verda images -o json` | `--type` (instance type filter, NOT `--instance-type`), `--category` (e.g. ubuntu, pytorch) | `image_type` (use in --os), `name`, `category` |
 
 ## VM Create — Required Flags (`--agent` mode)
 
@@ -50,30 +50,35 @@ All commands: `--agent -o json` (except `verda ssh` and `verda auth show`).
 |------|-------------------|
 | `--kind` | `gpu` or `cpu` — user intent |
 | `--instance-type` | `instance-types -o json` → `name` |
-| `--os` | `images --type <t> -o json` → `slug` |
+| `--os` | `images --type <t> -o json` → `image_type` field |
 | `--hostname` | User-provided or auto-generate |
 
-**Optional flags:** `--location` (default FIN-01), `--ssh-key` (repeatable), `--is-spot`, `--os-volume-size` (default 50), `--storage-size`, `--storage-type` (NVMe/HDD), `--startup-script`, `--contract` (PAY_AS_YOU_GO/SPOT/LONG_TERM), `--from` (template), `--wait`, `--wait-timeout` (use 2m)
+**Optional flags:** `--location` (default FIN-01), `--ssh-key` (repeatable, takes ID), `--is-spot`, `--os-volume-size` (GiB), `--storage-size` (GiB), `--storage-type` (NVMe/HDD), `--startup-script` (ID), `--contract` (PAY_AS_YOU_GO/SPOT/LONG_TERM), `--from` (template name), `--wait`, `--wait-timeout` (use 2m)
 
 ## VM Lifecycle
 
 | Command | Key Flags |
 |---------|-----------|
-| `verda vm list -o json` | `--status` (running, offline, provisioning). Fields: `id`, `hostname`, `status`, `instance_type`, `location`, `ip`, `price_per_hour` |
+| `verda vm list -o json` | `--status`, `--location`. Fields: `id`, `hostname`, `status`, `instance_type`, `location`, `ip`, `price_per_hour` |
 | `verda vm describe <id> -o json` | — |
 | `verda vm start <id> --wait` | `--yes` in agent mode |
 | `verda vm shutdown <id> --wait` | `--yes` in agent mode. Alias: `stop` |
 | `verda vm hibernate <id> --wait` | `--yes` in agent mode |
-| `verda vm delete <id> --wait` | `--yes` **required** in agent mode. Alias: `rm` |
+| `verda vm delete <id> --wait` | `--yes` **required**. `--with-volumes` to also delete attached volumes. Alias: `rm` |
+
+Batch operations: `--all` with `--status` and/or `--hostname` (glob pattern) to target multiple VMs.
+Example: `verda --agent vm shutdown --all --status running --yes --wait -o json`
+
+Note: `shutdown` alias is `stop`. `delete` alias is `rm`.
 
 ## Status & Cost
 
-| Command | Output Fields |
-|---------|---------------|
-| `verda status -o json` | `instances` (total, running, offline, spot), `volumes` (total, attached, detached, total_size_gb), `financials` (burn_rate_hourly, balance, runway_days), `locations[]` |
-| `verda cost balance -o json` | `amount`, `currency` |
-| `verda cost estimate -o json` | `total.hourly`, `instance.hourly`, `os_volume.hourly`. Flags: `--type`, `--os-volume`, `--storage`, `--spot` |
-| `verda cost running -o json` | `instances[]` (each: `hostname`, `hourly`, `daily`, `monthly`), `total.hourly` |
+| Command | Key Flags | Output Fields |
+|---------|-----------|---------------|
+| `verda status -o json` | — | `instances` (total, running, offline, spot), `volumes` (total, attached, detached, total_size_gb), `financials` (burn_rate_hourly, balance, runway_days), `locations[]` |
+| `verda cost balance -o json` | — | `amount`, `currency` |
+| `verda cost estimate -o json` | `--type` (required), `--os-volume`, `--storage`, `--storage-type`, `--spot`, `--location` | `total.hourly`, `instance.hourly`, `os_volume.hourly` |
+| `verda cost running -o json` | — | `instances[]` (each: `hostname`, `hourly`, `daily`, `monthly`), `total.hourly` |
 
 ## SSH (Interactive — Do NOT Run)
 
@@ -96,7 +101,7 @@ Tell user to run in their terminal:
 
 | Command | Notes |
 |---------|-------|
-| `verda template list -o json` | Fields: `resource`, `name`, `description` |
+| `verda template list -o json` | `--type` to filter (e.g. `--type vm`). Fields: `resource`, `name`, `description` |
 | `verda template show vm/<name> -o json` | Fields: `InstanceType`, `Location`, `Image`, `SSHKeys[]`, `HostnamePattern`, `Description`. Note: `vm/` prefix required |
 | `verda template delete vm/<name>` | Confirm first |
 | `verda template create` | Interactive — tell user to run |
@@ -141,8 +146,8 @@ Hostname patterns: `{random}` → random words, `{location}` → location code
 | Parameter | Source | Field |
 |-----------|--------|-------|
 | instance-type | `instance-types` | `name` |
-| location | `availability --type <t>` | `location_code` |
-| image/os | `images --type <t>` | `slug` |
+| location | `vm availability --type <t>` | `location` |
+| image/os | `images --type <t>` | `image_type` |
 | ssh-key ID | `ssh-key list` | `id` |
 | startup-script ID | `startup-script list` | `id` |
 | volume ID | `volume list` | `id` |

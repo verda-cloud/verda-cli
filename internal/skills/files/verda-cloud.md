@@ -37,7 +37,8 @@ description: Use when the user mentions Verda Cloud, GPU/CPU VMs, cloud instance
 
 ### Explore
 
-- Available instances: `verda --agent instance-types [--gpu|--cpu] -o json` → present name, GPU, VRAM, RAM, price_per_hour sorted by price. **Stop.**
+- What's available now: `verda --agent vm availability -o json` → shows what's **in stock** with location and pricing. Filter with `--kind gpu` or `--kind cpu` (NOT `--type gpu`). If result is empty or null, tell the user **nothing is in stock** for that kind — do NOT fall back to showing a different kind. **Stop.**
+- Full catalog (all types, not just in stock): `verda --agent instance-types [--gpu|--cpu] -o json` → specs and pricing. **Stop.**
 - Overview/dashboard: `verda --agent status -o json` → instances, volumes, balance, burn rate. **Stop.**
 - Running costs: `verda --agent cost running -o json` → per-instance breakdown. **Stop.**
 
@@ -50,8 +51,8 @@ Otherwise walk this chain. **ALWAYS** steps must run even if user specified valu
 1. **Billing** *(skip if known)* — spot ("cheap", "testing") or on-demand (default)
 2. **Compute** *(skip if known)* — GPU (ML/training/CUDA) or CPU (web/API/dev)
 3. **Instance type** *(skip if user specified)* — `verda --agent instance-types [--gpu|--cpu] -o json`, present top 3 by price
-4. **ALWAYS: Availability** — `verda --agent availability --type <type> [--spot] -o json`. Location depends on availability, NOT the reverse
-5. **ALWAYS: Images** — `verda --agent images --type <type> -o json`. **NEVER guess slugs** — they vary by instance type
+4. **ALWAYS: Availability** — `verda --agent vm availability --type <type> [--spot] -o json`. Location depends on availability, NOT the reverse
+5. **ALWAYS: Images** — `verda --agent images --type <type> -o json`. Use `image_type` field for `--os` flag. **NEVER guess** — they vary by instance type
 6. **ALWAYS: SSH keys** — `verda --agent ssh-key list -o json`. If user named a key, find its ID
 7. **ALWAYS: Cost** — `verda --agent cost balance -o json` + `verda --agent cost estimate --type <type> --os-volume 50 -o json`. Warn if runway < 24h
 8. **Confirm** — show summary, wait for "yes"

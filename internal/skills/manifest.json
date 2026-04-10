@@ -9,7 +9,11 @@
       "display_name": "Claude Code",
       "scope": "global",
       "target": "~/.claude/skills/",
-      "method": "copy"
+      "method": "copy",
+      "file_map": {
+        "verda-cloud.md": "verda-cloud/SKILL.md",
+        "verda-reference.md": "verda-reference/SKILL.md"
+      }
     },
     "cursor": {
       "display_name": "Cursor",
