@@ -441,8 +441,8 @@ func updateInstalledSkills(ctx context.Context, newBinary string, ioStreams cmdu
 		return
 	}
 
-	args := make([]string, 0, 4+len(state.Agents))
-	args = append(args, "--agent", "skills", "install", "--force")
+	args := make([]string, 0, 6+len(state.Agents))
+	args = append(args, "--agent", "-o", "json", "skills", "install", "--force")
 	args = append(args, state.Agents...)
 
 	cmd := exec.CommandContext(ctx, newBinary, args...) //nolint:gosec // newBinary is the just-installed verda binary

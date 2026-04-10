@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -295,8 +296,11 @@ func shortPath(p string) string {
 	if err != nil {
 		return p
 	}
-	if rel, err := filepath.Rel(home, p); err == nil && rel != "" && rel[0] != '.' {
-		return "~/" + rel
+	if strings.HasPrefix(p, home+string(filepath.Separator)) {
+		return "~" + p[len(home):]
+	}
+	if p == home {
+		return "~"
 	}
 	return p
 }

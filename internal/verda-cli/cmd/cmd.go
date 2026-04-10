@@ -15,6 +15,7 @@ import (
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/availability"
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/completion"
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/cost"
+	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/doctor"
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/images"
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/instancetypes"
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/locations"
@@ -55,6 +56,14 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) (*cobra.Command, *clioptions.Op
 			return cmd.Help()
 		},
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			// Agent mode always implies JSON output and no TUI. Apply
+			// this before the credential-skip check so commands that
+			// bypass Complete() (skills, mcp serve, auth show/use) still
+			// get the right output mode and suppress spinners.
+			if opts.Agent {
+				opts.Output = "json"
+			}
+
 			// Skip heavy credential resolution for commands that don't need it:
 			// - mcp serve: defers auth to the first tool call
 			// - auth show: diagnostic command that should work even without valid credentials
@@ -73,6 +82,21 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) (*cobra.Command, *clioptions.Op
 				bubbletea.SetThemeByName(theme)
 			}
 			return nil
+		},
+		PersistentPostRun: func(cmd *cobra.Command, _ []string) {
+			// Show version-update hint (best-effort, never fails the command).
+			if opts.Agent || opts.Output != "table" {
+				return
+			}
+			switch cmd.Name() {
+			case "update", "doctor", "completion":
+				return
+			}
+			latest, current, err := cmdutil.CheckVersion(cmd.Context())
+			if err != nil {
+				return
+			}
+			cmdutil.PrintVersionHint(ioStreams.ErrOut, latest, current)
 		},
 	}
 
@@ -138,6 +162,7 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) (*cobra.Command, *clioptions.Op
 			Message: "Other Commands:",
 			Commands: []*cobra.Command{
 				completion.NewCmdCompletion(ioStreams),
+				doctor.NewCmdDoctor(f, ioStreams),
 				settings.NewCmdSettings(f, ioStreams),
 				update.NewCmdUpdate(f, ioStreams),
 			},
@@ -166,6 +191,8 @@ func skipCredentialResolution(cmd *cobra.Command) bool {
 	case cmd.Name() == "use" && pName == "auth":
 		return true
 	case pName == "skills":
+		return true
+	case cmd.Name() == "doctor" && pName == "verda":
 		return true
 	}
 	return false
