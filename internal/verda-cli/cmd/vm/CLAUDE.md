@@ -7,7 +7,7 @@
   - `vm.go` -- Parent command, registers subcommands and shortcuts
   - `create.go` -- Create command, flags, `createOptions` struct, request building, validation
   - `wizard.go` -- 13 wizard step definitions, `WizardMode`, `RunTemplateWizard`, step Defaults
-  - `wizard_cache.go` -- `apiCache`, `ensurePricingCache`, pricing helpers, instance type utils
+  - `wizard_cache.go` -- `apiCache`, `fetchLocations`, `loadAllLocations`/`loadAvailableLocations`, `ensurePricingCache`, pricing helpers, instance type utils
   - `wizard_subflows.go` -- SSH key, startup script, storage interactive sub-flows
   - `wizard_summary.go` -- `renderDeploymentSummary` (accepts `io.Writer`)
   - `template_apply.go` -- Template loading, applying, name resolution with warnings
@@ -83,7 +83,10 @@ startup-script -> hostname -> description -> confirm-deploy
 
 - Steps with `DependsOn` re-run their Loader when dependencies change
 - `contract` step: `ShouldSkip` returns true for spot billing
+- `instance-type` step: accepts `WizardMode`. Deploy mode filters by real-time availability; template mode shows all instance types from the instance-types API (no availability filtering)
+- `location` step: accepts `WizardMode`. Deploy mode shows only locations where the instance type is available; template mode shows all locations with a "None (decide at deploy time)" skip option. Deploy mode returns a clear error when no locations are available for the instance type
 - `location` step: `IsSet` treats default `FIN-01` as unset (so wizard prompts)
+- `location` step: `Required` is dynamic — true in deploy mode, false in template mode
 - `storage`, `ssh-keys`, `startup-script` steps: manage values directly in Loader (Setter/Resetter are no-ops), include inline sub-flows for creating new resources via API
 - `confirm-deploy` step: renders deployment summary with full cost breakdown via `renderDeploymentSummary(w, opts, cache)`
 - Steps have `Default` functions that return current `opts` values for pre-selection (used when `--from` pre-fills values)
@@ -98,8 +101,9 @@ startup-script -> hostname -> description -> confirm-deploy
 
 ## Gotchas & Edge Cases
 
-- **Wizard triggers when ANY of instance-type, os, or hostname is missing** -- not all three. Providing two of three still launches the wizard.
+- **Wizard triggers when ANY of instance-type, os, or hostname is missing** -- not all three. Providing two of three still launches the wizard. Also triggers when `--from` was used but the template had no location (`templateWithoutLocation` check in `resolveCreateInputs`).
 - **Location default quirk**: `LocationCode` defaults to `FIN-01` in createOptions, but the wizard's `IsSet` returns false for `FIN-01` specifically, so the wizard always prompts for location even when the default is in effect.
+- **Flags override template values**: When `--from` is used alongside other flags (e.g. `--hostname`, `--location`), flags are parsed first, then `applyTemplate` only overwrites empty fields. CLI flags take precedence.
 - **apiCache invalidation**: Cache is invalidated when `isSpot` changes (user switches billing type), because availability differs between spot and on-demand.
 - **Lazy client resolution**: `clientFunc` defers credential resolution until the first API-dependent wizard step fires. Early steps (billing-type, kind, text inputs) run without credentials.
 - **Hidden flag aliases**: `--type`, `--image`, `--ssh-key-id`, `--startup-script-id`, `--spot` are hidden aliases for their primary flags.

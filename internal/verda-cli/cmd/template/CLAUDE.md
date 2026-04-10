@@ -24,8 +24,8 @@ All fields except `resource` are optional. Stored at `~/.verda/templates/<resour
 | `contract` | string | `"PAY_AS_YOU_GO"`, `"SPOT"`, `"LONG_TERM"` |
 | `kind` | string | `"GPU"` or `"CPU"` (lowercase in template, case-insensitive in matching) |
 | `instance_type` | string | e.g. `"1V100.6V"` |
-| `location` | string | e.g. `"FIN-01"` |
-| `image` | string | OS image slug or ID |
+| `location` | string | Optional. e.g. `"FIN-01"`. If omitted, wizard prompts at deploy time |
+| `image` | string | OS image **name** (resolved to ID at deploy time) |
 | `os_volume_size` | int | GiB |
 | `storage` | []StorageSpec | Each has `type` and `size` |
 | `storage_skip` | bool | Skip storage step in wizard |
@@ -79,8 +79,8 @@ The `template edit` command uses a field menu approach (not the full wizard):
 ### Edit field editors
 - **Billing Type**: static select (on-demand / spot). Clears contract when switching to spot.
 - **Kind**: static select (gpu / cpu)
-- **Instance Type**: API call to `InstanceTypes.Get`, filtered by current kind, shows price
-- **Location**: API call to `Locations.Get`
+- **Instance Type**: API call to `InstanceTypes.Get` (not availability), filtered by current kind, shows price
+- **Location**: API call to `Locations.Get`, includes "None (decide at deploy time)" to clear location
 - **Image**: API call to `Images.Get`, excludes cluster images
 - **OS Volume Size**: text input with current value as default
 - **SSH Keys**: API call to `SSHKeys.GetAllSSHKeys`, multi-select with current keys pre-selected
@@ -108,6 +108,9 @@ Displays all template fields, including those previously hidden:
 
 - **Import cycle**: `cmd/template/` cannot import `cmd/vm/` for the Template type (circular dependency). Shared types live in `internal/verda-cli/template/`, re-exported by `cmd/template/types.go` via type aliases and `var` bindings.
 - **`billingTypeSet` / `locationSet` flags**: Needed because `IsSet` in the wizard can't distinguish `"on-demand"` (falsy `IsSpot=false`) from "unset". When a template sets billing type or location, these booleans are set to `true` so the wizard skips those steps.
+- **Template without location triggers wizard**: When `--from` is used and the template has no location (`!opts.locationSet`), `resolveCreateInputs` triggers the wizard so the user is prompted for location instead of silently defaulting to FIN-01.
+- **Template instance type/location use different APIs**: Template wizard (create) uses instance-types API and locations API directly. Deploy wizard uses availability API to filter. Template edit also uses instance-types and locations APIs directly.
+- **Template error message**: `Resolve()` now shows `template name is required — template "X" not found` with guidance to run `verda template list` or use `--from` interactively.
 - **`NoOptDefVal` on `--from` flag**: Set to `" "` (space) so `--from` without a value is recognized as "flag changed but empty". When the user writes `verda vm create --from gpu-training`, cobra parses `gpu-training` as a positional arg; `RunE` recombines it into `opts.From`.
 - **Startup script "None (skip)" label**: The wizard presents "None (skip)" as a selectable option. Previously, this label text was captured as the script name. Fixed by checking `Value != ""` before storing the name.
 - **`ensurePricingCache`**: The confirm-deploy step calls this (with parent context, not `context.Background()`) to fetch pricing when the cache is empty from template pre-fill.

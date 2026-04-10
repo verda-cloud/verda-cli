@@ -29,6 +29,10 @@ verda vm create
 # From a saved template (only prompts for hostname + confirm)
 verda vm create --from gpu-training
 
+# From a template, override specific fields with flags
+verda vm create --from gpu-training --location FIN-03
+verda vm create --from gpu-training --hostname my-vm --os-volume-size 200
+
 # Pick template from list
 verda vm create --from
 
@@ -97,8 +101,8 @@ The wizard launches automatically when any of `--instance-type`, `--os`, or `--h
 1. Billing type (On-Demand or Spot)
 2. Contract period (skipped for Spot)
 3. Compute type (GPU or CPU)
-4. Instance type (filtered by kind and availability)
-5. Datacenter location (filtered by instance type availability)
+4. Instance type (deploy mode: filtered by kind and availability; template mode: all types from instance-types API)
+5. Datacenter location (deploy mode: filtered by instance type availability; template mode: all locations, optional)
 6. OS image (cluster images excluded)
 7. OS volume size (default: 50 GiB)
 8. Storage -- add new volumes, attach existing detached volumes, or skip
@@ -135,7 +139,7 @@ Destructive actions (Shutdown, Force shutdown, Delete) show confirmation prompts
 - **vm.go** -- Parent command definition, registers subcommands and shortcut commands
 - **create.go** -- `vm create` command, flag definitions, `createOptions` struct (with 5-stage mutation lifecycle), request building, contract normalization, volume spec parsing, kind validation
 - **wizard.go** -- 13 wizard step definitions using the wizard engine; `clientFunc` lazy client pattern; `WizardMode` (Deploy vs Template); `RunTemplateWizard`; step Default functions for pre-selection
-- **wizard_cache.go** -- `apiCache` struct for deduplicating API calls, `ensurePricingCache`, pricing helpers (`volumeHourlyPrice`, `instanceUnits`), instance type matching (`matchesKind`, `formatGPU`, `formatMemory`)
+- **wizard_cache.go** -- `apiCache` struct for deduplicating API calls, `fetchLocations` (locations without availability), `loadAllLocations`/`loadAvailableLocations` (extracted location loaders), `ensurePricingCache`, pricing helpers (`volumeHourlyPrice`, `instanceUnits`), instance type matching (`matchesKind`, `formatGPU`, `formatMemory`)
 - **wizard_subflows.go** -- Interactive sub-flows for SSH key creation, startup script creation, storage volume management; choice builders for multi-select prompts
 - **wizard_summary.go** -- `renderDeploymentSummary` with full cost breakdown (accepts `io.Writer`)
 - **template_apply.go** -- `resolveCreateInputs` orchestration, `applyTemplate`, `resolveTemplateNames` (with warnings), `printTemplateSummary`, `pickTemplate`

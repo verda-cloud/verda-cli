@@ -28,7 +28,7 @@ verda template create
 verda template create gpu-training
 ```
 
-The create command runs the VM wizard in **template mode** -- the same 10 configuration steps (billing type through startup script) but without hostname, description, or confirm-deploy. The resulting settings are saved to disk.
+The create command runs the VM wizard in **template mode** -- the same 10 configuration steps (billing type through startup script) but without hostname, description, or confirm-deploy. In template mode, instance types come from the instance-types API (not filtered by availability) and location is optional ("None — decide at deploy time"). The resulting settings are saved to disk.
 
 ### Edit
 
@@ -40,7 +40,7 @@ verda template edit
 verda template edit vm/gpu-training
 ```
 
-Shows a menu of all template fields with their current values. Pick a field to change, edit it with the appropriate prompt (static choices for simple fields, API-backed selection for instance type/location/image/SSH keys/startup script). Repeat until "Save & exit".
+Shows a menu of all template fields with their current values. Pick a field to change, edit it with the appropriate prompt (static choices for simple fields, API-backed selection for instance type/location/image/SSH keys/startup script). Location includes a "None (decide at deploy time)" option to clear the value. Repeat until "Save & exit".
 
 ### List
 
@@ -101,8 +101,8 @@ billing_type: on-demand          # on-demand or spot
 contract: PAY_AS_YOU_GO
 kind: GPU                        # GPU or CPU
 instance_type: 1V100.6V
-location: FIN-01
-image: ubuntu-24.04-cuda-12.8
+location: FIN-01                  # optional — omit to prompt at deploy time
+image: ubuntu-24.04-cuda-12.8     # stored by name, resolved to ID at deploy time
 os_volume_size: 200              # GiB
 storage:
   - type: NVMe
@@ -124,11 +124,17 @@ verda vm create --from gpu-training              # load by name
 verda vm create --from ./my-template.yaml        # load from file path
 verda vm create --from                           # pick from list (interactive)
 verda vm create --from gpu-training --hostname my-vm --description "test"
+
+# Override template values with flags
+verda vm create --from gpu-training --location FIN-03
+verda vm create --from gpu-training --hostname my-vm --os-volume-size 200
 ```
+
+Flags passed alongside `--from` override the template values.
 
 ### Flow
 
-1. Template values pre-fill the wizard's `createOptions`
+1. Template values pre-fill the wizard's `createOptions` (CLI flags take precedence — they are parsed first)
 2. A summary of template values is printed to stderr
 3. SSH keys and startup scripts are resolved by name to ID via the API; unresolved names produce warnings (no longer silently swallowed)
 4. Only unfilled steps are prompted (hostname, description, confirm-deploy are always prompted; other steps only if the template didn't fill them)
