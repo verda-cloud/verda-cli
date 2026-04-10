@@ -1,6 +1,9 @@
 # Changelog
 
 
+## [v1.6.3] - 2026-04-10
+- [`93d9d7a`] Fix/verda update code leak n new doctor
+
 ## [v1.6.2] - 2026-04-10
 - [`1f75209`] Fix: filter images by instance type and use image_type slug
 - [`b313e1b`] Fix: apply template description and improve description default
