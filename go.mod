@@ -1,4 +1,4 @@
-module github/verda-cloud/verda-cli
+module github.com/verda-cloud/verda-cli
 
 go 1.25.9
 
