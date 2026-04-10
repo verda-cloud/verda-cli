@@ -103,6 +103,7 @@ func NewCmdCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 		Long: cmdutil.LongDesc(`
 			Create a Verda VM instance. Without flags, launches an interactive
 			wizard. Use --from to pre-fill settings from a saved template.
+			Flags passed alongside --from override the template values.
 
 			Templates are created with "verda template create" and stored
 			as YAML files under ~/.verda/templates/vm/.
@@ -120,6 +121,10 @@ func NewCmdCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 
 			# From a template file
 			verda vm create --from ./my-template.yaml
+
+			# From a template, override specific fields with flags
+			verda vm create --from gpu-training --location FIN-03
+			verda vm create --from gpu-training --hostname my-vm --os-volume-size 200
 
 			# Non-interactive with all flags
 			verda vm create \

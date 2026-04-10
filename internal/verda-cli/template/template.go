@@ -137,7 +137,7 @@ func Resolve(baseDir, resource, ref string) (string, error) {
 	}
 
 	if _, err := os.Stat(path); err != nil {
-		return "", fmt.Errorf("template not found: %w", err)
+		return "", fmt.Errorf("template name is required — template %q not found. Run \"verda template list\" to see available templates, or use \"--from\" to pick interactively", ref)
 	}
 	return path, nil
 }
