@@ -29,7 +29,7 @@ func TestBuildCreateFlowHappyPath(t *testing.T) {
 	// hostname, description, confirm-deploy.
 	ctx := context.Background()
 	errClient := func() (*verda.Client, error) { return nil, errors.New("no client in test") }
-	flow := buildCreateFlow(ctx, errClient, opts, WizardModeDeploy, io.Discard)
+	flow := buildCreateFlow(ctx, errClient, opts, WizardModeDeploy)
 	engine := wizard.NewEngine(nil, nil,
 		wizard.WithOutput(io.Discard),
 		wizard.WithTestResults(
@@ -77,7 +77,7 @@ func TestBuildCreateFlowSpotSkipsContract(t *testing.T) {
 
 	ctx := context.Background()
 	errClient := func() (*verda.Client, error) { return nil, errors.New("no client in test") }
-	flow := buildCreateFlow(ctx, errClient, opts, WizardModeDeploy, io.Discard)
+	flow := buildCreateFlow(ctx, errClient, opts, WizardModeDeploy)
 	engine := wizard.NewEngine(nil, nil,
 		wizard.WithOutput(io.Discard),
 		wizard.WithTestResults(

@@ -309,6 +309,13 @@ func cleanupStaleFiles(dir string, agent *Agent, currentFiles map[string]string,
 		// names and mapped names like verda-cloud.md → SKILL.md).
 		oldDest := agent.DestName(old)
 		if current[oldDest] {
+			// If file_map was added/changed, the raw source name may still
+			// exist as a flat file from a previous install without file_map.
+			// Clean it up (e.g. ~/.claude/skills/verda-cloud.md → now
+			// installed as ~/.claude/skills/verda-cloud/SKILL.md).
+			if oldDest != old {
+				_ = os.Remove(filepath.Join(dir, old)) // best-effort
+			}
 			continue // still in current manifest
 		}
 		_ = os.Remove(filepath.Join(dir, oldDest)) // best-effort
@@ -317,7 +324,15 @@ func cleanupStaleFiles(dir string, agent *Agent, currentFiles map[string]string,
 
 func installCopy(dir string, agent *Agent, skillFiles map[string]string) error {
 	for name, content := range skillFiles {
-		path := filepath.Join(dir, agent.DestName(name))
+		dest := agent.DestName(name)
+		path := filepath.Join(dir, dest)
+		// Create parent subdirectories for path-based file_map entries
+		// (e.g. "verda-cloud/SKILL.md" needs the "verda-cloud" dir).
+		if parent := filepath.Dir(path); parent != dir {
+			if err := os.MkdirAll(parent, 0o750); err != nil {
+				return fmt.Errorf("creating directory %s: %w", parent, err)
+			}
+		}
 		if err := os.WriteFile(path, []byte(content), 0o644); err != nil { //nolint:gosec // non-sensitive skill files
 			return fmt.Errorf("writing %s: %w", path, err)
 		}

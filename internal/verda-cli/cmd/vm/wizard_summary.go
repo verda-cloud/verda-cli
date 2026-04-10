@@ -1,16 +1,48 @@
 package vm
 
 import (
+	"context"
 	"fmt"
-	"io"
+	"reflect"
 	"strconv"
 	"strings"
 
 	"charm.land/lipgloss/v2"
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
+	"github.com/verda-cloud/verdagostack/pkg/tui/wizard"
 )
 
-func renderDeploymentSummary(w io.Writer, opts *createOptions, cache *apiCache) {
+// summaryView implements wizard.View and renders the deployment summary
+// when the wizard reaches the confirm-deploy step.
+type summaryView struct {
+	ctx       context.Context
+	getClient clientFunc
+	cache     *apiCache
+	opts      *createOptions
+	last      string
+}
+
+func newSummaryView(ctx context.Context, getClient clientFunc, cache *apiCache, opts *createOptions) *summaryView {
+	return &summaryView{ctx: ctx, getClient: getClient, cache: cache, opts: opts}
+}
+
+func (v *summaryView) Update(msg any) (render string, publish []any) {
+	if sc, ok := msg.(wizard.StepChangedMsg); ok {
+		if sc.StepName == "confirm-deploy" {
+			ensurePricingCache(v.ctx, v.getClient, v.cache)
+			v.last = renderDeploymentSummary(v.opts, v.cache)
+		} else {
+			v.last = ""
+		}
+	}
+	return v.last, nil
+}
+
+func (v *summaryView) Subscribe() []reflect.Type {
+	return nil // receive all engine broadcasts
+}
+
+func renderDeploymentSummary(opts *createOptions, cache *apiCache) string {
 	bold := lipgloss.NewStyle().Bold(true)
 	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 	accent := lipgloss.NewStyle().Foreground(lipgloss.Color("14"))
@@ -73,18 +105,20 @@ func renderDeploymentSummary(w io.Writer, opts *createOptions, cache *apiCache) 
 		volDetails = append(volDetails, volDetail{name, vType, size, unitP, hourly})
 	}
 
+	var b strings.Builder
+
 	// Print summary.
-	_, _ = fmt.Fprintf(w, "\n  %s\n", bold.Render("Deployment Summary"))
+	fmt.Fprintf(&b, "\n  %s\n", bold.Render("Deployment Summary"))
 
 	billing := "On-Demand"
 	if opts.IsSpot {
 		billing = "Spot Instance"
 	}
-	_, _ = fmt.Fprintf(w, "  %s\n", dim.Render(billing))
-	_, _ = fmt.Fprintf(w, "  %s\n\n", dim.Render(strings.Repeat("─", 50)))
+	fmt.Fprintf(&b, "  %s\n", dim.Render(billing))
+	fmt.Fprintf(&b, "  %s\n\n", dim.Render(strings.Repeat("─", 50)))
 
 	// Instance.
-	_, _ = fmt.Fprintf(w, "  %s\n", accent.Render("Instance"))
+	fmt.Fprintf(&b, "  %s\n", accent.Render("Instance"))
 	var computePriceStr string
 	if instUnits > 1 {
 		perUnit := computeHourly / float64(instUnits)
@@ -92,36 +126,38 @@ func renderDeploymentSummary(w io.Writer, opts *createOptions, cache *apiCache) 
 	} else {
 		computePriceStr = fmt.Sprintf("$%.4f/hr", computeHourly)
 	}
-	_, _ = fmt.Fprintf(w, "    %-40s %s\n", instLabel, priceStyle.Render(computePriceStr))
-	_, _ = fmt.Fprintf(w, "    %s\n\n", dim.Render(opts.LocationCode))
+	fmt.Fprintf(&b, "    %-40s %s\n", instLabel, priceStyle.Render(computePriceStr))
+	fmt.Fprintf(&b, "    %s\n\n", dim.Render(opts.LocationCode))
 
 	// OS.
-	_, _ = fmt.Fprintf(w, "  %s\n", accent.Render("Operating System"))
+	fmt.Fprintf(&b, "  %s\n", accent.Render("Operating System"))
 	osLine := fmt.Sprintf("%s  %dGB NVMe", opts.Image, opts.OSVolumeSize)
 	osPrice := fmt.Sprintf("($%.2f/GB/mo)  $%.4f/hr", osVolUnitPrice, osVolPrice)
-	_, _ = fmt.Fprintf(w, "    %-40s %s\n\n", osLine, priceStyle.Render(osPrice))
+	fmt.Fprintf(&b, "    %-40s %s\n\n", osLine, priceStyle.Render(osPrice))
 
 	// Storage volumes.
 	if len(volDetails) > 0 {
-		_, _ = fmt.Fprintf(w, "  %s\n", accent.Render("Storage"))
+		fmt.Fprintf(&b, "  %s\n", accent.Render("Storage"))
 		for _, v := range volDetails {
 			line := fmt.Sprintf("%s  %dGB %s", v.name, v.size, v.volType)
 			vPrice := fmt.Sprintf("($%.2f/GB/mo)  $%.4f/hr", v.unitPrice, v.hourly)
-			_, _ = fmt.Fprintf(w, "    %-40s %s\n", line, priceStyle.Render(vPrice))
+			fmt.Fprintf(&b, "    %-40s %s\n", line, priceStyle.Render(vPrice))
 		}
-		_, _ = fmt.Fprintln(w)
+		fmt.Fprintln(&b)
 	}
 
 	// SSH keys.
 	if len(opts.SSHKeyIDs) > 0 {
-		_, _ = fmt.Fprintf(w, "  %s  %d key(s)\n\n", accent.Render("SSH Keys"), len(opts.SSHKeyIDs))
+		fmt.Fprintf(&b, "  %s  %d key(s)\n\n", accent.Render("SSH Keys"), len(opts.SSHKeyIDs))
 	}
 
 	// Cost breakdown.
-	_, _ = fmt.Fprintf(w, "  %s\n", dim.Render(strings.Repeat("─", 50)))
-	_, _ = fmt.Fprintf(w, "  %-40s %s\n", "Compute total", fmt.Sprintf("$%.4f/hr", computeHourly))
-	_, _ = fmt.Fprintf(w, "  %-40s %s\n", "Storage total", fmt.Sprintf("$%.4f/hr", storageHourly))
+	fmt.Fprintf(&b, "  %s\n", dim.Render(strings.Repeat("─", 50)))
+	fmt.Fprintf(&b, "  %-40s %s\n", "Compute total", fmt.Sprintf("$%.4f/hr", computeHourly))
+	fmt.Fprintf(&b, "  %-40s %s\n", "Storage total", fmt.Sprintf("$%.4f/hr", storageHourly))
 	total := computeHourly + storageHourly
-	_, _ = fmt.Fprintf(w, "  %s  %s\n", bold.Render(fmt.Sprintf("%-40s", "Total")), bold.Render(fmt.Sprintf("$%.4f/hr", total)))
-	_, _ = fmt.Fprintf(w, "  %s\n\n", dim.Render(strings.Repeat("─", 50)))
+	fmt.Fprintf(&b, "  %s  %s\n", bold.Render(fmt.Sprintf("%-40s", "Total")), bold.Render(fmt.Sprintf("$%.4f/hr", total)))
+	fmt.Fprintf(&b, "  %s\n", dim.Render(strings.Repeat("─", 50)))
+
+	return b.String()
 }

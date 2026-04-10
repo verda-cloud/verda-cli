@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"strconv"
 	"strings"
 
@@ -78,7 +77,7 @@ func RunTemplateWizard(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil
 }
 
 func runTemplateWizardWithOpts(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *createOptions) (*TemplateResult, error) {
-	flow := buildCreateFlow(ctx, f.VerdaClient, opts, WizardModeTemplate, ioStreams.ErrOut)
+	flow := buildCreateFlow(ctx, f.VerdaClient, opts, WizardModeTemplate)
 	engine := wizard.NewEngine(f.Prompter(), f.Status(), wizard.WithOutput(ioStreams.ErrOut), wizard.WithExitConfirmation())
 	if err := engine.Run(ctx, flow); err != nil {
 		return nil, err
@@ -118,7 +117,7 @@ func optsToTemplateResult(opts *createOptions) *TemplateResult {
 //	billing-type → contract → kind → instance-type → location →
 //	image → os-volume-size → storage-size → ssh-keys →
 //	startup-script → hostname → description
-func buildCreateFlow(ctx context.Context, getClient clientFunc, opts *createOptions, mode WizardMode, errOut io.Writer) *wizard.Flow {
+func buildCreateFlow(ctx context.Context, getClient clientFunc, opts *createOptions, mode WizardMode) *wizard.Flow {
 	cache := &apiCache{}
 
 	steps := []wizard.Step{
@@ -137,7 +136,7 @@ func buildCreateFlow(ctx context.Context, getClient clientFunc, opts *createOpti
 		steps = append(steps,
 			stepHostname(opts),
 			stepDescription(opts),
-			stepConfirmDeploy(ctx, errOut, getClient, cache, opts),
+			stepConfirmDeploy(opts),
 		)
 	}
 	if mode == WizardModeTemplate {
@@ -151,9 +150,9 @@ func buildCreateFlow(ctx context.Context, getClient clientFunc, opts *createOpti
 		{ID: "hints", View: wizard.NewHintBarView(wizard.WithHintStyle(bubbletea.HintStyle()))},
 	}
 	if mode == WizardModeDeploy {
-		// Prepend progress bar for deploy mode only
 		layout = append([]wizard.ViewDef{
 			{ID: "progress", View: wizard.NewProgressView(wizard.WithProgressPercent())},
+			{ID: "summary", View: newSummaryView(ctx, getClient, cache, opts)},
 		}, layout...)
 	}
 
@@ -787,17 +786,13 @@ func stepDescription(opts *createOptions) wizard.Step {
 
 // --- Step 13: Deployment Summary & Confirm ---
 
-func stepConfirmDeploy(ctx context.Context, errOut io.Writer, getClient clientFunc, cache *apiCache, opts *createOptions) wizard.Step {
+func stepConfirmDeploy(opts *createOptions) wizard.Step {
 	return wizard.Step{
 		Name:        "confirm-deploy",
 		Description: "Deploy now?",
 		Prompt:      wizard.ConfirmPrompt,
 		Required:    true,
 		Default: func(_ map[string]any) any {
-			// Ensure pricing data is available (may be missing when
-			// steps were skipped via --from template pre-fill).
-			ensurePricingCache(ctx, getClient, cache)
-			renderDeploymentSummary(errOut, opts, cache)
 			return true
 		},
 		Setter: func(v any) {

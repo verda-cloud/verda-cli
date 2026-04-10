@@ -33,6 +33,40 @@ func TestUninstallCopy(t *testing.T) {
 	}
 }
 
+func TestUninstallCopy_SubdirCleanup(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	// Create subdirectory-based skill files.
+	for _, sub := range []string{"verda-cloud", "verda-reference"} {
+		subDir := filepath.Join(dir, sub)
+		_ = os.MkdirAll(subDir, 0o750)
+		_ = os.WriteFile(filepath.Join(subDir, "SKILL.md"), []byte("test"), 0o600)
+	}
+	agent := &Agent{
+		Name: "claude-code", Scope: "global", Method: "copy",
+		Target: dir,
+		FileMap: map[string]string{
+			"verda-cloud.md":     "verda-cloud/SKILL.md",
+			"verda-reference.md": "verda-reference/SKILL.md",
+		},
+	}
+	if err := uninstallForAgent(agent, []string{"verda-cloud.md", "verda-reference.md"}); err != nil {
+		t.Fatalf("uninstall error: %v", err)
+	}
+	// SKILL.md files should be removed.
+	for _, sub := range []string{"verda-cloud", "verda-reference"} {
+		if _, err := os.Stat(filepath.Join(dir, sub, "SKILL.md")); !os.IsNotExist(err) {
+			t.Fatalf("expected %s/SKILL.md to be deleted", sub)
+		}
+	}
+	// Empty subdirectories should be removed.
+	for _, sub := range []string{"verda-cloud", "verda-reference"} {
+		if _, err := os.Stat(filepath.Join(dir, sub)); !os.IsNotExist(err) {
+			t.Fatalf("expected empty dir %s to be removed", sub)
+		}
+	}
+}
+
 func TestUninstallAppend(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

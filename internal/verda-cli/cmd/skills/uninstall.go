@@ -219,9 +219,15 @@ func uninstallForAgent(agent *Agent, skillNames []string) error {
 func uninstallCopy(agent *Agent, skillNames []string) error {
 	dir := agent.TargetDir()
 	for _, name := range skillNames {
-		path := filepath.Join(dir, agent.DestName(name))
+		dest := agent.DestName(name)
+		path := filepath.Join(dir, dest)
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("removing %s: %w", path, err)
+		}
+		// Remove empty parent directory for subdirectory-based installs
+		// (e.g. verda-cloud/SKILL.md leaves an empty verda-cloud/ dir).
+		if parent := filepath.Dir(path); parent != dir {
+			_ = os.Remove(parent) // best-effort; only succeeds if empty
 		}
 	}
 	return nil

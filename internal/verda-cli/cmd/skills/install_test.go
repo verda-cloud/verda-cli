@@ -112,6 +112,80 @@ func TestInstallCopy_FileMap(t *testing.T) {
 	}
 }
 
+func TestInstallCopy_SubdirFileMap(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	skillFiles := map[string]string{
+		"verda-cloud.md":     "# Verda Cloud\ncontent",
+		"verda-reference.md": "# Reference\ncontent",
+	}
+	agent := &Agent{
+		Name: "claude-code", DisplayName: "Claude Code",
+		Scope: "global", Method: "copy", Target: dir,
+		FileMap: map[string]string{
+			"verda-cloud.md":     "verda-cloud/SKILL.md",
+			"verda-reference.md": "verda-reference/SKILL.md",
+		},
+	}
+	if err := installForAgent(agent, skillFiles, nil); err != nil {
+		t.Fatalf("install error: %v", err)
+	}
+	// Both should be installed in subdirectories as SKILL.md
+	for _, sub := range []string{"verda-cloud", "verda-reference"} {
+		path := filepath.Join(dir, sub, "SKILL.md")
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("expected %s/SKILL.md to exist", sub)
+		}
+	}
+	// Flat files should NOT exist
+	for _, flat := range []string{"verda-cloud.md", "verda-reference.md"} {
+		if _, err := os.Stat(filepath.Join(dir, flat)); !os.IsNotExist(err) {
+			t.Fatalf("%s should not exist as flat file", flat)
+		}
+	}
+}
+
+func TestInstallCopy_CleansUpFlatFilesOnFileMapChange(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	// Simulate a previous install that wrote flat files (no file_map).
+	_ = os.WriteFile(filepath.Join(dir, "verda-cloud.md"), []byte("old"), 0o600)
+	_ = os.WriteFile(filepath.Join(dir, "verda-reference.md"), []byte("old"), 0o600)
+
+	// Re-install with file_map that puts files into subdirectories.
+	newFiles := map[string]string{
+		"verda-cloud.md":     "# Cloud v2",
+		"verda-reference.md": "# Reference v2",
+	}
+	agent := &Agent{
+		Name: "claude-code", DisplayName: "Claude Code",
+		Scope: "global", Method: "copy", Target: dir,
+		FileMap: map[string]string{
+			"verda-cloud.md":     "verda-cloud/SKILL.md",
+			"verda-reference.md": "verda-reference/SKILL.md",
+		},
+	}
+	previousSkills := []string{"verda-cloud.md", "verda-reference.md"}
+
+	if err := installForAgent(agent, newFiles, previousSkills); err != nil {
+		t.Fatalf("install error: %v", err)
+	}
+
+	// New subdir files should exist.
+	for _, sub := range []string{"verda-cloud", "verda-reference"} {
+		if _, err := os.Stat(filepath.Join(dir, sub, "SKILL.md")); err != nil {
+			t.Fatalf("expected %s/SKILL.md to exist", sub)
+		}
+	}
+	// Old flat files should be cleaned up.
+	for _, flat := range []string{"verda-cloud.md", "verda-reference.md"} {
+		if _, err := os.Stat(filepath.Join(dir, flat)); !os.IsNotExist(err) {
+			t.Fatalf("old flat file %s should have been removed", flat)
+		}
+	}
+}
+
 func TestInstallCopy_CleansUpStaleFiles(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
