@@ -154,6 +154,9 @@ func applyTemplate(tmpl *template.Template, opts *createOptions) {
 	if tmpl.HostnamePattern != "" && opts.Hostname == "" {
 		opts.Hostname = template.ExpandHostnamePattern(tmpl.HostnamePattern, opts.LocationCode)
 	}
+	if tmpl.Description != "" && opts.Description == "" {
+		opts.Description = tmpl.Description
+	}
 	// SSH keys and startup script are handled by resolveTemplateNames, not here.
 }
 

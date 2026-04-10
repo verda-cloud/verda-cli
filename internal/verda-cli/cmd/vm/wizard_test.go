@@ -58,8 +58,10 @@ func TestBuildCreateFlowHappyPath(t *testing.T) {
 	if opts.IsSpot {
 		t.Error("expected IsSpot=false for on-demand")
 	}
-	if opts.Description != "my-gpu" {
-		t.Errorf("expected description=my-gpu (defaulted from hostname), got %q", opts.Description)
+	// Description defaults to image-type + instance-type joined with dashes.
+	expectedDesc := "ubuntu-24-04-cuda-12-8-open-docker-1V100-6V"
+	if opts.Description != expectedDesc {
+		t.Errorf("expected description=%q, got %q", expectedDesc, opts.Description)
 	}
 }
 

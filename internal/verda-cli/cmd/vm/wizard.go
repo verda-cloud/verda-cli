@@ -777,9 +777,17 @@ func stepDescription(opts *createOptions) wizard.Step {
 		Prompt:      wizard.TextInputPrompt,
 		Required:    false,
 		DependsOn:   []string{"hostname"},
-		Default: func(c map[string]any) any {
-			if h, ok := c["hostname"].(string); ok && h != "" {
-				return h
+		Default: func(_ map[string]any) any {
+			// Match web UI: image-type + instance-type joined with dash.
+			parts := make([]string, 0, 2)
+			if opts.Image != "" {
+				parts = append(parts, strings.ReplaceAll(opts.Image, ".", "-"))
+			}
+			if opts.InstanceType != "" {
+				parts = append(parts, strings.ReplaceAll(opts.InstanceType, ".", "-"))
+			}
+			if len(parts) > 0 {
+				return strings.Join(parts, "-")
 			}
 			return ""
 		},
