@@ -34,6 +34,7 @@ import (
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/instancetypes"
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/locations"
 	mcpcmd "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/mcp"
+	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/s3"
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/settings"
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/skills"
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/ssh"
@@ -152,6 +153,7 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) (*cobra.Command, *clioptions.Op
 				images.NewCmdImages(f, ioStreams),
 				instancetypes.NewCmdInstanceTypes(f, ioStreams),
 				locations.NewCmdLocations(f, ioStreams),
+				s3.NewCmdS3(f, ioStreams),
 				sshkey.NewCmdSSHKey(f, ioStreams),
 				startupscript.NewCmdStartupScript(f, ioStreams),
 				template.NewCmdTemplate(f, ioStreams),
@@ -205,6 +207,8 @@ func skipCredentialResolution(cmd *cobra.Command) bool {
 	case cmd.Name() == "use" && pName == "auth":
 		return true
 	case pName == "skills":
+		return true
+	case pName == "s3":
 		return true
 	case cmd.Name() == "doctor" && pName == "verda":
 		return true
