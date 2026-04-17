@@ -14,6 +14,7 @@ require (
 )
 
 require (
+	github.com/aws/smithy-go v1.25.0
 	github.com/charmbracelet/x/term v0.2.2
 	github.com/mark3labs/mcp-go v0.47.0
 	gopkg.in/ini.v1 v1.67.1
