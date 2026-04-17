@@ -18,6 +18,7 @@ verda_s3_access_key = AKIA123
 verda_s3_secret_key = secret456
 verda_s3_endpoint = https://objects.lab.verda.storage
 verda_s3_region = us-east-1
+verda_s3_auth_mode = credentials
 `
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
@@ -39,6 +40,9 @@ verda_s3_region = us-east-1
 	}
 	if creds.Region != "us-east-1" {
 		t.Errorf("Region = %q, want %q", creds.Region, "us-east-1")
+	}
+	if creds.AuthMode != "credentials" {
+		t.Errorf("AuthMode = %q, want %q", creds.AuthMode, "credentials")
 	}
 }
 

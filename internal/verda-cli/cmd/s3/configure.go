@@ -119,6 +119,7 @@ func NewCmdConfigure(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Comm
 			section.Key("verda_s3_secret_key").SetValue(opts.SecretKey)
 			section.Key("verda_s3_endpoint").SetValue(opts.Endpoint)
 			section.Key("verda_s3_region").SetValue(opts.Region)
+			section.Key("verda_s3_auth_mode").SetValue("credentials")
 
 			if _, err := options.EnsureVerdaDir(); err != nil {
 				return err
