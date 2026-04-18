@@ -42,6 +42,7 @@ func NewCmdS3(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 
 	cmd.AddCommand(
 		NewCmdConfigure(f, ioStreams),
+		NewCmdCp(f, ioStreams),
 		NewCmdLs(f, ioStreams),
 		NewCmdMb(f, ioStreams),
 		NewCmdPresign(f, ioStreams),
