@@ -50,6 +50,7 @@ func NewCmdS3(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 		NewCmdRb(f, ioStreams),
 		NewCmdRm(f, ioStreams),
 		NewCmdShow(f, ioStreams),
+		NewCmdSync(f, ioStreams),
 	)
 
 	return cmd
