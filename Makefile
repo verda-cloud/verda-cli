@@ -1,6 +1,6 @@
 OUTPUT_DIR ?= bin
 
-.PHONY: all build clean lint lint.fix test test.integration fmt changelog hooks.install pre-commit help
+.PHONY: all build clean lint lint.fix test test.integration test-s3-integration fmt changelog hooks.install pre-commit help
 
 ## Build -------------------------------------------------------------------
 
@@ -28,6 +28,10 @@ test: ## Run all tests
 test.integration: build ## Run integration tests (requires staging credentials in [test] profile)
 	@cp $(OUTPUT_DIR)/verda /usr/local/bin/verda-test
 	@VERDA_BIN=$(CURDIR)/$(OUTPUT_DIR)/verda go test -tags=integration -v -count=1 -timeout=5m ./tests/integration/
+
+test-s3-integration: build ## Run S3 data-plane smoke test against a live endpoint (requires VERDA_S3_* env vars)
+	@VERDA_BIN=$(CURDIR)/$(OUTPUT_DIR)/verda VERDA_S3_INTEGRATION=1 \
+		go test -tags=integration -count=1 -timeout=5m -v ./tests/integration/ -run TestS3
 
 fmt: ## Format code with gofmt and goimports
 	@gofmt -w .
