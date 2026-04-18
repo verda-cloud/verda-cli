@@ -241,8 +241,11 @@ func uploadTree(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStre
 // uploadOne uploads a single local file (or records a dryrun entry).
 func uploadOne(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, tr Transporter, localPath string, dst URI, rel string, opts *cpOptions, payload *cpPayload) error {
 	dstStr := dst.String()
+	structured := isStructured(f.OutputFormat())
 	if opts.Dryrun {
-		_, _ = fmt.Fprintf(ioStreams.Out, "(dry run) would upload %s -> %s\n", rel, dstStr)
+		if !structured {
+			_, _ = fmt.Fprintf(ioStreams.Out, "(dry run) would upload %s -> %s\n", rel, dstStr)
+		}
 		payload.Transfers = append(payload.Transfers, transferEntry{
 			Source:      localPath,
 			Destination: dstStr,
@@ -290,7 +293,9 @@ func uploadOne(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStrea
 		DurationMs:  elapsed.Milliseconds(),
 		Status:      "ok",
 	})
-	_, _ = fmt.Fprintf(ioStreams.Out, "\u2713 uploaded %s (%s)\n", rel, humanBytes(info.Size()))
+	if !structured {
+		_, _ = fmt.Fprintf(ioStreams.Out, "\u2713 uploaded %s (%s)\n", rel, humanBytes(info.Size()))
+	}
 	return nil
 }
 
@@ -328,7 +333,9 @@ func runDownload(ctx context.Context, cmd *cobra.Command, f cmdutil.Factory, ioS
 }
 
 // downloadTree lists src.Key and downloads each matching object into dstDir
-// preserving the relative path below src.Key.
+// preserving the relative path below src.Key. Each resolved local path is
+// verified to stay within dstDir to block adversarial keys with ".."
+// segments.
 func downloadTree(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client API, tr Transporter, src URI, dstDir string, opts *cpOptions, payload *cpPayload) error {
 	keys, err := listAllKeys(ctx, f, ioStreams, client, src)
 	if err != nil {
@@ -339,7 +346,10 @@ func downloadTree(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOSt
 		if !matchFilters(rel, opts.Include, opts.Exclude) {
 			continue
 		}
-		localPath := filepath.Join(dstDir, filepath.FromSlash(rel))
+		localPath, err := safeJoin(dstDir, rel)
+		if err != nil {
+			return err
+		}
 		if err := downloadOne(ctx, f, ioStreams, tr, URI{Bucket: src.Bucket, Key: k}, localPath, rel, opts, payload); err != nil {
 			return err
 		}
@@ -350,8 +360,11 @@ func downloadTree(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOSt
 // downloadOne performs a single GetObject download (or records a dryrun entry).
 func downloadOne(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, tr Transporter, src URI, localPath, rel string, opts *cpOptions, payload *cpPayload) error {
 	srcStr := src.String()
+	structured := isStructured(f.OutputFormat())
 	if opts.Dryrun {
-		_, _ = fmt.Fprintf(ioStreams.Out, "(dry run) would download %s -> %s\n", srcStr, localPath)
+		if !structured {
+			_, _ = fmt.Fprintf(ioStreams.Out, "(dry run) would download %s -> %s\n", srcStr, localPath)
+		}
 		payload.Transfers = append(payload.Transfers, transferEntry{
 			Source:      srcStr,
 			Destination: localPath,
@@ -368,13 +381,16 @@ func downloadOne(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStr
 	if err != nil {
 		return err
 	}
-	defer func() { _ = file.Close() }()
 
 	in := &s3.GetObjectInput{Bucket: aws.String(src.Bucket), Key: aws.String(src.Key)}
 	started := time.Now()
 	n, err := tr.Download(ctx, file, in)
 	elapsed := time.Since(started)
+	if closeErr := file.Close(); err == nil {
+		err = closeErr
+	}
 	if err != nil {
+		_ = os.Remove(localPath)
 		return translateError(err)
 	}
 
@@ -391,7 +407,9 @@ func downloadOne(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStr
 		DurationMs:  elapsed.Milliseconds(),
 		Status:      "ok",
 	})
-	_, _ = fmt.Fprintf(ioStreams.Out, "\u2713 downloaded %s (%s)\n", rel, humanBytes(n))
+	if !structured {
+		_, _ = fmt.Fprintf(ioStreams.Out, "\u2713 downloaded %s (%s)\n", rel, humanBytes(n))
+	}
 	return nil
 }
 
@@ -446,8 +464,11 @@ func copyTree(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStream
 func copyOne(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client API, src, dst URI, rel string, opts *cpOptions, payload *cpPayload) error {
 	srcStr := src.String()
 	dstStr := dst.String()
+	structured := isStructured(f.OutputFormat())
 	if opts.Dryrun {
-		_, _ = fmt.Fprintf(ioStreams.Out, "(dry run) would copy %s -> %s\n", srcStr, dstStr)
+		if !structured {
+			_, _ = fmt.Fprintf(ioStreams.Out, "(dry run) would copy %s -> %s\n", srcStr, dstStr)
+		}
 		payload.Transfers = append(payload.Transfers, transferEntry{
 			Source:      srcStr,
 			Destination: dstStr,
@@ -456,10 +477,14 @@ func copyOne(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams
 		return nil
 	}
 
+	// S3 requires a literal '/' between bucket and key in CopySource; each
+	// component must be URL-encoded separately so special characters in the
+	// key (spaces, '+', etc.) round-trip correctly.
+	copySource := url.PathEscape(src.Bucket) + "/" + url.PathEscape(src.Key)
 	in := &s3.CopyObjectInput{
 		Bucket:     aws.String(dst.Bucket),
 		Key:        aws.String(dst.Key),
-		CopySource: aws.String(url.PathEscape(src.Bucket + "/" + src.Key)),
+		CopySource: aws.String(copySource),
 	}
 	started := time.Now()
 	out, err := client.CopyObject(ctx, in)
@@ -476,11 +501,20 @@ func copyOne(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams
 		DurationMs:  elapsed.Milliseconds(),
 		Status:      "ok",
 	})
-	_, _ = fmt.Fprintf(ioStreams.Out, "\u2713 copied %s -> %s\n", srcStr, dstStr)
+	if !structured {
+		_, _ = fmt.Fprintf(ioStreams.Out, "\u2713 copied %s -> %s\n", srcStr, dstStr)
+	}
 	return nil
 }
 
 // ----- shared helpers -----------------------------------------------------
+
+// isStructured reports whether the output format is a machine-readable one
+// that must not be interleaved with human progress lines. "table" (or an
+// empty default) yields false.
+func isStructured(format string) bool {
+	return format == "json" || format == "yaml"
+}
 
 func newCpPayload(dryrun bool) cpPayload {
 	return cpPayload{

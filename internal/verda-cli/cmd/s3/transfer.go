@@ -16,9 +16,12 @@ package s3
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"mime"
+	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -80,6 +83,26 @@ func (t *sdkTransporter) Upload(ctx context.Context, in *s3.PutObjectInput) (*ma
 
 func (t *sdkTransporter) Download(ctx context.Context, w io.WriterAt, in *s3.GetObjectInput) (int64, error) {
 	return t.down.Download(ctx, w, in) //nolint:staticcheck // see defaultTransporterBuilder.
+}
+
+// safeJoin joins root with the slash-separated rel path, ensuring the result
+// stays within root. If rel contains ".." segments that would escape root,
+// it returns an error — guards against adversarial S3 keys in recursive
+// downloads.
+func safeJoin(root, rel string) (string, error) {
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return "", fmt.Errorf("resolve destination: %w", err)
+	}
+	candidate := filepath.Join(absRoot, filepath.FromSlash(rel))
+	absCandidate, err := filepath.Abs(candidate)
+	if err != nil {
+		return "", fmt.Errorf("resolve local path: %w", err)
+	}
+	if absCandidate != absRoot && !strings.HasPrefix(absCandidate, absRoot+string(os.PathSeparator)) {
+		return "", fmt.Errorf("key %q would escape destination directory", rel)
+	}
+	return absCandidate, nil
 }
 
 // inferContentType returns override when non-empty, otherwise

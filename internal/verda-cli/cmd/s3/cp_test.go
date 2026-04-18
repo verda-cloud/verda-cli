@@ -225,7 +225,11 @@ func TestCp_S3ToS3_SingleFile(t *testing.T) {
 	out := &bytes.Buffer{}
 	f := cmdutil.NewTestFactory(nil)
 	cmd := NewCmdCp(f, cmdutil.IOStreams{Out: out, ErrOut: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"s3://src-bucket/a.txt", "s3://dst-bucket/b.txt"})
+	// Use a key with a space to verify per-component URL encoding of
+	// CopySource — bucket/key are encoded separately with a literal '/'
+	// between them, so the result must be "src-bucket/hello%20world.txt"
+	// (NOT "src-bucket%2Fhello%20world.txt").
+	cmd.SetArgs([]string{"s3://src-bucket/hello world.txt", "s3://dst-bucket/b.txt"})
 	cmd.SetContext(context.Background())
 
 	if err := cmd.Execute(); err != nil {
@@ -241,10 +245,12 @@ func TestCp_S3ToS3_SingleFile(t *testing.T) {
 	if aws.ToString(got.Key) != "b.txt" {
 		t.Errorf("Key = %q, want b.txt", aws.ToString(got.Key))
 	}
-	// CopySource must reference the source bucket + key.
+	// Exact match: bucket/key are percent-encoded individually, with a
+	// literal '/' separating them. A space encodes as %20; the separator
+	// must NOT encode as %2F.
 	cs := aws.ToString(got.CopySource)
-	if !strings.Contains(cs, "src-bucket") || !strings.Contains(cs, "a.txt") {
-		t.Errorf("CopySource = %q, want to contain src-bucket and a.txt", cs)
+	if cs != "src-bucket/hello%20world.txt" {
+		t.Errorf("CopySource = %q, want %q", cs, "src-bucket/hello%20world.txt")
 	}
 	if !strings.Contains(out.String(), "copied") {
 		t.Errorf("stdout missing 'copied':\n%s", out.String())
@@ -378,6 +384,62 @@ func TestCp_Dryrun(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "(dry run) would") {
 		t.Errorf("stdout missing dry run preview:\n%s", out.String())
+	}
+}
+
+// TestCp_RecursiveDownload_EscapeAttempt verifies that an adversarial S3 key
+// containing ".." segments cannot cause a local write outside the declared
+// destination directory. The command must return an error and leave no
+// files on disk outside dstDir.
+func TestCp_RecursiveDownload_EscapeAttempt(t *testing.T) {
+	// no t.Parallel
+	tmp := t.TempDir()
+	dstDir := filepath.Join(tmp, "dst")
+	if err := os.MkdirAll(dstDir, 0o755); err != nil {
+		t.Fatalf("mkdir dst: %v", err)
+	}
+
+	fakeAPI := &cpFakeAPI{
+		listObjectsPages: []*s3.ListObjectsV2Output{
+			{
+				Contents: []s3types.Object{
+					// Adversarial key: would resolve outside dstDir if
+					// filepath.Join cleans the ".." segments.
+					{Key: aws.String("../../etc/passwd"), Size: aws.Int64(1)},
+				},
+				IsTruncated: aws.Bool(false),
+			},
+		},
+	}
+	restore := withFakeClient(fakeAPI)
+	defer restore()
+
+	fakeT := &cpFakeTransporter{downloadWrite: []byte("pwned")}
+	restoreT := withFakeTransporter(fakeT)
+	defer restoreT()
+
+	out := &bytes.Buffer{}
+	f := cmdutil.NewTestFactory(nil)
+	cmd := NewCmdCp(f, cmdutil.IOStreams{Out: out, ErrOut: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"s3://evil-bucket/", dstDir, "--recursive"})
+	cmd.SetContext(context.Background())
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for path-traversal key, got nil")
+	}
+	if !strings.Contains(err.Error(), "escape") {
+		t.Errorf("error = %v, want mention of 'escape'", err)
+	}
+	// No download should have been attempted.
+	if len(fakeT.downloads) != 0 {
+		t.Errorf("Download called %d times, want 0 (must abort before any write)", len(fakeT.downloads))
+	}
+	// And no local file should exist at the escape target.
+	if _, statErr := os.Stat(filepath.Join(tmp, "etc", "passwd")); statErr == nil {
+		t.Errorf("file written outside dstDir: %s", filepath.Join(tmp, "etc", "passwd"))
 	}
 }
 
