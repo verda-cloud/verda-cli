@@ -24,6 +24,12 @@ import (
 // code funnels through buildClient → clientBuilder → newGGCRRegistry.
 var clientBuilder = newGGCRRegistry
 
+// daemonListerBuilder is the parallel swap point for the local Docker
+// daemon lister. Tests (push, Task 19) reassign it to return a fake
+// DaemonLister that enumerates a canned image set without touching the
+// host's docker socket. Production code funnels through NewDaemonLister.
+var daemonListerBuilder = NewDaemonLister
+
 // buildClient returns a Registry for the given credentials, routed
 // through clientBuilder so tests can substitute a fake.
 func buildClient(creds *options.RegistryCredentials) Registry {
