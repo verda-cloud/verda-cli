@@ -35,6 +35,7 @@ import (
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/instancetypes"
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/locations"
 	mcpcmd "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/mcp"
+	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/registry"
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/s3"
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/settings"
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/skills"
@@ -146,6 +147,9 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) (*cobra.Command, *clioptions.Op
 	if s3Enabled() {
 		resourceCmds = append(resourceCmds, s3.NewCmdS3(f, ioStreams))
 	}
+	if registryEnabled() {
+		resourceCmds = append(resourceCmds, registry.NewCmdRegistry(f, ioStreams))
+	}
 
 	groups := cmdutil.CommandGroups{
 		{
@@ -205,6 +209,16 @@ func s3Enabled() bool {
 	return v == "1" || v == "true"
 }
 
+// registryEnabled gates the pre-release Verda Container Registry commands.
+// The whole command tree is omitted from registration unless
+// VERDA_REGISTRY_ENABLED is "1" or "true". When the feature ships GA,
+// delete this function, drop the gate in NewRootCommand, and remove
+// `Hidden: true` from cmd/registry/registry.go.
+func registryEnabled() bool {
+	v := os.Getenv("VERDA_REGISTRY_ENABLED")
+	return v == "1" || v == "true"
+}
+
 // skipCredentialResolution returns true for commands that should work
 // without valid credentials (diagnostics, profile switching, etc.).
 func skipCredentialResolution(cmd *cobra.Command) bool {
@@ -223,6 +237,8 @@ func skipCredentialResolution(cmd *cobra.Command) bool {
 	case pName == "skills":
 		return true
 	case pName == "s3":
+		return true
+	case pName == "registry":
 		return true
 	case cmd.Name() == "doctor" && pName == "verda":
 		return true
