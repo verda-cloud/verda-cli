@@ -38,6 +38,13 @@ import (
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/options"
 )
 
+// localhostHost is the reserved host literal treated specially by the
+// Docker / OCI reference grammar: when the first "/"-delimited segment
+// equals "localhost", it is a registry host even though it contains no
+// dot or port. Promoted to a constant so goconst stays happy when other
+// files in the package (push.go's manual ref splitter) reference it.
+const localhostHost = "localhost"
+
 // Ref is a parsed image reference broken into logical components.
 // Exactly one of Tag or Digest is non-empty (Tag defaults to "latest" when
 // neither is supplied in the source string).
@@ -96,7 +103,7 @@ func (r Ref) FullRepository() string {
 // to catch every registry-with-port we've seen in the wild (localhost:5000,
 // 127.0.0.1:5000, registry.local:5000, foo.example.com:443, ...).
 func hasProjectNamespace(host string) bool {
-	if host == "" || host == "localhost" {
+	if host == "" || host == localhostHost {
 		return false
 	}
 	if strings.ContainsRune(host, ':') {
@@ -122,7 +129,7 @@ func isShortRef(raw string) bool {
 		return true
 	}
 	first := raw[:slash]
-	if first == "localhost" {
+	if first == localhostHost {
 		return false
 	}
 	return !strings.ContainsAny(first, ".:")
