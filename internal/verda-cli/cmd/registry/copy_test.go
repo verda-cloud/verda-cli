@@ -22,9 +22,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/google/go-containerregistry/pkg/authn"
 	ggcrregistry "github.com/google/go-containerregistry/pkg/registry"
@@ -786,4 +788,456 @@ func copyBody(dst http.ResponseWriter, src interface{ Read([]byte) (int, error) 
 			return total, err
 		}
 	}
+}
+
+// ---------- --all-tags tests ----------
+
+// primeSourceImageNew pushes a random image to host+ref (each ref gets a
+// distinct random image so digests vary per-tag). Mirrors
+// primeSourceImage but returns the image so the test can assert digest
+// round-trip per tag.
+func primeSourceImageNew(t *testing.T, host, ref string) v1.Image {
+	t.Helper()
+	r := newGGCRRegistry(testCreds(host))
+	img, err := random.Image(1024, 1)
+	if err != nil {
+		t.Fatalf("random.Image: %v", err)
+	}
+	if err := r.Write(context.Background(), host+"/"+ref, img, WriteOptions{}); err != nil {
+		t.Fatalf("prime source %q: %v", ref, err)
+	}
+	return img
+}
+
+// TestCopy_AllTagsHappy: push 3 tags to a source repo, run --all-tags with
+// no explicit dst, confirm all tags land at the default destination under
+// the same repo path.
+func TestCopy_AllTagsHappy(t *testing.T) {
+	srcHost := testServer(t)
+	dstHost := testServer(t)
+	writeCopyCredsFile(t, dstHost, "proj")
+
+	want := map[string]v1.Image{}
+	for _, tag := range []string{"v1", "v2", "v3"} {
+		want[tag] = primeSourceImageNew(t, srcHost, "ns/app:"+tag)
+	}
+
+	f := cmdutil.NewTestFactory(nil)
+	streams, out, _ := copyStreams("")
+
+	srcArg := srcHost + "/ns/app"
+	if err := runCopyForTest(t, f, streams, srcArg, "--all-tags"); err != nil {
+		t.Fatalf("copy --all-tags: %v", err)
+	}
+
+	dstReg := newGGCRRegistry(testCreds(dstHost))
+	for tag, srcImg := range want {
+		dstRef := dstHost + "/proj/ns/app:" + tag
+		desc, err := dstReg.Head(context.Background(), dstRef)
+		if err != nil {
+			t.Fatalf("Head(%s): %v", dstRef, err)
+		}
+		gotDigest, _ := srcImg.Digest()
+		if desc.Digest != gotDigest {
+			t.Errorf("tag %s digest mismatch: got %s want %s", tag, desc.Digest, gotDigest)
+		}
+	}
+
+	summary := out.String()
+	if !strings.Contains(summary, "Copied 3 of 3 tags") {
+		t.Errorf("expected aggregate summary line, got:\n%s", summary)
+	}
+}
+
+// TestCopy_AllTagsWithDstRepo: --all-tags with an explicit dst repo (no
+// tag) lands every source tag under that dst repo.
+func TestCopy_AllTagsWithDstRepo(t *testing.T) {
+	srcHost := testServer(t)
+	dstHost := testServer(t)
+	writeCopyCredsFile(t, dstHost, "proj")
+
+	for _, tag := range []string{"v1", "v2", "v3"} {
+		primeSourceImageNew(t, srcHost, "ns/app:"+tag)
+	}
+
+	f := cmdutil.NewTestFactory(nil)
+	streams, _, _ := copyStreams("")
+
+	srcArg := srcHost + "/ns/app"
+	if err := runCopyForTest(t, f, streams, srcArg, "new-repo", "--all-tags"); err != nil {
+		t.Fatalf("copy --all-tags new-repo: %v", err)
+	}
+
+	dstReg := newGGCRRegistry(testCreds(dstHost))
+	for _, tag := range []string{"v1", "v2", "v3"} {
+		dstRef := dstHost + "/proj/new-repo:" + tag
+		if _, err := dstReg.Head(context.Background(), dstRef); err != nil {
+			t.Errorf("Head(%s): %v", dstRef, err)
+		}
+	}
+}
+
+// TestCopy_AllTagsIncompatibleWithSrcTag: explicit :tag on src rejected.
+func TestCopy_AllTagsIncompatibleWithSrcTag(t *testing.T) {
+	dstHost := testServer(t)
+	writeCopyCredsFile(t, dstHost, "proj")
+
+	f := cmdutil.NewTestFactory(nil)
+	streams, _, _ := copyStreams("")
+
+	err := runCopyForTest(t, f, streams, "docker.io/library/nginx:1.25", "--all-tags")
+	if err == nil {
+		t.Fatal("expected error for --all-tags with explicit source tag")
+	}
+	if !strings.Contains(err.Error(), "incompatible with a source tag") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// TestCopy_AllTagsIncompatibleWithDstTag: explicit :tag on dst rejected.
+func TestCopy_AllTagsIncompatibleWithDstTag(t *testing.T) {
+	srcHost := testServer(t)
+	dstHost := testServer(t)
+	writeCopyCredsFile(t, dstHost, "proj")
+	primeSourceImageNew(t, srcHost, "ns/app:v1")
+
+	f := cmdutil.NewTestFactory(nil)
+	streams, _, _ := copyStreams("")
+
+	err := runCopyForTest(t, f, streams, srcHost+"/ns/app", "new-repo:prod", "--all-tags")
+	if err == nil {
+		t.Fatal("expected error for --all-tags with explicit dst tag")
+	}
+	if !strings.Contains(err.Error(), "incompatible with a destination tag") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// TestCopy_AllTagsEmptySourceRepo: the source-side Tags() lists nothing →
+// friendly message, exit 0, no writes.
+func TestCopy_AllTagsEmptySourceRepo(t *testing.T) {
+	dstHost := testServer(t)
+	writeCopyCredsFile(t, dstHost, "proj")
+
+	// Swap the source-side builder so Tags returns an empty slice
+	// deterministically regardless of whatever a real server would do.
+	prev := sourceRegistryBuilder
+	sourceRegistryBuilder = func(_ authn.Authenticator, _ RetryConfig) Registry {
+		return &emptyTagsRegistry{}
+	}
+	t.Cleanup(func() { sourceRegistryBuilder = prev })
+
+	// Also prove the destination is never consulted.
+	var dstWrites atomic.Int32
+	prevClient := clientBuilder
+	clientBuilder = func(creds *options.RegistryCredentials, cfg RetryConfig) Registry {
+		return &writeCountingRegistry{inner: prevClient(creds, cfg), writes: &dstWrites}
+	}
+	t.Cleanup(func() { clientBuilder = prevClient })
+
+	f := cmdutil.NewTestFactory(nil)
+	streams, out, _ := copyStreams("")
+
+	if err := runCopyForTest(t, f, streams, "docker.io/library/nginx", "--all-tags"); err != nil {
+		t.Fatalf("copy --all-tags: %v", err)
+	}
+	if !strings.Contains(out.String(), "No tags found") {
+		t.Errorf("expected friendly empty-tag message, got: %q", out.String())
+	}
+	if dstWrites.Load() != 0 {
+		t.Errorf("expected zero dst writes, got %d", dstWrites.Load())
+	}
+}
+
+// TestCopy_AllTagsImageJobs: with 5 tags and --image-jobs=3, the observed
+// peak concurrency on the destination Write never exceeds 3.
+func TestCopy_AllTagsImageJobs(t *testing.T) {
+	srcHost := testServer(t)
+	dstHost := testServer(t)
+	writeCopyCredsFile(t, dstHost, "proj")
+
+	for _, tag := range []string{"v1", "v2", "v3", "v4", "v5"} {
+		primeSourceImageNew(t, srcHost, "ns/app:"+tag)
+	}
+
+	// Wrap the destination-side client to observe concurrent Write calls.
+	// Each Write holds for 50ms before delegating so overlapping jobs
+	// actually overlap.
+	throttle := &throttleRegistry{writeDelay: 50 * time.Millisecond}
+	prev := clientBuilder
+	clientBuilder = func(creds *options.RegistryCredentials, cfg RetryConfig) Registry {
+		throttle.inner = prev(creds, cfg)
+		return throttle
+	}
+	t.Cleanup(func() { clientBuilder = prev })
+
+	f := cmdutil.NewTestFactory(nil)
+	streams, _, _ := copyStreams("")
+
+	if err := runCopyForTest(t, f, streams,
+		srcHost+"/ns/app", "--all-tags", "--image-jobs", "3"); err != nil {
+		t.Fatalf("copy --all-tags: %v", err)
+	}
+
+	peak := throttle.maxSeen.Load()
+	if peak > 3 {
+		t.Errorf("peak concurrency = %d, want <= 3", peak)
+	}
+	if peak < 1 {
+		t.Errorf("peak concurrency = %d, expected at least 1 Write to have occurred", peak)
+	}
+	if total := throttle.totalWrites.Load(); total != 5 {
+		t.Errorf("expected 5 total Writes, got %d", total)
+	}
+}
+
+// TestCopy_AllTagsPartialFailure: three tags, destination fake that fails
+// tag "v2". Others succeed; command exits non-zero with structured
+// summary showing succeeded:2, failed:1.
+func TestCopy_AllTagsPartialFailure(t *testing.T) {
+	srcHost := testServer(t)
+	// Credentials point at a synthetic host — the in-process destination
+	// is injected via clientBuilder below so endpoint reachability
+	// doesn't matter.
+	writeCopyCredsFile(t, "vccr.io", "proj")
+
+	for _, tag := range []string{"v1", "v2", "v3"} {
+		primeSourceImageNew(t, srcHost, "ns/app:"+tag)
+	}
+
+	prev := clientBuilder
+	clientBuilder = func(_ *options.RegistryCredentials, _ RetryConfig) Registry {
+		return &tagFailingRegistry{failTag: "v2"}
+	}
+	t.Cleanup(func() { clientBuilder = prev })
+
+	f := cmdutil.NewTestFactory(nil)
+	f.OutputFormatOverride = "json"
+	streams, out, _ := copyStreams("")
+
+	err := runCopyForTest(t, f, streams, srcHost+"/ns/app", "--all-tags")
+	if err == nil {
+		t.Fatal("expected partial-failure error")
+	}
+	var ae *cmdutil.AgentError
+	if !errors.As(err, &ae) {
+		t.Fatalf("expected *AgentError, got %T (%v)", err, err)
+	}
+	if ae.Code != kindRegistryCopyPartialFailure {
+		t.Errorf("Code = %q, want %q", ae.Code, kindRegistryCopyPartialFailure)
+	}
+
+	var payload allTagsOutput
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal json: %v\n%s", err, out.String())
+	}
+	if payload.Summary.Total != 3 {
+		t.Errorf("Summary.Total = %d, want 3", payload.Summary.Total)
+	}
+	if payload.Summary.Succeeded != 2 {
+		t.Errorf("Summary.Succeeded = %d, want 2", payload.Summary.Succeeded)
+	}
+	if payload.Summary.Failed != 1 {
+		t.Errorf("Summary.Failed = %d, want 1", payload.Summary.Failed)
+	}
+	// Each row matches the tag it's reporting on.
+	statusByTag := map[string]string{}
+	for _, r := range payload.Results {
+		statusByTag[r.Tag] = r.Status
+	}
+	if statusByTag["v2"] != "failed" {
+		t.Errorf("v2 status = %q, want failed", statusByTag["v2"])
+	}
+	if statusByTag["v1"] != "succeeded" || statusByTag["v3"] != "succeeded" {
+		t.Errorf("expected v1/v3 succeeded, got %+v", statusByTag)
+	}
+}
+
+// TestCopy_AllTagsResolveImageJobs: table-driven for the clamping rules.
+func TestCopy_AllTagsResolveImageJobs(t *testing.T) {
+	cases := []struct {
+		name string
+		user int
+		tags int
+		hw   int
+		want int
+	}{
+		{"auto-tiny-repo", 0, 1, 8, 1},
+		{"auto-below-threshold", 0, 3, 8, 1},
+		{"auto-threshold", 0, 4, 8, 4},
+		{"auto-big-hw-caps-at-4", 0, 20, 32, 4},
+		{"auto-single-core", 0, 10, 1, 1},
+		{"auto-two-core", 0, 10, 2, 1},
+		{"auto-four-core", 0, 10, 4, 2},
+		{"user-under-max", 5, 10, 16, 5},
+		{"user-clamped-to-hw", 12, 10, 4, 4},
+		{"user-clamped-to-8", 20, 10, 32, 8},
+		{"user-1-ignores-auto", 1, 10, 32, 1},
+		{"user-zero-falls-to-auto", 0, 10, 16, 4},
+		{"hw-zero-becomes-one", 0, 10, 0, 1},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := resolveImageJobs(c.user, c.tags, c.hw)
+			if got != c.want {
+				t.Errorf("resolveImageJobs(user=%d, tags=%d, hw=%d) = %d, want %d",
+					c.user, c.tags, c.hw, got, c.want)
+			}
+		})
+	}
+}
+
+// TestCopy_AllTagsJSONOutput: -o json with --all-tags emits the expected
+// shape (results + summary, per-row bytes / duration_ms present).
+func TestCopy_AllTagsJSONOutput(t *testing.T) {
+	srcHost := testServer(t)
+	dstHost := testServer(t)
+	writeCopyCredsFile(t, dstHost, "proj")
+
+	for _, tag := range []string{"v1", "v2"} {
+		primeSourceImageNew(t, srcHost, "ns/app:"+tag)
+	}
+
+	f := cmdutil.NewTestFactory(nil)
+	f.OutputFormatOverride = "json"
+	streams, out, _ := copyStreams("")
+
+	if err := runCopyForTest(t, f, streams, srcHost+"/ns/app", "--all-tags"); err != nil {
+		t.Fatalf("copy --all-tags -o json: %v", err)
+	}
+
+	var payload allTagsOutput
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal json: %v\n%s", err, out.String())
+	}
+	if len(payload.Results) != 2 {
+		t.Fatalf("Results length = %d, want 2", len(payload.Results))
+	}
+	if payload.Summary.Total != 2 || payload.Summary.Succeeded != 2 || payload.Summary.Failed != 0 {
+		t.Errorf("Summary = %+v, want {Total:2 Succeeded:2 Failed:0}", payload.Summary)
+	}
+	// Every row should have Status "succeeded" and a non-empty src/dst.
+	tags := make([]string, 0, len(payload.Results))
+	for _, r := range payload.Results {
+		if r.Status != "succeeded" {
+			t.Errorf("row %s Status = %q, want succeeded", r.Tag, r.Status)
+		}
+		if r.Src == "" || r.Dst == "" {
+			t.Errorf("row %s missing src/dst: %+v", r.Tag, r)
+		}
+		tags = append(tags, r.Tag)
+	}
+	sort.Strings(tags)
+	if tags[0] != "v1" || tags[1] != "v2" {
+		t.Errorf("tags = %v, want [v1 v2]", tags)
+	}
+	// No human summary line should have bled into stdout.
+	if strings.Contains(out.String(), "Copied ") {
+		t.Errorf("unexpected human summary in JSON stdout:\n%s", out.String())
+	}
+}
+
+// ---------- test helpers: registry fakes ----------
+
+// emptyTagsRegistry returns "" for Catalog and [] for Tags. Anything else
+// panics via the nil-embedded Registry.
+type emptyTagsRegistry struct {
+	Registry // nil; accidental Read/Write panics.
+}
+
+func (e *emptyTagsRegistry) Tags(_ context.Context, _ string) ([]string, error) {
+	return []string{}, nil
+}
+
+// writeCountingRegistry wraps an inner Registry and counts Write calls.
+// Used to prove the destination is never written to in empty-tag-list
+// / partial-failure scenarios.
+type writeCountingRegistry struct {
+	inner  Registry
+	writes *atomic.Int32
+}
+
+func (w *writeCountingRegistry) Catalog(ctx context.Context) ([]string, error) {
+	return w.inner.Catalog(ctx)
+}
+func (w *writeCountingRegistry) Tags(ctx context.Context, repo string) ([]string, error) {
+	return w.inner.Tags(ctx, repo)
+}
+func (w *writeCountingRegistry) Head(ctx context.Context, ref string) (*v1.Descriptor, error) {
+	return w.inner.Head(ctx, ref)
+}
+func (w *writeCountingRegistry) Read(ctx context.Context, ref string) (v1.Image, error) {
+	return w.inner.Read(ctx, ref)
+}
+func (w *writeCountingRegistry) Write(ctx context.Context, ref string, img v1.Image, opts WriteOptions) error {
+	w.writes.Add(1)
+	return w.inner.Write(ctx, ref, img, opts)
+}
+
+// throttleRegistry wraps an inner Registry and tracks the peak concurrent
+// Write count. Each Write holds for writeDelay before delegating so
+// concurrent jobs actually overlap in wall time.
+type throttleRegistry struct {
+	inner       Registry
+	active      atomic.Int32
+	maxSeen     atomic.Int32
+	totalWrites atomic.Int32
+	writeDelay  time.Duration
+}
+
+func (r *throttleRegistry) Catalog(ctx context.Context) ([]string, error) {
+	return r.inner.Catalog(ctx)
+}
+func (r *throttleRegistry) Tags(ctx context.Context, repo string) ([]string, error) {
+	return r.inner.Tags(ctx, repo)
+}
+func (r *throttleRegistry) Head(ctx context.Context, ref string) (*v1.Descriptor, error) {
+	return r.inner.Head(ctx, ref)
+}
+func (r *throttleRegistry) Read(ctx context.Context, ref string) (v1.Image, error) {
+	return r.inner.Read(ctx, ref)
+}
+func (r *throttleRegistry) Write(ctx context.Context, ref string, img v1.Image, opts WriteOptions) error {
+	r.totalWrites.Add(1)
+	n := r.active.Add(1)
+	defer r.active.Add(-1)
+
+	// Compare-and-swap the max-seen counter so the peak observation is
+	// stable under concurrent callers.
+	for {
+		prev := r.maxSeen.Load()
+		if n <= prev {
+			break
+		}
+		if r.maxSeen.CompareAndSwap(prev, n) {
+			break
+		}
+	}
+	time.Sleep(r.writeDelay)
+	return r.inner.Write(ctx, ref, img, opts)
+}
+
+// tagFailingRegistry is a Registry whose Write succeeds for every ref
+// except those ending in ":<failTag>", where it returns a canned auth
+// error. Tags() / Read() are never called on this fake — only Write is
+// exercised by the --all-tags partial-failure test.
+type tagFailingRegistry struct {
+	Registry
+	failTag string
+}
+
+func (r *tagFailingRegistry) Write(_ context.Context, ref string, _ v1.Image, opts WriteOptions) error {
+	// Close progress channel so the forwarder goroutine terminates.
+	if opts.Progress != nil {
+		close(opts.Progress)
+	}
+	if strings.HasSuffix(ref, ":"+r.failTag) {
+		return &transport.Error{
+			Errors: []transport.Diagnostic{
+				{Code: transport.UnauthorizedErrorCode, Message: "tag copy denied"},
+			},
+			StatusCode: http.StatusUnauthorized,
+		}
+	}
+	return nil
 }

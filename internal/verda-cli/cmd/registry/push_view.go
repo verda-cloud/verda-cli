@@ -67,6 +67,13 @@ type pushResultMsg struct {
 // between ggcr progress updates.
 type pushTickMsg struct{}
 
+// pushHeaderNoteMsg updates the optional sub-heading rendered between the
+// main heading and the row list. copy --all-tags uses this to show a live
+// "copied K of N tags" summary as individual tag copies complete.
+type pushHeaderNoteMsg struct {
+	Note string
+}
+
 // pushTickInterval is how often the view re-renders independently of ggcr
 // progress. 100ms is smooth to the eye without burning CPU.
 const pushTickInterval = 100 * time.Millisecond
@@ -75,11 +82,12 @@ const pushTickInterval = 100 * time.Millisecond
 // auto+TTY mode. Pure: View never touches a clock; all throughput/ETA
 // values flow from per-row Meter.Snapshot().
 type pushViewModel struct {
-	host     string
-	project  string
-	rows     []imageRow
-	ctxDone  func() // invoked on Ctrl-C to cancel the upstream push context
-	finished bool   // true once every row is Done or Failed
+	host       string
+	project    string
+	rows       []imageRow
+	ctxDone    func() // invoked on Ctrl-C to cancel the upstream push context
+	finished   bool   // true once every row is Done or Failed
+	headerNote string // optional sub-heading (e.g. "copied K of N tags"); copy --all-tags only
 }
 
 // newPushViewModel builds a fresh model with every row queued.
@@ -103,71 +111,98 @@ func pushTickCmd() tea.Cmd {
 }
 
 // Update is the dispatch function. Keeps allocation tight: returns a tea.Cmd
-// only for quit / re-arm / initial tick cases.
+// only for quit / re-arm / initial tick cases. Per-message handling is
+// extracted into helpers so each case stays small and the function's
+// cyclomatic complexity stays under the linter cap.
 func (m *pushViewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case pushProgressMsg:
-		if msg.Index < 0 || msg.Index >= len(m.rows) {
-			return m, nil
-		}
-		row := &m.rows[msg.Index]
-		// Terminal-state rows ignore late progress ticks — ggcr can deliver
-		// the last byte of a layer after the result msg has already landed.
-		if row.State == stateDone || row.State == stateFailed {
-			return m, nil
-		}
-		if row.State == stateQueued {
-			row.State = stateInFlight
-			row.Meter = &Meter{}
-		}
-		if row.Meter == nil {
-			row.Meter = &Meter{}
-		}
-		row.Meter.Update(msg.Update.Complete, msg.Update.Total)
+		m.handleProgress(msg)
 		return m, nil
 
 	case pushResultMsg:
-		if msg.Index < 0 || msg.Index >= len(m.rows) {
-			return m, nil
-		}
-		row := &m.rows[msg.Index]
-		if msg.Err != nil {
-			row.State = stateFailed
-			row.Err = msg.Err
-		} else {
-			row.State = stateDone
-		}
-		if row.Meter != nil {
-			snap := row.Meter.Snapshot()
-			row.Took = snap.Elapsed
-			row.DoneBytes = snap.Complete
-		}
-		row.Meter = nil
-
-		if m.allFinished() {
-			m.finished = true
-			return m, tea.Quit
+		if cmd := m.handleResult(msg); cmd != nil {
+			return m, cmd
 		}
 		return m, nil
 
 	case pushTickMsg:
 		return m, pushTickCmd()
 
-	case tea.KeyPressMsg:
-		// Match ctrl+c via either the modifier check (matches wizard) or the
-		// string form documented in the v2 upgrade guide. Both routes are
-		// safe — keeping both means future key-encoding refinements in v2
-		// don't silently break the cancel path.
-		if (msg.Code == 'c' && msg.Mod == tea.ModCtrl) || msg.String() == "ctrl+c" {
-			if m.ctxDone != nil {
-				m.ctxDone()
-				m.ctxDone = nil // idempotent: a second Ctrl-C is a no-op
-			}
-			return m, tea.Quit
-		}
+	case pushHeaderNoteMsg:
+		m.headerNote = msg.Note
 		return m, nil
+
+	case tea.KeyPressMsg:
+		cmd := m.handleKey(msg)
+		return m, cmd
 	}
 	return m, nil
+}
+
+// handleProgress applies a ggcr progress tick to the target row's meter,
+// transitioning queued -> in-flight on the first update. Terminal-state
+// rows ignore late ticks — ggcr can deliver the last byte of a layer
+// after the result msg has already landed.
+func (m *pushViewModel) handleProgress(msg pushProgressMsg) {
+	if msg.Index < 0 || msg.Index >= len(m.rows) {
+		return
+	}
+	row := &m.rows[msg.Index]
+	if row.State == stateDone || row.State == stateFailed {
+		return
+	}
+	if row.State == stateQueued {
+		row.State = stateInFlight
+		row.Meter = &Meter{}
+	}
+	if row.Meter == nil {
+		row.Meter = &Meter{}
+	}
+	row.Meter.Update(msg.Update.Complete, msg.Update.Total)
+}
+
+// handleResult finalizes a row's state after Write returns. Returns
+// tea.Quit when every row has reached a terminal state, so the caller
+// can surface the command to the outer Update return value.
+func (m *pushViewModel) handleResult(msg pushResultMsg) tea.Cmd {
+	if msg.Index < 0 || msg.Index >= len(m.rows) {
+		return nil
+	}
+	row := &m.rows[msg.Index]
+	if msg.Err != nil {
+		row.State = stateFailed
+		row.Err = msg.Err
+	} else {
+		row.State = stateDone
+	}
+	if row.Meter != nil {
+		snap := row.Meter.Snapshot()
+		row.Took = snap.Elapsed
+		row.DoneBytes = snap.Complete
+	}
+	row.Meter = nil
+
+	if m.allFinished() {
+		m.finished = true
+		return tea.Quit
+	}
+	return nil
+}
+
+// handleKey is the Ctrl-C cancel path. Matches via both the modifier
+// check (matches wizard) and the string form documented in the v2
+// upgrade guide — keeping both means future key-encoding refinements in
+// v2 don't silently break the cancel path. A second Ctrl-C is a no-op.
+func (m *pushViewModel) handleKey(msg tea.KeyPressMsg) tea.Cmd {
+	if (msg.Code == 'c' && msg.Mod == tea.ModCtrl) || msg.String() == "ctrl+c" {
+		if m.ctxDone != nil {
+			m.ctxDone()
+			m.ctxDone = nil
+		}
+		return tea.Quit
+	}
+	return nil
 }
 
 // allFinished reports whether every row has reached a terminal state.
@@ -213,7 +248,15 @@ func (m *pushViewModel) View() tea.View {
 	heading := fmt.Sprintf("Pushing %d image%s to %s/%s",
 		len(m.rows), pluralS(len(m.rows)), m.host, m.project)
 	b.WriteString(pushStyleHeading.Render(heading))
-	b.WriteString("\n\n")
+	b.WriteString("\n")
+
+	// Optional sub-heading (copy --all-tags uses this to show a live
+	// "copied K of N tags" summary). Dimmed so it reads as secondary.
+	if m.headerNote != "" {
+		b.WriteString(pushStyleDim.Render(m.headerNote))
+		b.WriteString("\n")
+	}
+	b.WriteString("\n")
 
 	for i := range m.rows {
 		b.WriteString(renderRow(&m.rows[i]))

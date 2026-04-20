@@ -19,6 +19,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"runtime"
+	"sync"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -42,6 +44,13 @@ const (
 	srcAuthBasic        = "basic"
 )
 
+// Status sentinels for the copy structured-output payloads.
+const (
+	copyStatusCopied    = "copied"
+	copyStatusFailed    = "failed"
+	copyStatusSucceeded = "succeeded"
+)
+
 // sourceKeychainBuilder is the package-level swap point for resolving
 // the default source-side keychain. Production uses authn.DefaultKeychain
 // (reads ~/.docker/config.json + cred helpers). Tests reassign this to
@@ -61,12 +70,13 @@ type copyOptions struct {
 	Profile          string
 	CredentialsFile  string
 	Jobs             int    // layer-level parallelism on Write
-	ImageJobs        int    // image-level parallelism (v1: always 1)
+	ImageJobs        int    // image-level parallelism (0 = auto-pick; see resolveImageJobs)
 	Retries          int    // flows into both src + dst retrying transports
 	Progress         string // auto|plain|json|none
 	SrcAuth          string // docker-config|anonymous|basic
 	SrcUsername      string // required with --src-auth basic
 	SrcPasswordStdin bool   // required with --src-auth basic
+	AllTags          bool   // copy every tag in the source repository
 }
 
 // copyPayload is the structured-output shape for `copy`. Mirrors push's
@@ -99,11 +109,10 @@ type copyPayload struct {
 // credentials, with the secret read from stdin.
 func NewCmdCopy(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 	opts := &copyOptions{
-		Profile:   defaultProfileName,
-		ImageJobs: 1,
-		Retries:   5,
-		Progress:  progressAuto,
-		SrcAuth:   srcAuthDockerConfig,
+		Profile:  defaultProfileName,
+		Retries:  5,
+		Progress: progressAuto,
+		SrcAuth:  srcAuthDockerConfig,
 	}
 
 	cmd := &cobra.Command{
@@ -152,12 +161,13 @@ func NewCmdCopy(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 	flags.StringVar(&opts.Profile, "profile", opts.Profile, "Credentials profile name")
 	flags.StringVar(&opts.CredentialsFile, "credentials-file", "", "Path to credentials file")
 	flags.IntVar(&opts.Jobs, "jobs", 0, "Layer-level parallelism (0 = ggcr default)")
-	flags.IntVar(&opts.ImageJobs, "image-jobs", opts.ImageJobs, "Image-level parallelism (v1: always 1)")
+	flags.IntVar(&opts.ImageJobs, "image-jobs", 0, "Image-level parallelism for --all-tags (0 = auto)")
 	flags.IntVar(&opts.Retries, "retries", opts.Retries, "Maximum attempts for idempotent HTTP operations on transient errors")
 	flags.StringVar(&opts.Progress, "progress", opts.Progress, "Progress output: auto|plain|json|none")
 	flags.StringVar(&opts.SrcAuth, "src-auth", opts.SrcAuth, "Source authentication mode: docker-config|anonymous|basic")
 	flags.StringVar(&opts.SrcUsername, "src-username", "", "Source registry username (required with --src-auth basic)")
 	flags.BoolVar(&opts.SrcPasswordStdin, "src-password-stdin", false, "Read the source registry password from stdin (required with --src-auth basic)")
+	flags.BoolVar(&opts.AllTags, "all-tags", false, "Copy every tag in the source repository")
 
 	return cmd
 }
@@ -189,11 +199,6 @@ func runCopy(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams,
 		}
 	}
 
-	dstRef, err := resolveCopyDestination(args, srcRef, creds)
-	if err != nil {
-		return err
-	}
-
 	srcAuth, err := buildSourceAuth(opts, ioStreams.In)
 	if err != nil {
 		return err
@@ -205,6 +210,15 @@ func runCopy(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams,
 
 	ctx, cancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
 	defer cancel()
+
+	if opts.AllTags {
+		return runCopyAllTagsFlow(ctx, cancel, cmd, f, ioStreams, srcReg, dstReg, srcRef, args, creds, opts)
+	}
+
+	dstRef, err := resolveCopyDestination(args, srcRef, creds)
+	if err != nil {
+		return err
+	}
 
 	srcString := srcRef.String()
 	dstString := dstRef.String()
@@ -572,10 +586,10 @@ func buildCopyPayload(src, dst string, r copyResult) copyPayload {
 		BytesTotal:       r.bytesTotal,
 		BytesTransferred: r.bytesTransferred,
 		DurationMs:       r.duration.Milliseconds(),
-		Status:           "copied",
+		Status:           copyStatusCopied,
 	}
 	if r.err != nil {
-		p.Status = "failed"
+		p.Status = copyStatusFailed
 		p.Error = r.err.Error()
 		var ae *cmdutil.AgentError
 		if errors.As(r.err, &ae) {
@@ -583,4 +597,499 @@ func buildCopyPayload(src, dst string, r copyResult) copyPayload {
 		}
 	}
 	return p
+}
+
+// ---------- --all-tags implementation ----------
+
+// copyTagResult is the per-tag row in the --all-tags structured payload.
+type copyTagResult struct {
+	Tag        string `json:"tag"                    yaml:"tag"`
+	Src        string `json:"src"                    yaml:"src"`
+	Dst        string `json:"dst"                    yaml:"dst"`
+	Bytes      int64  `json:"bytes"                  yaml:"bytes"`
+	Status     string `json:"status"                 yaml:"status"` // "succeeded" | "failed"
+	Error      string `json:"error,omitempty"        yaml:"error,omitempty"`
+	ErrorCode  string `json:"error_code,omitempty"   yaml:"error_code,omitempty"`
+	DurationMs int64  `json:"duration_ms"            yaml:"duration_ms"`
+}
+
+// allTagsSummary is the aggregate counts across all per-tag results.
+type allTagsSummary struct {
+	Total     int `json:"total"     yaml:"total"`
+	Succeeded int `json:"succeeded" yaml:"succeeded"`
+	Failed    int `json:"failed"    yaml:"failed"`
+}
+
+// allTagsOutput is the --all-tags structured-output shape.
+type allTagsOutput struct {
+	Results []copyTagResult `json:"results" yaml:"results"`
+	Summary allTagsSummary  `json:"summary" yaml:"summary"`
+}
+
+// copyJob is a unit of work sent from the producer to the worker pool.
+type copyJob struct {
+	Index int
+	Tag   string
+}
+
+// copyJobResult is a completed unit of work returned by a worker.
+type copyJobResult struct {
+	Index int
+	Tag   string
+	Src   string
+	Dst   string
+	Err   error
+	Bytes int64
+	Took  time.Duration
+}
+
+// resolveImageJobs clamps the requested image-level parallelism against the
+// available hardware concurrency and the number of tags. Extracted with
+// hwConcurrency as an explicit parameter so tests can drive the decision
+// matrix deterministically without depending on runtime.NumCPU() of the
+// test host.
+//
+// Rules:
+//   - User-provided values > 0 win, but are clamped to min(hw, 8). We cap
+//     at 8 because VCR is a single backend — spraying more than 8
+//     concurrent pushes at one host creates more head-of-line blocking
+//     than throughput, and ggcr's per-image layer fan-out already
+//     saturates a typical link at 3-4 concurrent images.
+//   - Auto (userValue <= 0): 1 for tiny repos (<4 tags), otherwise hw/2
+//     capped at 4. The cap keeps a 32-core laptop from DoSing a small
+//     registry while still giving slow links a useful speedup.
+func resolveImageJobs(userValue, tagCount, hwConcurrency int) int {
+	hw := hwConcurrency
+	if hw < 1 {
+		hw = 1
+	}
+	maxAllowed := hw
+	if maxAllowed > 8 {
+		maxAllowed = 8
+	}
+	if userValue > 0 {
+		if userValue > maxAllowed {
+			return maxAllowed
+		}
+		return userValue
+	}
+	if tagCount < 4 {
+		return 1
+	}
+	half := hw / 2
+	if half < 1 {
+		half = 1
+	}
+	if half > 4 {
+		return 4
+	}
+	return half
+}
+
+// runCopyAllTagsFlow is the --all-tags entry point. It validates src/dst
+// shape, fetches the tag list, and delegates the fan-out to
+// runCopyAllTagsPool.
+//
+//nolint:gocritic // hugeParam: Ref is an immutable value type; contract uses value receivers uniformly (see refname.go).
+func runCopyAllTagsFlow(
+	ctx context.Context,
+	cancel context.CancelFunc,
+	cmd *cobra.Command,
+	f cmdutil.Factory,
+	ioStreams cmdutil.IOStreams,
+	srcReg Registry,
+	dstReg Registry,
+	srcRef Ref,
+	args []string,
+	creds *options.RegistryCredentials,
+	opts *copyOptions,
+) error {
+	// An explicit source tag contradicts --all-tags semantics (we'd be
+	// enumerating the tags of a repo that the user then narrowed to one).
+	// defaultTag ("latest") is the ggcr fallback when no tag is supplied,
+	// so only reject when the user gave something OTHER than "latest" —
+	// bare "docker.io/library/nginx" should still work.
+	if hasExplicitTag(args[0]) {
+		return cmdutil.UsageErrorf(cmd, "--all-tags is incompatible with a source tag; remove the :tag suffix")
+	}
+
+	dstBase, err := resolveCopyAllTagsDestination(cmd, args, srcRef, creds)
+	if err != nil {
+		return err
+	}
+
+	// Tags() expects a repository path; include the source host prefix
+	// because the source-side Registry is built with an empty default
+	// host (source refs must be fully qualified). Without the prefix,
+	// ggcr would either fall back to docker.io or emit a hostless URL.
+	srcRepoPath := srcRef.Host + "/" + srcRef.FullRepository()
+	tags, err := srcReg.Tags(ctx, srcRepoPath)
+	if err != nil {
+		return translateError(err)
+	}
+	if len(tags) == 0 {
+		_, _ = fmt.Fprintln(ioStreams.Out, "No tags found in source repository.")
+		if isStructuredFormat(f.OutputFormat()) {
+			// Still emit an empty structured payload so scripts get a
+			// parseable envelope.
+			empty := allTagsOutput{Results: []copyTagResult{}}
+			_, werr := cmdutil.WriteStructured(ioStreams.Out, f.OutputFormat(), empty)
+			return werr
+		}
+		return nil
+	}
+
+	imageJobs := resolveImageJobs(opts.ImageJobs, len(tags), runtime.NumCPU())
+
+	results := runCopyAllTagsPool(ctx, cancel, srcReg, dstReg, srcRef, dstBase, tags, imageJobs, creds, opts, f, ioStreams)
+
+	summary := summarizeCopyResults(results)
+
+	if handled, err := writeAllTagsStructured(ioStreams, f.OutputFormat(), results, summary); handled {
+		return err
+	}
+
+	// Human-readable summary.
+	for _, r := range results {
+		if r.Err != nil {
+			_, _ = fmt.Fprintf(ioStreams.ErrOut, "FAILED %s -> %s: %v\n", r.Src, r.Dst, r.Err)
+			continue
+		}
+		if opts.Progress != progressNone {
+			_, _ = fmt.Fprintf(ioStreams.Out, "copied %s -> %s\n", r.Src, r.Dst)
+		}
+	}
+	if opts.Progress != progressNone {
+		_, _ = fmt.Fprintf(ioStreams.Out, "Copied %d of %d tag%s (%d failed).\n",
+			summary.Succeeded, summary.Total, pluralS(summary.Total), summary.Failed)
+	}
+
+	if summary.Failed > 0 {
+		return newPartialFailureError(summary)
+	}
+	return nil
+}
+
+// writeAllTagsStructured writes the --all-tags structured payload when the
+// output format is structured. Returns (handled=true, err) when the
+// caller should return immediately; handled=false means the caller should
+// fall through to human-readable rendering.
+func writeAllTagsStructured(ioStreams cmdutil.IOStreams, outputFormat string, results []copyJobResult, summary allTagsSummary) (bool, error) {
+	if !isStructuredFormat(outputFormat) {
+		return false, nil
+	}
+	payload := buildAllTagsOutput(results, summary)
+	wrote, werr := cmdutil.WriteStructured(ioStreams.Out, outputFormat, payload)
+	if !wrote {
+		return false, nil
+	}
+	if werr != nil {
+		return true, werr
+	}
+	if summary.Failed > 0 {
+		return true, newPartialFailureError(summary)
+	}
+	return true, nil
+}
+
+// hasExplicitTag reports whether a raw source reference carries an explicit
+// :tag suffix the user typed. A bare "docker.io/library/nginx" returns
+// false even though the parsed Ref has Tag="latest" (the ggcr default).
+// We scan right-to-left for ':' after the last '/' so host:port authority
+// components ("registry.local:5000/app") don't trigger a false positive.
+func hasExplicitTag(raw string) bool {
+	// Peel any '@digest' suffix; digests are incompatible with --all-tags
+	// but we leave that check to the ref parser which already ran.
+	if at := lastIndexByte(raw, '@'); at >= 0 {
+		raw = raw[:at]
+	}
+	slash := lastIndexByte(raw, '/')
+	colon := lastIndexByte(raw, ':')
+	return colon > slash
+}
+
+// lastIndexByte mirrors strings.LastIndexByte without pulling strings into
+// this call site; keeps the helper local since hasExplicitTag is the only
+// consumer.
+func lastIndexByte(s string, c byte) int {
+	for i := len(s) - 1; i >= 0; i-- {
+		if s[i] == c {
+			return i
+		}
+	}
+	return -1
+}
+
+// resolveCopyAllTagsDestination computes the "base" destination Ref (no
+// tag) for --all-tags. The returned Ref's Tag field is intentionally empty;
+// runCopyAllTagsPool fills it in per iteration via Ref.WithTag.
+//
+//nolint:gocritic // hugeParam: Ref uses value receivers uniformly per refname.go contract.
+func resolveCopyAllTagsDestination(cmd *cobra.Command, args []string, src Ref, creds *options.RegistryCredentials) (Ref, error) {
+	if len(args) >= 2 {
+		// Reject an explicit dst tag for the same reason we reject an
+		// explicit src tag: --all-tags implies the tag list comes from
+		// the source, not the user.
+		if hasExplicitTag(args[1]) {
+			return Ref{}, cmdutil.UsageErrorf(cmd,
+				"--all-tags is incompatible with a destination tag; remove the :tag suffix from %q", args[1])
+		}
+		ref, err := Normalize(args[1], creds)
+		if err != nil {
+			return Ref{}, &cmdutil.AgentError{
+				Code:     kindRegistryInvalidReference,
+				Message:  err.Error(),
+				ExitCode: cmdutil.ExitBadArgs,
+			}
+		}
+		// Clear whatever tag Normalize defaulted in; the per-tag fan-out
+		// supplies the real tag.
+		ref.Tag = ""
+		ref.Digest = ""
+		return ref, nil
+	}
+	if creds == nil || creds.Endpoint == "" || creds.ProjectID == "" {
+		return Ref{}, &cmdutil.AgentError{
+			Code:     kindRegistryNotConfigured,
+			Message:  "Registry is not configured. Run `verda registry configure` first.",
+			ExitCode: cmdutil.ExitAuth,
+		}
+	}
+	fullRepo := src.Repository
+	if src.Project != "" {
+		fullRepo = src.Project + "/" + src.Repository
+	}
+	return Ref{
+		Host:       creds.Endpoint,
+		Project:    creds.ProjectID,
+		Repository: fullRepo,
+	}, nil
+}
+
+// runCopyAllTagsPool spins up imageJobs worker goroutines and distributes
+// per-tag copy jobs across them. Partial-success semantics: a failure on
+// one tag never cancels siblings, so the user always sees the full result
+// set. Ctrl-C propagates through ctx.Done to abort in-flight writes.
+//
+// We use sync.WaitGroup + channels rather than errgroup because errgroup
+// cancels every sibling on the first error, which would mask the failure
+// mode we want to surface (e.g. "2 tags copied, 1 failed with AUTH").
+//
+//nolint:gocritic // hugeParam: Ref is an immutable value type; contract uses value receivers uniformly (see refname.go).
+func runCopyAllTagsPool(
+	ctx context.Context,
+	cancel context.CancelFunc,
+	srcReg Registry,
+	dstReg Registry,
+	srcBase Ref,
+	dstBase Ref,
+	tags []string,
+	imageJobs int,
+	creds *options.RegistryCredentials,
+	opts *copyOptions,
+	f cmdutil.Factory,
+	ioStreams cmdutil.IOStreams,
+) []copyJobResult {
+	rows := make([]imageRow, len(tags))
+	for i, t := range tags {
+		rows[i] = imageRow{
+			Ref:   srcBase.WithTag(t).String(),
+			Dst:   dstBase.WithTag(t).String(),
+			State: stateQueued,
+		}
+	}
+
+	useTUI := shouldUseBubbleteaCopy(opts, f.OutputFormat(), ioStreams.ErrOut)
+	var program *tea.Program
+	if useTUI {
+		model := newPushViewModel(creds.Endpoint, creds.ProjectID, rows, cancel)
+		program = tea.NewProgram(model, tea.WithOutput(ioStreams.ErrOut))
+	}
+
+	jobs := make(chan copyJob)
+	resultsCh := make(chan copyJobResult, len(tags))
+
+	var wg sync.WaitGroup
+	for w := 0; w < imageJobs; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := range jobs {
+				r := copyOneTag(ctx, program, srcReg, dstReg, srcBase, dstBase, j, opts, creds)
+				resultsCh <- r
+			}
+		}()
+	}
+
+	// Producer: fans tags into jobs, closes the channel once exhausted.
+	go func() {
+		for i, t := range tags {
+			select {
+			case <-ctx.Done():
+				// Stop enqueueing; workers drain whatever they already
+				// picked up and we move on to shutdown.
+				close(jobs)
+				return
+			case jobs <- copyJob{Index: i, Tag: t}:
+			}
+		}
+		close(jobs)
+	}()
+
+	// Closer: waits for all workers, then closes resultsCh so the drainer
+	// can terminate.
+	go func() {
+		wg.Wait()
+		close(resultsCh)
+	}()
+
+	// Drainer: accumulates results in index order and pushes progress
+	// events to the TUI (when enabled). Runs in a dedicated goroutine so
+	// the main goroutine can drive program.Run synchronously.
+	done := make(chan []copyJobResult, 1)
+	go func() {
+		results := make([]copyJobResult, len(tags))
+		var completed int
+		for r := range resultsCh {
+			results[r.Index] = r
+			completed++
+			if program != nil {
+				program.Send(pushResultMsg{Index: r.Index, Err: r.Err})
+				program.Send(pushHeaderNoteMsg{
+					Note: fmt.Sprintf("copied %d of %d tag%s", completed, len(tags), pluralS(len(tags))),
+				})
+			}
+		}
+		if program != nil {
+			program.Quit()
+		}
+		done <- results
+	}()
+
+	if useTUI {
+		if _, err := program.Run(); err != nil {
+			_, _ = fmt.Fprintf(ioStreams.ErrOut, "copy: progress view error: %v\n", err)
+		}
+	}
+	return <-done
+}
+
+// copyOneTag performs a single Read+Write transfer for a given tag and
+// reports progress into the bubbletea program when one is supplied. Safe
+// to call from multiple goroutines; all shared state lives on the Registry
+// implementations, which the caller is responsible for making concurrency-
+// safe (ggcrRegistry is; transport-level state is per-request).
+//
+//nolint:gocritic // hugeParam: Ref is an immutable value type; contract uses value receivers uniformly (see refname.go).
+func copyOneTag(
+	ctx context.Context,
+	program *tea.Program,
+	srcReg Registry,
+	dstReg Registry,
+	srcBase Ref,
+	dstBase Ref,
+	job copyJob,
+	opts *copyOptions,
+	creds *options.RegistryCredentials,
+) copyJobResult {
+	srcRef := srcBase.WithTag(job.Tag)
+	dstRef := dstBase.WithTag(job.Tag)
+	res := copyJobResult{
+		Index: job.Index,
+		Tag:   job.Tag,
+		Src:   srcRef.String(),
+		Dst:   dstRef.String(),
+	}
+
+	img, err := srcReg.Read(ctx, res.Src)
+	if err != nil {
+		res.Err = translateError(err)
+		return res
+	}
+
+	progressCh := make(chan v1.Update, 16)
+	forwardDone := make(chan struct{})
+	var last v1.Update
+	var gotAny bool
+	go func() {
+		defer close(forwardDone)
+		for u := range progressCh {
+			last = u
+			gotAny = true
+			if program != nil {
+				program.Send(pushProgressMsg{Index: job.Index, Update: u})
+			}
+		}
+	}()
+
+	start := time.Now()
+	wo := WriteOptions{Jobs: opts.Jobs, Progress: progressCh}
+	writeErr := dstReg.Write(ctx, res.Dst, img, wo)
+	<-forwardDone
+	res.Took = time.Since(start)
+
+	if gotAny {
+		res.Bytes = last.Complete
+	}
+	res.Err = translateErrorWithExpiry(writeErr, creds)
+	return res
+}
+
+// summarizeCopyResults computes the aggregate counts for the structured
+// payload and the exit-code decision.
+func summarizeCopyResults(results []copyJobResult) allTagsSummary {
+	s := allTagsSummary{Total: len(results)}
+	for _, r := range results {
+		if r.Err != nil {
+			s.Failed++
+		} else {
+			s.Succeeded++
+		}
+	}
+	return s
+}
+
+// buildAllTagsOutput assembles the structured --all-tags payload.
+func buildAllTagsOutput(results []copyJobResult, summary allTagsSummary) allTagsOutput {
+	out := allTagsOutput{
+		Results: make([]copyTagResult, len(results)),
+		Summary: summary,
+	}
+	for i, r := range results {
+		row := copyTagResult{
+			Tag:        r.Tag,
+			Src:        r.Src,
+			Dst:        r.Dst,
+			Bytes:      r.Bytes,
+			DurationMs: r.Took.Milliseconds(),
+			Status:     copyStatusSucceeded,
+		}
+		if r.Err != nil {
+			row.Status = copyStatusFailed
+			row.Error = r.Err.Error()
+			var ae *cmdutil.AgentError
+			if errors.As(r.Err, &ae) {
+				row.ErrorCode = ae.Code
+			}
+		}
+		out.Results[i] = row
+	}
+	return out
+}
+
+// newPartialFailureError surfaces a non-zero exit code when any tag copy
+// failed. We embed the summary counts as details so agent-mode consumers
+// can dispatch on specifics without re-parsing the structured payload.
+func newPartialFailureError(s allTagsSummary) error {
+	return &cmdutil.AgentError{
+		Code: kindRegistryCopyPartialFailure,
+		Message: fmt.Sprintf("%d of %d tag copies failed",
+			s.Failed, s.Total),
+		Details: map[string]any{
+			"total":     s.Total,
+			"succeeded": s.Succeeded,
+			"failed":    s.Failed,
+		},
+		ExitCode: cmdutil.ExitAPI,
+	}
 }

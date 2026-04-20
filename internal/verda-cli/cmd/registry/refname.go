@@ -100,6 +100,19 @@ func (r Ref) FullRepository() string {
 	return r.Project + "/" + r.Repository
 }
 
+// WithTag returns a copy of r with Tag replaced by tag and Digest cleared.
+// Used by the copy --all-tags fan-out to produce a per-tag reference from a
+// repo-only source or destination Ref without mutating the original.
+// Ref is an immutable value type; value receivers are enforced package-wide.
+//
+//nolint:gocritic // hugeParam: Ref is an immutable value type; contract uses value receivers uniformly.
+func (r Ref) WithTag(tag string) Ref {
+	out := r
+	out.Tag = tag
+	out.Digest = ""
+	return out
+}
+
 // hasProjectNamespace reports whether a registry host is conventionally
 // organized as "<namespace>/<repo>" (Docker Hub, VCR, GHCR-style public
 // hosts) rather than an opaque self-hosted registry.

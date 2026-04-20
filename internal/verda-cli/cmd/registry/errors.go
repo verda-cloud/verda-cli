@@ -33,18 +33,19 @@ import (
 // translateError / translateErrorWithExpiry so ggcr transport details
 // never leak to callers.
 const (
-	kindRegistryAuthFailed        = "registry_auth_failed"
-	kindRegistryCredentialExpired = "registry_credential_expired" //nolint:gosec // error-code constant, not a credential
-	kindRegistryNotConfigured     = "registry_not_configured"
-	kindRegistryRepoNotFound      = "registry_repo_not_found"
-	kindRegistryTagNotFound       = "registry_tag_not_found"
-	kindRegistryAccessDenied      = "registry_access_denied"
-	kindRegistryRateLimited       = "registry_rate_limited"
-	kindRegistryUploadFailed      = "registry_upload_failed"
-	kindRegistryInvalidReference  = "registry_invalid_reference"
-	kindRegistryUnreachable       = "registry_unreachable"
-	kindRegistryInternalError     = "registry_internal_error"
-	kindRegistryNoImageSource     = "registry_no_image_source"
+	kindRegistryAuthFailed         = "registry_auth_failed"
+	kindRegistryCredentialExpired  = "registry_credential_expired" //nolint:gosec // error-code constant, not a credential
+	kindRegistryNotConfigured      = "registry_not_configured"
+	kindRegistryRepoNotFound       = "registry_repo_not_found"
+	kindRegistryTagNotFound        = "registry_tag_not_found"
+	kindRegistryAccessDenied       = "registry_access_denied"
+	kindRegistryRateLimited        = "registry_rate_limited"
+	kindRegistryUploadFailed       = "registry_upload_failed"
+	kindRegistryInvalidReference   = "registry_invalid_reference"
+	kindRegistryUnreachable        = "registry_unreachable"
+	kindRegistryInternalError      = "registry_internal_error"
+	kindRegistryNoImageSource      = "registry_no_image_source"
+	kindRegistryCopyPartialFailure = "registry_copy_partial_failure"
 )
 
 // translateError maps a generic ggcr/network error to a *cmdutil.AgentError.
