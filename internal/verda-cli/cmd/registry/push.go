@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/spf13/cobra"
@@ -166,15 +167,16 @@ func runPush(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams,
 	}
 
 	if len(args) == 0 {
-		// Interactive multi-select picker is Task 23/24. For now surface a
-		// structured error pointing the user at the flag-driven usage.
-		return &cmdutil.AgentError{
-			Code: kindRegistryInvalidReference,
-			Message: "interactive push picker is not yet wired; " +
-				"pass at least one image reference as a positional argument " +
-				"(e.g. `verda registry push my-app:v1`)",
-			ExitCode: cmdutil.ExitBadArgs,
+		picked, proceed, err := resolveZeroArgs(cmd.Context(), f, ioStreams, creds)
+		if err != nil {
+			return err
 		}
+		if !proceed {
+			// User canceled the picker OR there were no local images /
+			// they deselected everything. Either way exit 0 quietly.
+			return nil
+		}
+		args = picked
 	}
 	if len(args) > 1 && (opts.Repo != "" || opts.Tag != "") {
 		return cmdutil.UsageErrorf(cmd,
@@ -535,4 +537,180 @@ func runPushBubbletea(
 	}
 
 	return results
+}
+
+// --- interactive picker wiring (Task 24) ---
+
+// daemonPingTimeout bounds the initial reachability probe. Short enough
+// that users aren't stuck staring at a blank terminal when Docker isn't
+// running; long enough that a cold socket still gets a fair shot.
+const daemonPingTimeout = 5 * time.Second
+
+// isInteractivePush decides whether a zero-arg `verda registry push`
+// invocation should enter the interactive picker flow. It gates on two
+// independent signals:
+//
+//  1. Agent mode (--agent) disables all TUI unconditionally. This keeps
+//     the JSON/structured-output contract intact for automation and
+//     mirrors every other command that falls back to flag-only mode
+//     under --agent.
+//  2. ErrOut must be an actual terminal. A piped/redirected ErrOut
+//     cannot render the picker or receive synthetic key presses, so we
+//     refuse rather than spin forever on a non-interactive stream.
+//
+// Note: we gate on `isTerminalFn(errOut)` directly rather than reusing
+// shouldUseBubbletea() — shouldUseBubbletea mixes in the --progress and
+// --output flags, which govern the progress view after an image has
+// been selected, not the picker itself. Users running with -o json or
+// --progress=plain should still be able to pick images interactively;
+// the downstream push just won't render the fancy progress view.
+func isInteractivePush(f cmdutil.Factory, errOut io.Writer) bool {
+	if f.AgentMode() {
+		return false
+	}
+	return isTerminalFn(errOut)
+}
+
+// runPickerFn is the swappable driver that runs the picker TUI and
+// returns the user's selection. Production code wires this to
+// runPickerTUI (a real tea.Program). Tests reassign it to return canned
+// (refs, proceed) values so the picker flow can be asserted without
+// driving a TUI through stdin emulation.
+var runPickerFn = runPickerTUI
+
+// resolveZeroArgs handles the `verda registry push` no-positional-args
+// case. It returns either a clear "needs a TTY" error (agent mode or
+// non-TTY ErrOut) or delegates to listAndPickImages for the real
+// interactive picker flow.
+//
+// The (refs, proceed, err) contract matches listAndPickImages so the
+// caller's branch stays small: proceed=false collapses cancel / empty
+// / empty-daemon-list into a single exit-0 path.
+func resolveZeroArgs(
+	ctx context.Context,
+	f cmdutil.Factory,
+	ioStreams cmdutil.IOStreams,
+	creds *options.RegistryCredentials,
+) (refs []string, proceed bool, err error) {
+	if !isInteractivePush(f, ioStreams.ErrOut) {
+		return nil, false, &cmdutil.AgentError{
+			Code: kindRegistryInvalidReference,
+			Message: "interactive push requires a TTY; " +
+				"pass image references as arguments " +
+				"(e.g. `verda registry push my-app:v1`), " +
+				"or use --source oci|tar with a path",
+			ExitCode: cmdutil.ExitBadArgs,
+		}
+	}
+	return listAndPickImages(ctx, f, ioStreams, creds)
+}
+
+// listAndPickImages is the zero-arg interactive flow. It pings the
+// daemon, lists images, runs the picker, and returns the selected
+// refs. The returned proceed flag is false when the user canceled OR
+// when no images were available / nothing was ticked — in either case
+// the caller should exit 0 without pushing.
+//
+// creds is passed in (rather than re-loaded) because the caller has
+// already validated expiry. The picker only uses creds to build the
+// destination hint for the header — it never dials the registry.
+func listAndPickImages(
+	ctx context.Context,
+	f cmdutil.Factory,
+	ioStreams cmdutil.IOStreams,
+	creds *options.RegistryCredentials,
+) (refs []string, proceed bool, err error) {
+	lister, lerr := daemonListerBuilder()
+	if lerr != nil {
+		return nil, false, interactiveNoImageSourceError(lerr)
+	}
+
+	pingCtx, pingCancel := context.WithTimeout(ctx, daemonPingTimeout)
+	defer pingCancel()
+	if perr := lister.Ping(pingCtx); perr != nil {
+		return nil, false, interactiveNoImageSourceError(perr)
+	}
+
+	listCtx, listCancel := context.WithTimeout(ctx, f.Options().Timeout)
+	defer listCancel()
+	images, lerr := lister.List(listCtx)
+	if lerr != nil {
+		return nil, false, lerr
+	}
+
+	if len(images) == 0 {
+		_, _ = fmt.Fprintln(ioStreams.Out,
+			"No local Docker images found. Build an image (e.g. `docker build -t my-app .`) "+
+				"or provide a source: --source oci|tar.")
+		return nil, false, nil
+	}
+
+	picked, ok := runPickerFn(ctx, ioStreams, images, creds)
+	if !ok {
+		// User pressed Esc / Ctrl+C.
+		return nil, false, nil
+	}
+	if len(picked) == 0 {
+		// User pressed Enter with nothing ticked — treat as a graceful
+		// bow-out, not an error.
+		return nil, false, nil
+	}
+	return picked, true, nil
+}
+
+// runPickerTUI is the production picker driver. It runs
+// pushPickerModel via tea.Program, writing only to ErrOut so a caller
+// piping stdout gets nothing from the picker itself.
+//
+// Returns (refs, true) when the user pressed Enter; (nil, false) on
+// cancel (Esc/Ctrl+C) or TUI setup failure. The caller distinguishes
+// "submitted empty" from "canceled" by the length of refs combined
+// with the proceed flag.
+func runPickerTUI(
+	_ context.Context,
+	ioStreams cmdutil.IOStreams,
+	images []DaemonImage,
+	creds *options.RegistryCredentials,
+) ([]string, bool) {
+	dst := creds.Endpoint + "/" + creds.ProjectID
+	model := newPushPickerModelWithHeader(images, dst)
+	program := tea.NewProgram(model, tea.WithOutput(ioStreams.ErrOut))
+
+	if _, err := program.Run(); err != nil {
+		_, _ = fmt.Fprintf(ioStreams.ErrOut, "push picker: %v\n", err)
+		return nil, false
+	}
+	if model.Canceled() {
+		return nil, false
+	}
+	selected := model.Selected()
+	refs := make([]string, 0, len(selected))
+	for _, it := range selected {
+		refs = append(refs, it.Ref)
+	}
+	// proceed=true even when refs is empty — the caller collapses both
+	// "empty selection" and "canceled" to exit 0, but keeping them
+	// distinguishable in the protocol makes future error-reporting work
+	// possible (e.g. telemetry could count empty submits).
+	return refs, true
+}
+
+// interactiveNoImageSourceError is the zero-arg picker counterpart to
+// daemonUnreachableError. The message lives here rather than in
+// source.go so the friendly "pass image refs" hint lines up with the
+// zero-arg flow (where --source isn't the only fix available).
+func interactiveNoImageSourceError(underlying error) error {
+	return &cmdutil.AgentError{
+		Code: kindRegistryNoImageSource,
+		Message: fmt.Sprintf(
+			"Docker daemon not reachable (%s); "+
+				"pass image references as arguments (e.g. `verda registry push my-app:v1`) "+
+				"or use --source oci|tar with a path",
+			underlying.Error(),
+		),
+		Details: map[string]any{
+			"daemon_error": underlying.Error(),
+		},
+		ExitCode: cmdutil.ExitAPI,
+	}
 }

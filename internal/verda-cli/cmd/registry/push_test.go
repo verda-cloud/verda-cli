@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -499,14 +500,76 @@ func TestPush_JSONOutput(t *testing.T) {
 	}
 }
 
-// TestPush_InteractiveMode_ReturnsNotYetWiredError: zero positional args
-// in agent mode → structured error pointing users at the flag-driven
-// usage. The interactive picker is Task 23/24.
-func TestPush_InteractiveMode_ReturnsNotYetWiredError(t *testing.T) {
+// ---------- interactive picker helpers ----------
+
+// fakePickerDaemon is a minimal DaemonLister double for the interactive
+// picker tests. pingErr / listErr / images are read at call time so tests
+// can mutate the struct before invoking the command.
+type fakePickerDaemon struct {
+	pingErr  error
+	listErr  error
+	images   []DaemonImage
+	pingHits int
+	listHits int
+}
+
+func (f *fakePickerDaemon) Ping(_ context.Context) error {
+	f.pingHits++
+	return f.pingErr
+}
+
+func (f *fakePickerDaemon) List(_ context.Context) ([]DaemonImage, error) {
+	f.listHits++
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	out := make([]DaemonImage, len(f.images))
+	copy(out, f.images)
+	return out, nil
+}
+
+// withFakeDaemonLister swaps daemonListerBuilder to return fake. The
+// returned *fakePickerDaemon is the same pointer the builder hands out,
+// so tests can mutate it after the swap.
+func withFakeDaemonLister(t *testing.T, fake *fakePickerDaemon) {
+	t.Helper()
+	prev := daemonListerBuilder
+	daemonListerBuilder = func() (DaemonLister, error) { return fake, nil }
+	t.Cleanup(func() { daemonListerBuilder = prev })
+}
+
+// withTerminalErrOut pretends ErrOut is a real TTY so isInteractivePush
+// returns true even with a *bytes.Buffer-backed stream. Restored on
+// cleanup.
+func withTerminalErrOut(t *testing.T, isTTY bool) {
+	t.Helper()
+	prev := isTerminalFn
+	isTerminalFn = func(_ io.Writer) bool { return isTTY }
+	t.Cleanup(func() { isTerminalFn = prev })
+}
+
+// withRunPickerFn swaps the picker driver with a stub that returns
+// canned (refs, proceed) values. Restored on cleanup.
+func withRunPickerFn(
+	t *testing.T,
+	stub func(ctx context.Context, ioStreams cmdutil.IOStreams, images []DaemonImage, creds *options.RegistryCredentials) ([]string, bool),
+) {
+	t.Helper()
+	prev := runPickerFn
+	runPickerFn = stub
+	t.Cleanup(func() { runPickerFn = prev })
+}
+
+// TestPush_InteractiveMode_AgentModeErrors: zero positional args in
+// agent mode → structured "requires a TTY" error. Never attempts a TUI,
+// never dials the daemon, never invokes the source loader.
+func TestPush_InteractiveMode_AgentModeErrors(t *testing.T) {
 	writeLsCredsFile(t, healthyPushCredsBody("vccr.io", "proj"))
 
 	fake := &fakeSourceLoader{}
 	withFakeSourceLoader(t, fake)
+	daemon := &fakePickerDaemon{}
+	withFakeDaemonLister(t, daemon)
 
 	f := cmdutil.NewTestFactory(nil)
 	f.AgentModeOverride = true
@@ -514,13 +577,255 @@ func TestPush_InteractiveMode_ReturnsNotYetWiredError(t *testing.T) {
 
 	err := runPushForTest(t, f, streams)
 	if err == nil {
-		t.Fatal("expected error when no args supplied")
+		t.Fatal("expected error when no args supplied in agent mode")
 	}
-	if !strings.Contains(err.Error(), "interactive push picker is not yet wired") {
+	if !strings.Contains(err.Error(), "interactive push requires a TTY") {
 		t.Errorf("unexpected error: %v", err)
 	}
 	if len(fake.loadCalls) != 0 {
-		t.Errorf("loader should not be called when no args, got %d call(s)", len(fake.loadCalls))
+		t.Errorf("loader should not be called in agent mode, got %d call(s)", len(fake.loadCalls))
+	}
+	if daemon.pingHits != 0 || daemon.listHits != 0 {
+		t.Errorf("daemon should not be probed in agent mode, got ping=%d list=%d",
+			daemon.pingHits, daemon.listHits)
+	}
+}
+
+// TestPush_InteractiveMode_NonTTYErrors: zero positional args with
+// ErrOut non-TTY → same "requires a TTY" error. Guards against a piped
+// ErrOut accidentally entering the picker path.
+func TestPush_InteractiveMode_NonTTYErrors(t *testing.T) {
+	writeLsCredsFile(t, healthyPushCredsBody("vccr.io", "proj"))
+
+	fake := &fakeSourceLoader{}
+	withFakeSourceLoader(t, fake)
+	daemon := &fakePickerDaemon{}
+	withFakeDaemonLister(t, daemon)
+	withTerminalErrOut(t, false) // ErrOut is NOT a TTY
+
+	f := cmdutil.NewTestFactory(nil)
+	streams, _, _ := newLsStreams()
+
+	err := runPushForTest(t, f, streams)
+	if err == nil {
+		t.Fatal("expected error when no args supplied with non-TTY ErrOut")
+	}
+	if !strings.Contains(err.Error(), "interactive push requires a TTY") {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if daemon.pingHits != 0 || daemon.listHits != 0 {
+		t.Errorf("daemon should not be probed without a TTY, got ping=%d list=%d",
+			daemon.pingHits, daemon.listHits)
+	}
+}
+
+// TestPush_InteractiveMode_NoDaemon: zero args + TTY + daemon ping
+// fails → registry_no_image_source error. Picker never invoked.
+func TestPush_InteractiveMode_NoDaemon(t *testing.T) {
+	writeLsCredsFile(t, healthyPushCredsBody("vccr.io", "proj"))
+
+	fake := &fakeSourceLoader{}
+	withFakeSourceLoader(t, fake)
+	daemon := &fakePickerDaemon{pingErr: errors.New("docker daemon not reachable")}
+	withFakeDaemonLister(t, daemon)
+	withTerminalErrOut(t, true)
+
+	pickerHits := 0
+	withRunPickerFn(t, func(_ context.Context, _ cmdutil.IOStreams, _ []DaemonImage, _ *options.RegistryCredentials) ([]string, bool) {
+		pickerHits++
+		return nil, false
+	})
+
+	f := cmdutil.NewTestFactory(nil)
+	streams, _, _ := newLsStreams()
+
+	err := runPushForTest(t, f, streams)
+	if err == nil {
+		t.Fatal("expected registry_no_image_source error when daemon unreachable")
+	}
+	var ae *cmdutil.AgentError
+	if !errors.As(err, &ae) {
+		t.Fatalf("expected *AgentError, got %T (%v)", err, err)
+	}
+	if ae.Code != kindRegistryNoImageSource {
+		t.Errorf("Code = %q, want %q", ae.Code, kindRegistryNoImageSource)
+	}
+	if !strings.Contains(ae.Message, "Docker daemon not reachable") {
+		t.Errorf("expected friendly daemon message, got: %v", ae.Message)
+	}
+	if daemon.pingHits == 0 {
+		t.Error("expected Ping to be attempted")
+	}
+	if daemon.listHits != 0 {
+		t.Errorf("List should NOT be called when Ping fails, got %d call(s)", daemon.listHits)
+	}
+	if pickerHits != 0 {
+		t.Errorf("picker should NOT be invoked when daemon unreachable, got %d call(s)", pickerHits)
+	}
+}
+
+// TestPush_InteractiveMode_NoImages: zero args + daemon returns empty
+// list → prints helpful stdout message and exits 0. Picker never runs.
+func TestPush_InteractiveMode_NoImages(t *testing.T) {
+	writeLsCredsFile(t, healthyPushCredsBody("vccr.io", "proj"))
+
+	fake := &fakeSourceLoader{}
+	withFakeSourceLoader(t, fake)
+	daemon := &fakePickerDaemon{images: nil}
+	withFakeDaemonLister(t, daemon)
+	withTerminalErrOut(t, true)
+
+	pickerHits := 0
+	withRunPickerFn(t, func(_ context.Context, _ cmdutil.IOStreams, _ []DaemonImage, _ *options.RegistryCredentials) ([]string, bool) {
+		pickerHits++
+		return nil, false
+	})
+
+	f := cmdutil.NewTestFactory(nil)
+	streams, out, _ := newLsStreams()
+
+	if err := runPushForTest(t, f, streams); err != nil {
+		t.Fatalf("expected nil error on empty daemon list, got: %v", err)
+	}
+	got := out.String()
+	if !strings.Contains(got, "No local Docker images found") {
+		t.Errorf("expected helpful empty-state message on stdout, got:\n%s", got)
+	}
+	if daemon.listHits != 1 {
+		t.Errorf("expected List to be called once, got %d", daemon.listHits)
+	}
+	if pickerHits != 0 {
+		t.Errorf("picker should not be invoked on empty list, got %d call(s)", pickerHits)
+	}
+	if len(fake.loadCalls) != 0 {
+		t.Errorf("source loader should not be called, got %d call(s)", len(fake.loadCalls))
+	}
+}
+
+// TestPush_InteractiveMode_UserCancels: picker returns (nil, false) →
+// exit 0, nothing pushed. Stub picker so we don't drive a real TUI.
+func TestPush_InteractiveMode_UserCancels(t *testing.T) {
+	writeLsCredsFile(t, healthyPushCredsBody("vccr.io", "proj"))
+
+	fake := &fakeSourceLoader{}
+	withFakeSourceLoader(t, fake)
+	// A single fake image so the picker is reached (non-empty list).
+	daemon := &fakePickerDaemon{images: []DaemonImage{
+		{ID: "sha256:a", RepoTags: []string{"my-app:v1"}, Size: 100},
+	}}
+	withFakeDaemonLister(t, daemon)
+	withTerminalErrOut(t, true)
+
+	withRunPickerFn(t, func(_ context.Context, _ cmdutil.IOStreams, _ []DaemonImage, _ *options.RegistryCredentials) ([]string, bool) {
+		return nil, false
+	})
+
+	// Registry should NOT be called — swap in a recording one so accidental
+	// dispatch panics loudly.
+	fakeReg := &recordingRegistry{}
+	withFakeRegistry(t, fakeReg)
+
+	f := cmdutil.NewTestFactory(nil)
+	streams, _, _ := newLsStreams()
+
+	if err := runPushForTest(t, f, streams); err != nil {
+		t.Fatalf("cancel should exit 0, got: %v", err)
+	}
+	if len(fake.loadCalls) != 0 {
+		t.Errorf("source loader should not be called on cancel, got %d call(s)", len(fake.loadCalls))
+	}
+}
+
+// TestPush_InteractiveMode_EmptySelection: picker returns ([]string{},
+// true) → exit 0, nothing pushed. Unticking everything is not an error.
+func TestPush_InteractiveMode_EmptySelection(t *testing.T) {
+	writeLsCredsFile(t, healthyPushCredsBody("vccr.io", "proj"))
+
+	fake := &fakeSourceLoader{}
+	withFakeSourceLoader(t, fake)
+	daemon := &fakePickerDaemon{images: []DaemonImage{
+		{ID: "sha256:a", RepoTags: []string{"my-app:v1"}, Size: 100},
+	}}
+	withFakeDaemonLister(t, daemon)
+	withTerminalErrOut(t, true)
+
+	withRunPickerFn(t, func(_ context.Context, _ cmdutil.IOStreams, _ []DaemonImage, _ *options.RegistryCredentials) ([]string, bool) {
+		return []string{}, true
+	})
+
+	fakeReg := &recordingRegistry{}
+	withFakeRegistry(t, fakeReg)
+
+	f := cmdutil.NewTestFactory(nil)
+	streams, _, _ := newLsStreams()
+
+	if err := runPushForTest(t, f, streams); err != nil {
+		t.Fatalf("empty selection should exit 0, got: %v", err)
+	}
+	if len(fake.loadCalls) != 0 {
+		t.Errorf("source loader should not be called on empty selection, got %d call(s)", len(fake.loadCalls))
+	}
+}
+
+// TestPush_InteractiveMode_HappyPath: picker returns a ref which is
+// then pushed end-to-end through the real ggcr test server. Asserts
+// the selected image lands at the expected destination.
+func TestPush_InteractiveMode_HappyPath(t *testing.T) {
+	host := testServer(t)
+	writeLsCredsFile(t, healthyPushCredsBody(host, "proj"))
+
+	img := randomPushImage(t)
+	fake := &fakeSourceLoader{imagesByRef: map[string]v1.Image{"my-app:v1": img}}
+	withFakeSourceLoader(t, fake)
+
+	daemon := &fakePickerDaemon{images: []DaemonImage{
+		{ID: "sha256:a", RepoTags: []string{"my-app:v1"}, Size: 100},
+	}}
+	withFakeDaemonLister(t, daemon)
+	withTerminalErrOut(t, true)
+
+	pickerHits := 0
+	withRunPickerFn(t, func(_ context.Context, _ cmdutil.IOStreams, images []DaemonImage, creds *options.RegistryCredentials) ([]string, bool) {
+		pickerHits++
+		// Sanity: the picker driver must see the daemon's image list and
+		// correctly-constructed creds.
+		if len(images) != 1 || len(images[0].RepoTags) != 1 || images[0].RepoTags[0] != "my-app:v1" {
+			t.Errorf("picker received unexpected images: %+v", images)
+		}
+		if creds == nil || creds.ProjectID != "proj" {
+			t.Errorf("picker received unexpected creds: %+v", creds)
+		}
+		return []string{"my-app:v1"}, true
+	})
+
+	f := cmdutil.NewTestFactory(nil)
+	streams, out, _ := newLsStreams()
+
+	// --progress plain gates off the bubbletea progress view so the test
+	// doesn't try to drive a real TUI through a *bytes.Buffer.
+	// isInteractivePush ignores --progress (by design); the picker still
+	// runs. shouldUseBubbletea, which routes the downstream push, honors
+	// --progress=plain and picks the flat-text path.
+	if err := runPushForTest(t, f, streams, "--progress", "plain"); err != nil {
+		t.Fatalf("push (interactive happy path): %v", err)
+	}
+	if pickerHits != 1 {
+		t.Errorf("expected picker to run once, got %d", pickerHits)
+	}
+
+	// Verify the image landed at the expected destination.
+	dstReg := newGGCRRegistry(testCreds(host))
+	dstRef := host + "/proj/my-app:v1"
+	desc, err := dstReg.Head(context.Background(), dstRef)
+	if err != nil {
+		t.Fatalf("Head(%s): %v", dstRef, err)
+	}
+	wantDigest, _ := img.Digest()
+	if desc.Digest != wantDigest {
+		t.Errorf("digest mismatch: got %s, want %s", desc.Digest, wantDigest)
+	}
+	if !strings.Contains(out.String(), "pushed my-app:v1 ->") {
+		t.Errorf("expected summary line, got:\n%s", out.String())
 	}
 }
 
