@@ -41,6 +41,7 @@ func NewCmdRegistry(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Comma
 		NewCmdConfigure(f, ioStreams),
 		NewCmdShow(f, ioStreams),
 		NewCmdLogin(f, ioStreams),
+		NewCmdLs(f, ioStreams),
 	)
 	return cmd
 }
