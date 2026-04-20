@@ -72,7 +72,7 @@ func TestMv_Upload_SingleFile(t *testing.T) {
 	// no t.Parallel
 	tmp := t.TempDir()
 	src := filepath.Join(tmp, "hello.txt")
-	if err := os.WriteFile(src, []byte("hello world"), 0o644); err != nil {
+	if err := os.WriteFile(src, []byte("hello world"), 0o600); err != nil {
 		t.Fatalf("write tmp: %v", err)
 	}
 
@@ -134,7 +134,7 @@ func TestMv_Download_SingleFile(t *testing.T) {
 	if len(fakeT.downloads) != 1 {
 		t.Fatalf("Download calls = %d, want 1", len(fakeT.downloads))
 	}
-	body, err := os.ReadFile(dst)
+	body, err := os.ReadFile(dst) // #nosec G304 -- dst is under t.TempDir()
 	if err != nil {
 		t.Fatalf("ReadFile: %v", err)
 	}
@@ -212,7 +212,7 @@ func TestMv_Dryrun(t *testing.T) {
 	// no t.Parallel
 	tmp := t.TempDir()
 	src := filepath.Join(tmp, "hello.txt")
-	if err := os.WriteFile(src, []byte("hi"), 0o644); err != nil {
+	if err := os.WriteFile(src, []byte("hi"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -257,7 +257,7 @@ func TestMv_Upload_TransferFails_NoDelete(t *testing.T) {
 	// no t.Parallel
 	tmp := t.TempDir()
 	src := filepath.Join(tmp, "hello.txt")
-	if err := os.WriteFile(src, []byte("hello world"), 0o644); err != nil {
+	if err := os.WriteFile(src, []byte("hello world"), 0o600); err != nil {
 		t.Fatalf("write tmp: %v", err)
 	}
 

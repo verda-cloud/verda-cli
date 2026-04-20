@@ -19,6 +19,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -35,10 +36,10 @@ import (
 // and modification times to mt so tests can precisely control timestamps.
 func writeFileWithMtime(t *testing.T, path string, body []byte, mt time.Time) {
 	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
 	}
-	if err := os.WriteFile(path, body, 0o644); err != nil {
+	if err := os.WriteFile(path, body, 0o600); err != nil {
 		t.Fatalf("write %s: %v", path, err)
 	}
 	if err := os.Chtimes(path, mt, mt); err != nil {
@@ -108,7 +109,7 @@ func TestSync_LocalToS3_CopiesNewAndUpdated(t *testing.T) {
 	// should be skipped (size match + not-newer).
 	gotKeys := sortedUploadKeys(fakeT.uploads)
 	wantKeys := []string{"prefix/b.txt", "prefix/c.txt"}
-	if !equalStrings(gotKeys, wantKeys) {
+	if !slices.Equal(gotKeys, wantKeys) {
 		t.Fatalf("uploaded keys = %v, want %v", gotKeys, wantKeys)
 	}
 	// No deletes without --delete.
@@ -156,7 +157,7 @@ func TestSync_S3ToLocal_Download(t *testing.T) {
 	}
 	gotKeys := sortedDownloadKeys(fakeT.downloads)
 	wantKeys := []string{"data/b.txt"}
-	if !equalStrings(gotKeys, wantKeys) {
+	if !slices.Equal(gotKeys, wantKeys) {
 		t.Fatalf("downloaded keys = %v, want %v", gotKeys, wantKeys)
 	}
 	// b.txt now exists locally.
@@ -256,7 +257,7 @@ func TestSync_ExactTimestamps(t *testing.T) {
 		t.Fatalf("Execute (default): %v", err)
 	}
 	// a.txt is newer → uploaded. b.txt is exactly-equal → skipped.
-	if got := sortedUploadKeys(fakeT.uploads); !equalStrings(got, []string{"a.txt"}) {
+	if got := sortedUploadKeys(fakeT.uploads); !slices.Equal(got, []string{"a.txt"}) {
 		t.Fatalf("default uploads = %v, want [a.txt]", got)
 	}
 	restore()
@@ -286,7 +287,7 @@ func TestSync_ExactTimestamps(t *testing.T) {
 		t.Fatalf("Execute (exact-timestamps): %v", err)
 	}
 	// a.txt still uploaded (timestamps differ), b.txt still skipped (equal).
-	if got := sortedUploadKeys(fakeT2.uploads); !equalStrings(got, []string{"a.txt"}) {
+	if got := sortedUploadKeys(fakeT2.uploads); !slices.Equal(got, []string{"a.txt"}) {
 		t.Fatalf("exact-timestamps uploads = %v, want [a.txt]", got)
 	}
 }
@@ -374,7 +375,7 @@ func TestSync_Filters(t *testing.T) {
 		t.Fatalf("Execute: %v", err)
 	}
 	// Only keep.txt is uploaded.
-	if got := sortedUploadKeys(fakeT.uploads); !equalStrings(got, []string{"keep.txt"}) {
+	if got := sortedUploadKeys(fakeT.uploads); !slices.Equal(got, []string{"keep.txt"}) {
 		t.Fatalf("uploads = %v, want [keep.txt]", got)
 	}
 	// old.log matches --exclude, so it must NOT be deleted despite --delete.
@@ -433,16 +434,4 @@ func (s *syncDualAPI) CopyObject(ctx context.Context, in *s3.CopyObjectInput, op
 func (s *syncDualAPI) DeleteObject(ctx context.Context, in *s3.DeleteObjectInput, opts ...func(*s3.Options)) (*s3.DeleteObjectOutput, error) {
 	s.deleteInputs = append(s.deleteInputs, in)
 	return &s3.DeleteObjectOutput{}, nil
-}
-
-func equalStrings(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }

@@ -142,7 +142,7 @@ func TestCp_Upload_SingleFile(t *testing.T) {
 	// no t.Parallel
 	tmp := t.TempDir()
 	src := filepath.Join(tmp, "hello.txt")
-	if err := os.WriteFile(src, []byte("hello world"), 0o644); err != nil {
+	if err := os.WriteFile(src, []byte("hello world"), 0o600); err != nil {
 		t.Fatalf("write tmp: %v", err)
 	}
 
@@ -202,7 +202,7 @@ func TestCp_Download_SingleFile(t *testing.T) {
 	if len(fake.downloads) != 1 {
 		t.Fatalf("Download calls = %d, want 1", len(fake.downloads))
 	}
-	body, err := os.ReadFile(dst)
+	body, err := os.ReadFile(dst) // #nosec G304 -- dst is under t.TempDir()
 	if err != nil {
 		t.Fatalf("ReadFile: %v", err)
 	}
@@ -260,16 +260,16 @@ func TestCp_S3ToS3_SingleFile(t *testing.T) {
 func TestCp_RecursiveUpload_WithInclude(t *testing.T) {
 	// no t.Parallel
 	tmp := t.TempDir()
-	if err := os.WriteFile(filepath.Join(tmp, "a.txt"), []byte("A"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(tmp, "a.txt"), []byte("A"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(tmp, "b.log"), []byte("B"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(tmp, "b.log"), []byte("B"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Join(tmp, "subdir"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(tmp, "subdir"), 0o750); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(tmp, "subdir", "c.txt"), []byte("C"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(tmp, "subdir", "c.txt"), []byte("C"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -353,7 +353,7 @@ func TestCp_Dryrun(t *testing.T) {
 	// no t.Parallel
 	tmp := t.TempDir()
 	src := filepath.Join(tmp, "hello.txt")
-	if err := os.WriteFile(src, []byte("hi"), 0o644); err != nil {
+	if err := os.WriteFile(src, []byte("hi"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -395,7 +395,7 @@ func TestCp_RecursiveDownload_EscapeAttempt(t *testing.T) {
 	// no t.Parallel
 	tmp := t.TempDir()
 	dstDir := filepath.Join(tmp, "dst")
-	if err := os.MkdirAll(dstDir, 0o755); err != nil {
+	if err := os.MkdirAll(dstDir, 0o750); err != nil {
 		t.Fatalf("mkdir dst: %v", err)
 	}
 

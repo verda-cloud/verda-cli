@@ -1,6 +1,6 @@
 OUTPUT_DIR ?= bin
 
-.PHONY: all build clean lint lint.fix test test.integration test-s3-integration fmt changelog hooks.install pre-commit help
+.PHONY: all build clean lint lint.fix security test test.integration test-s3-integration fmt changelog hooks.install pre-commit help
 
 ## Build -------------------------------------------------------------------
 
@@ -21,6 +21,9 @@ lint: ## Run golangci-lint on all packages
 
 lint.fix: ## Run golangci-lint with auto-fix
 	@golangci-lint run --fix ./...
+
+security: ## Run gosec-only scan mirroring CI (ignores .golangci.yaml, so test files are scanned too)
+	@golangci-lint run --no-config -E gosec ./...
 
 test: ## Run all tests
 	@go test -count=1 ./...
