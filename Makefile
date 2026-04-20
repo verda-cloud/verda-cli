@@ -1,6 +1,6 @@
 OUTPUT_DIR ?= bin
 
-.PHONY: all build clean lint lint.fix test test.integration fmt changelog hooks.install pre-commit help
+.PHONY: all build clean lint lint.fix security test test.integration test-s3-integration fmt changelog hooks.install pre-commit help
 
 ## Build -------------------------------------------------------------------
 
@@ -22,12 +22,19 @@ lint: ## Run golangci-lint on all packages
 lint.fix: ## Run golangci-lint with auto-fix
 	@golangci-lint run --fix ./...
 
+security: ## Run gosec-only scan mirroring CI (ignores .golangci.yaml, so test files are scanned too)
+	@golangci-lint run --no-config -E gosec ./...
+
 test: ## Run all tests
 	@go test -count=1 ./...
 
 test.integration: build ## Run integration tests (requires staging credentials in [test] profile)
 	@cp $(OUTPUT_DIR)/verda /usr/local/bin/verda-test
 	@VERDA_BIN=$(CURDIR)/$(OUTPUT_DIR)/verda go test -tags=integration -v -count=1 -timeout=5m ./tests/integration/
+
+test-s3-integration: build ## Run S3 data-plane smoke test against a live endpoint (requires VERDA_S3_* env vars)
+	@VERDA_BIN=$(CURDIR)/$(OUTPUT_DIR)/verda VERDA_S3_INTEGRATION=1 \
+		go test -tags=integration -count=1 -timeout=5m -v ./tests/integration/ -run TestS3
 
 fmt: ## Format code with gofmt and goimports
 	@gofmt -w .

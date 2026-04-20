@@ -1,3 +1,17 @@
+// Copyright 2026 Verda Cloud Oy
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package options
 
 import (
@@ -17,6 +31,10 @@ const FlagConfig = "config"
 const (
 	defaultBaseURL            = "https://api.verda.com/v1"
 	defaultCredentialsProfile = "default"
+
+	OutputTable = "table"
+	OutputJSON  = "json"
+	OutputYAML  = "yaml"
 )
 
 // Options holds the shared CLI configuration that is resolved once in the
@@ -52,7 +70,7 @@ func NewOptions() *Options {
 	return &Options{
 		Server:      defaultBaseURL,
 		Timeout:     30 * time.Second,
-		Output:      "table",
+		Output:      OutputTable,
 		Log:         logOpts,
 		AuthOptions: &AuthOptions{},
 	}
@@ -110,7 +128,7 @@ func (o *Options) Complete() {
 		o.Output = viper.GetString("output")
 	}
 	if o.Output == "" {
-		o.Output = "table"
+		o.Output = OutputTable
 	}
 	if !o.Agent {
 		o.Agent = viper.GetBool("agent")
@@ -119,7 +137,7 @@ func (o *Options) Complete() {
 		o.Agent = os.Getenv("VERDA_AGENT") == "1" || os.Getenv("VERDA_AGENT") == "true"
 	}
 	if o.Agent {
-		o.Output = "json"
+		o.Output = OutputJSON
 	}
 	a := o.AuthOptions
 
@@ -213,9 +231,9 @@ func (o *Options) Validate() error {
 		return errors.New("--timeout must be positive")
 	}
 	switch o.Output {
-	case "table", "json", "yaml":
+	case OutputTable, OutputJSON, OutputYAML:
 	default:
-		return fmt.Errorf("--output must be one of: table, json, yaml (got %q)", o.Output)
+		return fmt.Errorf("--output must be one of: %s, %s, %s (got %q)", OutputTable, OutputJSON, OutputYAML, o.Output)
 	}
 	return nil
 }

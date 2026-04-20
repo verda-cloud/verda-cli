@@ -1,8 +1,23 @@
+// Copyright 2026 Verda Cloud Oy
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package cmd
 
 import (
 	"errors"
 	"fmt"
+	"os"
 	"runtime/debug"
 
 	"github.com/spf13/cobra"
@@ -20,6 +35,7 @@ import (
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/instancetypes"
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/locations"
 	mcpcmd "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/mcp"
+	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/s3"
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/settings"
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/skills"
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/ssh"
@@ -117,6 +133,20 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) (*cobra.Command, *clioptions.Op
 
 	f := cmdutil.NewFactory(opts)
 
+	resourceCmds := []*cobra.Command{
+		availability.NewCmdAvailability(f, ioStreams),
+		images.NewCmdImages(f, ioStreams),
+		instancetypes.NewCmdInstanceTypes(f, ioStreams),
+		locations.NewCmdLocations(f, ioStreams),
+		sshkey.NewCmdSSHKey(f, ioStreams),
+		startupscript.NewCmdStartupScript(f, ioStreams),
+		template.NewCmdTemplate(f, ioStreams),
+		volume.NewCmdVolume(f, ioStreams),
+	}
+	if s3Enabled() {
+		resourceCmds = append(resourceCmds, s3.NewCmdS3(f, ioStreams))
+	}
+
 	groups := cmdutil.CommandGroups{
 		{
 			Message: "Auth Commands:",
@@ -132,17 +162,8 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) (*cobra.Command, *clioptions.Op
 			},
 		},
 		{
-			Message: "Resource Commands:",
-			Commands: []*cobra.Command{
-				availability.NewCmdAvailability(f, ioStreams),
-				images.NewCmdImages(f, ioStreams),
-				instancetypes.NewCmdInstanceTypes(f, ioStreams),
-				locations.NewCmdLocations(f, ioStreams),
-				sshkey.NewCmdSSHKey(f, ioStreams),
-				startupscript.NewCmdStartupScript(f, ioStreams),
-				template.NewCmdTemplate(f, ioStreams),
-				volume.NewCmdVolume(f, ioStreams),
-			},
+			Message:  "Resource Commands:",
+			Commands: resourceCmds,
 		},
 		{
 			Message: "Info Commands:",
@@ -175,6 +196,15 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) (*cobra.Command, *clioptions.Op
 	return cmd, opts
 }
 
+// s3Enabled gates the pre-release S3 object-storage commands. The whole
+// command tree is omitted from registration unless VERDA_S3_ENABLED is "1"
+// or "true". When the feature ships GA, delete this function, drop the
+// gate in NewRootCommand, and remove `Hidden: true` from cmd/s3/s3.go.
+func s3Enabled() bool {
+	v := os.Getenv("VERDA_S3_ENABLED")
+	return v == "1" || v == "true"
+}
+
 // skipCredentialResolution returns true for commands that should work
 // without valid credentials (diagnostics, profile switching, etc.).
 func skipCredentialResolution(cmd *cobra.Command) bool {
@@ -191,6 +221,8 @@ func skipCredentialResolution(cmd *cobra.Command) bool {
 	case cmd.Name() == "use" && pName == "auth":
 		return true
 	case pName == "skills":
+		return true
+	case pName == "s3":
 		return true
 	case cmd.Name() == "doctor" && pName == "verda":
 		return true
