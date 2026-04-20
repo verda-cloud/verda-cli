@@ -39,6 +39,7 @@ Each command directory has its own `CLAUDE.md` (domain knowledge) and `README.md
 | `cmd/volume/` | CLAUDE.md, README.md | Volume lifecycle, trash, actions |
 | `cmd/sshkey/` | CLAUDE.md, README.md | SSH key management |
 | `cmd/startupscript/` | CLAUDE.md, README.md | Startup script management |
+| `cmd/registry/` | CLAUDE.md, README.md | Container registry (vccr.io): configure, show, login, ls, tags, push, copy — pre-release behind `VERDA_REGISTRY_ENABLED=1` |
 | `cmd/update/` | CLAUDE.md, README.md | CLI self-update |
 | `cmd/settings/` | CLAUDE.md, README.md | CLI settings management |
 | `cmd/availability/` | — | Instance availability by location |
