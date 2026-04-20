@@ -45,6 +45,12 @@ import (
 // files in the package (push.go's manual ref splitter) reference it.
 const localhostHost = "localhost"
 
+// defaultTag is the implicit tag per the Docker / OCI reference grammar
+// when a reference carries no explicit tag or digest. Promoted to a
+// constant so push / copy can share the fallback without duplicating
+// a string literal (goconst).
+const defaultTag = "latest"
+
 // Ref is a parsed image reference broken into logical components.
 // Exactly one of Tag or Digest is non-empty (Tag defaults to "latest" when
 // neither is supplied in the source string).

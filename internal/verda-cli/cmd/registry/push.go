@@ -370,7 +370,7 @@ func resolveDestination(rawLocal string, creds *options.RegistryCredentials, rep
 		}
 	}
 	if tag == "" {
-		tag = "latest"
+		tag = defaultTag
 	}
 
 	return creds.Endpoint + "/" + creds.ProjectID + "/" + repo + ":" + tag, nil

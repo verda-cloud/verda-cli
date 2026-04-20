@@ -189,3 +189,33 @@ func (g *ggcrRegistry) Read(ctx context.Context, ref string) (v1.Image, error) {
 	}
 	return remote.Image(r, g.remoteOptions(ctx)...)
 }
+
+// newGGCRRegistryForSource builds a ggcrRegistry that uses the supplied
+// authn.Authenticator instead of resolving from VCR credentials. It is
+// the source-side counterpart to newGGCRRegistryWithRetry used by `copy`:
+// the destination still goes through buildClient (VCR creds + retries),
+// while the source side needs a separate auth path (docker-config,
+// anonymous, or basic). Retries are wired identically so transient
+// 5xx/Retry-After responses from the source are handled without leaking
+// ggcr details into the command.
+//
+// host is left empty because source refs are always fully qualified —
+// parseRef defaults the registry to "" only when the input is relative,
+// and Parse rejects relative refs before they reach this Registry.
+func newGGCRRegistryForSource(auth authn.Authenticator, cfg RetryConfig) Registry {
+	reg := &ggcrRegistry{
+		host: "", // source refs are fully qualified; no default needed
+		auth: auth,
+	}
+	if cfg.enabled() {
+		base, ok := http.DefaultTransport.(*http.Transport)
+		var rt http.RoundTripper
+		if ok {
+			rt = base.Clone()
+		} else {
+			rt = http.DefaultTransport
+		}
+		reg.transport = NewRetryingTransport(rt, cfg)
+	}
+	return reg
+}
