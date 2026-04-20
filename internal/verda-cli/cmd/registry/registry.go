@@ -37,5 +37,6 @@ func NewCmdRegistry(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Comma
 		`),
 		Run: cmdutil.DefaultSubCommandRun(ioStreams.Out),
 	}
+	cmd.AddCommand(NewCmdConfigure(f, ioStreams))
 	return cmd
 }

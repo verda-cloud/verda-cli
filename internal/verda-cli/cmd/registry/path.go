@@ -21,12 +21,19 @@ import (
 )
 
 // credentialsFilePath resolves the credentials file path used by registry
-// subcommands. If the VERDA_REGISTRY_CREDENTIALS_FILE environment variable is
-// set to a non-empty value, it is returned verbatim; otherwise the shared
-// default from options.DefaultCredentialsFilePath() is used. On error
-// resolving the default, an empty string is returned and the caller's loader
-// will surface a clear error.
-func credentialsFilePath() string {
+// subcommands.
+//
+// Resolution order:
+//  1. flagOverride, if non-empty (e.g. --credentials-file from a subcommand)
+//  2. VERDA_REGISTRY_CREDENTIALS_FILE environment variable, if non-empty
+//  3. the shared default from options.DefaultCredentialsFilePath()
+//
+// On error resolving the default, an empty string is returned and the
+// caller's loader will surface a clear error.
+func credentialsFilePath(flagOverride string) string {
+	if flagOverride != "" {
+		return flagOverride
+	}
 	if p := os.Getenv("VERDA_REGISTRY_CREDENTIALS_FILE"); p != "" {
 		return p
 	}

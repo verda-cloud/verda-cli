@@ -16,6 +16,7 @@ package options
 
 import (
 	"os"
+	"runtime"
 	"strings"
 	"time"
 
@@ -84,4 +85,57 @@ func LoadRegistryCredentialsForProfile(path, profile string) (*RegistryCredentia
 		}
 	}
 	return creds, nil
+}
+
+// WriteRegistryCredentialsToProfile merges the given credentials into the
+// [profile] section of the INI file at path, preserving all other keys and
+// sections. Creates the file (and parent dirs) if missing. On non-Windows,
+// chmods the file to 0600 afterwards.
+//
+// A zero ExpiresAt is NOT written — the verda_registry_expires_at key is
+// omitted rather than writing an empty or zero-valued timestamp. This keeps
+// the INI file clean for non-expiring / legacy entries.
+func WriteRegistryCredentialsToProfile(path, profile string, creds *RegistryCredentials) error {
+	if creds == nil {
+		creds = &RegistryCredentials{}
+	}
+
+	cfg := ini.Empty()
+	if _, err := os.Stat(path); err == nil {
+		loaded, err := ini.Load(path)
+		if err != nil {
+			return err
+		}
+		cfg = loaded
+	}
+
+	section, err := cfg.GetSection(profile)
+	if err != nil {
+		section, err = cfg.NewSection(profile)
+		if err != nil {
+			return err
+		}
+	}
+
+	section.Key("verda_registry_username").SetValue(creds.Username)
+	section.Key("verda_registry_secret").SetValue(creds.Secret)
+	section.Key("verda_registry_endpoint").SetValue(creds.Endpoint)
+	section.Key("verda_registry_project_id").SetValue(creds.ProjectID)
+	if !creds.ExpiresAt.IsZero() {
+		section.Key("verda_registry_expires_at").SetValue(creds.ExpiresAt.Format(time.RFC3339))
+	} else {
+		section.DeleteKey("verda_registry_expires_at")
+	}
+
+	if _, err := EnsureVerdaDir(); err != nil {
+		return err
+	}
+	if err := cfg.SaveTo(path); err != nil {
+		return err
+	}
+	// Restrict file permissions on Unix (no-op on Windows).
+	if runtime.GOOS != windowsOS {
+		_ = os.Chmod(path, 0o600)
+	}
+	return nil
 }

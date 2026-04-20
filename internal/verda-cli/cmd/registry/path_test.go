@@ -24,7 +24,7 @@ func TestCredentialsFilePath_EnvOverride(t *testing.T) {
 	override := "/tmp/nonexistent-verda-registry-creds"
 	t.Setenv("VERDA_REGISTRY_CREDENTIALS_FILE", override)
 
-	got := credentialsFilePath()
+	got := credentialsFilePath("")
 	if got != override {
 		t.Fatalf("credentialsFilePath() = %q, want %q", got, override)
 	}
@@ -38,7 +38,7 @@ func TestCredentialsFilePath_EmptyEnvFallsThrough(t *testing.T) {
 		t.Fatalf("options.DefaultCredentialsFilePath() returned error: %v", err)
 	}
 
-	got := credentialsFilePath()
+	got := credentialsFilePath("")
 	if got != want {
 		t.Fatalf("credentialsFilePath() = %q, want %q", got, want)
 	}
@@ -53,8 +53,29 @@ func TestCredentialsFilePath_UnsetFallsThrough(t *testing.T) {
 		t.Fatalf("options.DefaultCredentialsFilePath() returned error: %v", err)
 	}
 
-	got := credentialsFilePath()
+	got := credentialsFilePath("")
 	if got != want {
 		t.Fatalf("credentialsFilePath() = %q, want %q", got, want)
+	}
+}
+
+func TestCredentialsFilePath_FlagOverrideBeatsEnv(t *testing.T) {
+	// The explicit flag override always wins — even over the env var.
+	t.Setenv("VERDA_REGISTRY_CREDENTIALS_FILE", "/tmp/env-value")
+
+	const flagPath = "/tmp/flag-value"
+	got := credentialsFilePath(flagPath)
+	if got != flagPath {
+		t.Fatalf("credentialsFilePath(%q) = %q, want %q", flagPath, got, flagPath)
+	}
+}
+
+func TestCredentialsFilePath_FlagOverrideBeatsDefault(t *testing.T) {
+	t.Setenv("VERDA_REGISTRY_CREDENTIALS_FILE", "")
+
+	const flagPath = "/tmp/flag-only"
+	got := credentialsFilePath(flagPath)
+	if got != flagPath {
+		t.Fatalf("credentialsFilePath(%q) = %q, want %q", flagPath, got, flagPath)
 	}
 }

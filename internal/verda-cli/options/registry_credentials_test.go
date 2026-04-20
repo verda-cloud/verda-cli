@@ -20,6 +20,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"gopkg.in/ini.v1"
 )
 
 func TestLoadRegistryCredentialsForProfile_HappyPath(t *testing.T) {
@@ -159,6 +161,199 @@ verda_registry_expires_at = not-a-timestamp
 	}
 	if !got.HasCredentials() {
 		t.Error("HasCredentials should still be true despite malformed expiry")
+	}
+}
+
+func TestWriteRegistryCredentialsToProfile_AllFiveKeys(t *testing.T) {
+	// Isolate HOME so the write helper's EnsureVerdaDir can't touch the
+	// developer's real ~/.verda directory during tests.
+	dir := t.TempDir()
+	t.Setenv("VERDA_HOME", dir)
+
+	path := filepath.Join(dir, "credentials")
+	expires := time.Date(2099, 1, 2, 3, 4, 5, 0, time.UTC)
+
+	creds := &RegistryCredentials{
+		Username:  "vcr-abc+cli",
+		Secret:    "s3cret",
+		Endpoint:  "vccr.io",
+		ProjectID: "abc",
+		ExpiresAt: expires,
+	}
+
+	if err := WriteRegistryCredentialsToProfile(path, "default", creds); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	cfg, err := ini.Load(path)
+	if err != nil {
+		t.Fatalf("load back: %v", err)
+	}
+	sec := cfg.Section("default")
+
+	want := map[string]string{
+		"verda_registry_username":   "vcr-abc+cli",
+		"verda_registry_secret":     "s3cret",
+		"verda_registry_endpoint":   "vccr.io",
+		"verda_registry_project_id": "abc",
+		"verda_registry_expires_at": expires.Format(time.RFC3339),
+	}
+	for k, v := range want {
+		if got := sec.Key(k).String(); got != v {
+			t.Errorf("key %q: got %q, want %q", k, got, v)
+		}
+	}
+}
+
+func TestWriteRegistryCredentialsToProfile_PreservesExistingKeysInSameSection(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("VERDA_HOME", dir)
+
+	path := filepath.Join(dir, "credentials")
+	existing := `[default]
+verda_client_id = my-api-id
+verda_client_secret = my-api-secret
+verda_s3_access_key = AKIAEXAMPLE
+`
+	if err := os.WriteFile(path, []byte(existing), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	creds := &RegistryCredentials{
+		Username:  "vcr-abc+cli",
+		Secret:    "s3cret",
+		Endpoint:  "vccr.io",
+		ProjectID: "abc",
+		ExpiresAt: time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC),
+	}
+	if err := WriteRegistryCredentialsToProfile(path, "default", creds); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	cfg, err := ini.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sec := cfg.Section("default")
+	if sec.Key("verda_client_id").String() != "my-api-id" {
+		t.Error("API client_id was clobbered")
+	}
+	if sec.Key("verda_client_secret").String() != "my-api-secret" {
+		t.Error("API client_secret was clobbered")
+	}
+	if sec.Key("verda_s3_access_key").String() != "AKIAEXAMPLE" {
+		t.Error("S3 access_key was clobbered")
+	}
+	if sec.Key("verda_registry_username").String() != "vcr-abc+cli" {
+		t.Error("registry_username not written alongside existing keys")
+	}
+}
+
+func TestWriteRegistryCredentialsToProfile_PreservesOtherSections(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("VERDA_HOME", dir)
+
+	path := filepath.Join(dir, "credentials")
+	existing := `[default]
+verda_client_id = default-id
+
+[staging]
+verda_client_id = staging-id
+verda_s3_endpoint = https://staging.s3.example.com
+`
+	if err := os.WriteFile(path, []byte(existing), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	creds := &RegistryCredentials{
+		Username:  "vcr-prod+cli",
+		Secret:    "prodsecret",
+		Endpoint:  "vccr.io",
+		ProjectID: "prod",
+		ExpiresAt: time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC),
+	}
+	if err := WriteRegistryCredentialsToProfile(path, "default", creds); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	cfg, err := ini.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// default got the registry keys.
+	if cfg.Section("default").Key("verda_registry_username").String() != "vcr-prod+cli" {
+		t.Error("registry keys not written to [default]")
+	}
+	// staging is verbatim.
+	staging := cfg.Section("staging")
+	if staging.Key("verda_client_id").String() != "staging-id" {
+		t.Errorf("[staging] verda_client_id changed: %q", staging.Key("verda_client_id").String())
+	}
+	if staging.Key("verda_s3_endpoint").String() != "https://staging.s3.example.com" {
+		t.Errorf("[staging] verda_s3_endpoint changed: %q", staging.Key("verda_s3_endpoint").String())
+	}
+	if staging.HasKey("verda_registry_username") {
+		t.Error("registry keys leaked into [staging]")
+	}
+}
+
+func TestWriteRegistryCredentialsToProfile_RFC3339Timestamp(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("VERDA_HOME", dir)
+
+	path := filepath.Join(dir, "credentials")
+	expires := time.Date(2030, 6, 15, 12, 30, 45, 0, time.UTC)
+
+	if err := WriteRegistryCredentialsToProfile(path, "default", &RegistryCredentials{
+		Username:  "u",
+		Secret:    "s",
+		Endpoint:  "vccr.io",
+		ProjectID: "p",
+		ExpiresAt: expires,
+	}); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	cfg, err := ini.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := cfg.Section("default").Key("verda_registry_expires_at").String()
+	if raw != expires.Format(time.RFC3339) {
+		t.Errorf("expires_at not RFC3339: got %q", raw)
+	}
+	parsed, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		t.Fatalf("parse back: %v", err)
+	}
+	if !parsed.Equal(expires) {
+		t.Errorf("round-trip mismatch: got %v, want %v", parsed, expires)
+	}
+}
+
+func TestWriteRegistryCredentialsToProfile_ZeroExpiresAtOmitted(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("VERDA_HOME", dir)
+
+	path := filepath.Join(dir, "credentials")
+
+	if err := WriteRegistryCredentialsToProfile(path, "default", &RegistryCredentials{
+		Username:  "u",
+		Secret:    "s",
+		Endpoint:  "vccr.io",
+		ProjectID: "p",
+		// ExpiresAt is zero
+	}); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	cfg, err := ini.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sec := cfg.Section("default")
+	if sec.HasKey("verda_registry_expires_at") {
+		t.Errorf("zero ExpiresAt should omit the key, got %q", sec.Key("verda_registry_expires_at").String())
 	}
 }
 
