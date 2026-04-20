@@ -30,6 +30,11 @@ import (
 	"time"
 )
 
+// goosWindows is a local alias for the runtime.GOOS literal "windows".
+// Extracted so goconst doesn't trip when this package grows beyond the
+// single daemon-socket branch that originally used it.
+const goosWindows = "windows"
+
 // DaemonImage is a summary of one image visible to the local Docker daemon.
 // Derived from GET /images/json with minimal transformation.
 type DaemonImage struct {
@@ -150,7 +155,7 @@ func resolveSocket(dockerHost, goos string) (string, error) {
 			return "", fmt.Errorf("unsupported DOCKER_HOST scheme: %q", dockerHost)
 		}
 	}
-	if goos == "windows" {
+	if goos == goosWindows {
 		return "", errors.New(
 			"docker on Windows is not yet supported by verda registry; " +
 				"set DOCKER_HOST=tcp://... to target a remote daemon, " +

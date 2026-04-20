@@ -44,6 +44,7 @@ const (
 	kindRegistryInvalidReference  = "registry_invalid_reference"
 	kindRegistryUnreachable       = "registry_unreachable"
 	kindRegistryInternalError     = "registry_internal_error"
+	kindRegistryNoImageSource     = "registry_no_image_source"
 )
 
 // translateError maps a generic ggcr/network error to a *cmdutil.AgentError.

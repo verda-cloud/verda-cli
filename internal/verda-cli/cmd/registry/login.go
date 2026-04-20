@@ -247,7 +247,7 @@ func atomicWrite(path string, data []byte) error {
 		return fmt.Errorf("write %q: %w", tmp, err)
 	}
 
-	if runtime.GOOS != "windows" {
+	if runtime.GOOS != goosWindows {
 		if err := os.Chmod(tmp, 0o600); err != nil {
 			_ = os.Remove(tmp)
 			return fmt.Errorf("chmod %q: %w", tmp, err)

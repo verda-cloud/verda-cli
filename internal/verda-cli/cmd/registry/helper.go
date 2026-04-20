@@ -30,6 +30,13 @@ var clientBuilder = newGGCRRegistry
 // host's docker socket. Production code funnels through NewDaemonLister.
 var daemonListerBuilder = NewDaemonLister
 
+// sourceLoaderBuilder is the swap point for resolving a user-supplied
+// image reference (daemon ref / OCI layout dir / tarball file) into a
+// v1.Image. It takes a ping function (supplied by push) so auto-detect
+// can probe the daemon without a circular import between source.go and
+// the push command. Tests reassign it to return a fake SourceLoader.
+var sourceLoaderBuilder = NewDefaultSourceLoader
+
 // buildClient returns a Registry for the given credentials, routed
 // through clientBuilder so tests can substitute a fake.
 func buildClient(creds *options.RegistryCredentials) Registry {
