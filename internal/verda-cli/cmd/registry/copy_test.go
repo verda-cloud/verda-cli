@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -33,6 +34,7 @@ import (
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/random"
 	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
+	tuitest "github.com/verda-cloud/verdagostack/pkg/tui/testing"
 
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/options"
@@ -1137,6 +1139,397 @@ func TestCopy_AllTagsJSONOutput(t *testing.T) {
 	}
 }
 
+// ---------- --dry-run / --overwrite tests ----------
+
+// TestCopy_DryRunSingleRef: --dry-run resolves the source manifest, prints
+// a summary, and leaves the destination untouched. Verifies via a Head on
+// the destination host after the run.
+func TestCopy_DryRunSingleRef(t *testing.T) {
+	srcHost := testServer(t)
+	dstHost := testServer(t)
+	writeCopyCredsFile(t, dstHost, "proj")
+
+	_ = primeSourceImage(t, srcHost, "ns/app:v1")
+
+	f := cmdutil.NewTestFactory(nil)
+	streams, out, _ := copyStreams("")
+
+	srcArg := srcHost + "/ns/app:v1"
+	dstArg := dstHost + "/proj/app:v1"
+	if err := runCopyForTest(t, f, streams, srcArg, dstArg, "--dry-run"); err != nil {
+		t.Fatalf("copy --dry-run: %v", err)
+	}
+
+	// Dst should not have been written.
+	dstReg := newGGCRRegistry(testCreds(dstHost))
+	if _, err := dstReg.Head(context.Background(), dstArg); err == nil {
+		t.Fatalf("dry-run wrote to destination %q", dstArg)
+	}
+
+	got := out.String()
+	if !strings.Contains(got, "Dry run") {
+		t.Errorf("expected 'Dry run' summary, got:\n%s", got)
+	}
+	if !strings.Contains(got, "LAYERS") {
+		t.Errorf("expected layers header, got:\n%s", got)
+	}
+	if !strings.Contains(got, "would copy 1 tag") {
+		t.Errorf("expected 'would copy 1 tag' line, got:\n%s", got)
+	}
+}
+
+// TestCopy_DryRunAllTags: --dry-run --all-tags lists every tag and totals
+// layer bytes without touching the destination.
+func TestCopy_DryRunAllTags(t *testing.T) {
+	srcHost := testServer(t)
+	dstHost := testServer(t)
+	writeCopyCredsFile(t, dstHost, "proj")
+
+	for _, tag := range []string{"v1", "v2", "v3"} {
+		_ = primeSourceImageNew(t, srcHost, "ns/app:"+tag)
+	}
+
+	// Swap the destination clientBuilder to prove Write is never called.
+	var dstWrites atomic.Int32
+	prev := clientBuilder
+	clientBuilder = func(creds *options.RegistryCredentials, cfg RetryConfig) Registry {
+		return &writeCountingRegistry{inner: prev(creds, cfg), writes: &dstWrites}
+	}
+	t.Cleanup(func() { clientBuilder = prev })
+
+	f := cmdutil.NewTestFactory(nil)
+	streams, out, _ := copyStreams("")
+
+	if err := runCopyForTest(t, f, streams, srcHost+"/ns/app", "--all-tags", "--dry-run"); err != nil {
+		t.Fatalf("copy --dry-run --all-tags: %v", err)
+	}
+
+	got := out.String()
+	if !strings.Contains(got, "would copy 3 tags") {
+		t.Errorf("expected '3 tags' summary line, got:\n%s", got)
+	}
+	if !strings.Contains(got, "TOTAL BYTES") {
+		t.Errorf("expected TOTAL BYTES header, got:\n%s", got)
+	}
+	if dstWrites.Load() != 0 {
+		t.Errorf("expected 0 destination writes under --dry-run, got %d", dstWrites.Load())
+	}
+}
+
+// TestCopy_DryRunJSON: -o json --dry-run emits the structured payload with
+// per-row layer counts and total_bytes > 0.
+func TestCopy_DryRunJSON(t *testing.T) {
+	srcHost := testServer(t)
+	dstHost := testServer(t)
+	writeCopyCredsFile(t, dstHost, "proj")
+
+	_ = primeSourceImage(t, srcHost, "ns/app:v1")
+
+	f := cmdutil.NewTestFactory(nil)
+	f.OutputFormatOverride = "json"
+	streams, out, _ := copyStreams("")
+
+	srcArg := srcHost + "/ns/app:v1"
+	dstArg := dstHost + "/proj/app:v1"
+	if err := runCopyForTest(t, f, streams, srcArg, dstArg, "--dry-run"); err != nil {
+		t.Fatalf("copy --dry-run -o json: %v", err)
+	}
+
+	var payload copyDryRunOutput
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid json: %v\n%s", err, out.String())
+	}
+	if len(payload.Results) != 1 {
+		t.Fatalf("Results = %d rows, want 1", len(payload.Results))
+	}
+	row := payload.Results[0]
+	if row.Src != srcArg || row.Dst != dstArg {
+		t.Errorf("row src/dst = %s/%s, want %s/%s", row.Src, row.Dst, srcArg, dstArg)
+	}
+	if row.Layers != 1 {
+		t.Errorf("row layers = %d, want 1", row.Layers)
+	}
+	if row.TotalBytes <= 0 {
+		t.Errorf("row total_bytes = %d, want > 0", row.TotalBytes)
+	}
+	if payload.Summary.Tags != 1 || payload.Summary.TotalBytes <= 0 {
+		t.Errorf("summary = %+v, want Tags=1 TotalBytes>0", payload.Summary)
+	}
+}
+
+// TestCopy_DryRunAllTagsEmpty: --dry-run --all-tags on a repo with zero
+// tags prints the same friendly "No tags..." message as the non-dry path.
+func TestCopy_DryRunAllTagsEmpty(t *testing.T) {
+	dstHost := testServer(t)
+	writeCopyCredsFile(t, dstHost, "proj")
+
+	prev := sourceRegistryBuilder
+	sourceRegistryBuilder = func(_ authn.Authenticator, _ RetryConfig) Registry {
+		return &emptyTagsRegistry{}
+	}
+	t.Cleanup(func() { sourceRegistryBuilder = prev })
+
+	f := cmdutil.NewTestFactory(nil)
+	streams, out, _ := copyStreams("")
+
+	if err := runCopyForTest(t, f, streams, "docker.io/library/nginx", "--all-tags", "--dry-run"); err != nil {
+		t.Fatalf("copy --dry-run --all-tags (empty): %v", err)
+	}
+	if !strings.Contains(out.String(), "No tags found") {
+		t.Errorf("expected friendly empty-tag message, got: %q", out.String())
+	}
+}
+
+// TestCopy_OverwriteRefused: destination already has the tag; default
+// --overwrite=false in interactive mode with a prompter returning false
+// reports skipped and does NOT replace the manifest.
+func TestCopy_OverwriteRefused(t *testing.T) {
+	srcHost := testServer(t)
+	dstHost := testServer(t)
+	writeCopyCredsFile(t, dstHost, "proj")
+
+	// Prime dst with a DIFFERENT image than src so we can detect
+	// whether a write happened (digests would differ).
+	_ = primeSourceImageNew(t, srcHost, "ns/app:v1")
+	dstExistingImg := primeSourceImageNew(t, dstHost, "proj/app:v1")
+
+	// Make interactive mode resolvable: pretend ErrOut is a TTY.
+	prevTTY := isTerminalFn
+	isTerminalFn = func(_ io.Writer) bool { return true }
+	t.Cleanup(func() { isTerminalFn = prevTTY })
+
+	mock := tuitest.New().AddConfirm(false)
+	f := &cmdutil.TestFactory{PrompterOverride: mock}
+	streams, _, errOut := copyStreams("")
+
+	srcArg := srcHost + "/ns/app:v1"
+	dstArg := dstHost + "/proj/app:v1"
+	if err := runCopyForTest(t, f, streams, srcArg, dstArg); err != nil {
+		t.Fatalf("copy (refused): %v", err)
+	}
+
+	// Dst manifest should still match the ORIGINAL dst image, not src.
+	dstReg := newGGCRRegistry(testCreds(dstHost))
+	desc, err := dstReg.Head(context.Background(), dstArg)
+	if err != nil {
+		t.Fatalf("Head(dst): %v", err)
+	}
+	origDigest, _ := dstExistingImg.Digest()
+	if desc.Digest != origDigest {
+		t.Fatalf("dst manifest changed: got %s, want %s (original)", desc.Digest, origDigest)
+	}
+
+	if !strings.Contains(errOut.String(), "skipped") {
+		t.Errorf("expected 'skipped' mention on ErrOut, got:\n%s", errOut.String())
+	}
+}
+
+// TestCopy_OverwriteAllowed: --overwrite=true replaces an existing dst
+// manifest with the src manifest.
+func TestCopy_OverwriteAllowed(t *testing.T) {
+	srcHost := testServer(t)
+	dstHost := testServer(t)
+	writeCopyCredsFile(t, dstHost, "proj")
+
+	srcImg := primeSourceImageNew(t, srcHost, "ns/app:v1")
+	_ = primeSourceImageNew(t, dstHost, "proj/app:v1")
+
+	f := cmdutil.NewTestFactory(nil)
+	streams, _, _ := copyStreams("")
+
+	srcArg := srcHost + "/ns/app:v1"
+	dstArg := dstHost + "/proj/app:v1"
+	if err := runCopyForTest(t, f, streams, srcArg, dstArg, "--overwrite"); err != nil {
+		t.Fatalf("copy --overwrite: %v", err)
+	}
+
+	dstReg := newGGCRRegistry(testCreds(dstHost))
+	desc, err := dstReg.Head(context.Background(), dstArg)
+	if err != nil {
+		t.Fatalf("Head(dst): %v", err)
+	}
+	wantDigest, _ := srcImg.Digest()
+	if desc.Digest != wantDigest {
+		t.Fatalf("dst digest after --overwrite = %s, want %s (src)", desc.Digest, wantDigest)
+	}
+}
+
+// TestCopy_OverwriteInteractiveConfirmYes: the interactive prompter returns
+// true, so copy proceeds despite dst already existing.
+func TestCopy_OverwriteInteractiveConfirmYes(t *testing.T) {
+	srcHost := testServer(t)
+	dstHost := testServer(t)
+	writeCopyCredsFile(t, dstHost, "proj")
+
+	srcImg := primeSourceImageNew(t, srcHost, "ns/app:v1")
+	_ = primeSourceImageNew(t, dstHost, "proj/app:v1")
+
+	prevTTY := isTerminalFn
+	isTerminalFn = func(_ io.Writer) bool { return true }
+	t.Cleanup(func() { isTerminalFn = prevTTY })
+
+	mock := tuitest.New().AddConfirm(true)
+	f := &cmdutil.TestFactory{PrompterOverride: mock}
+	streams, _, _ := copyStreams("")
+
+	srcArg := srcHost + "/ns/app:v1"
+	dstArg := dstHost + "/proj/app:v1"
+	// Force the flat-text renderer: the bubbletea TUI is flaky against
+	// a non-terminal buffer, and progress rendering isn't under test.
+	if err := runCopyForTest(t, f, streams, srcArg, dstArg, "--progress", "none"); err != nil {
+		t.Fatalf("copy (confirmed yes): %v", err)
+	}
+
+	dstReg := newGGCRRegistry(testCreds(dstHost))
+	desc, err := dstReg.Head(context.Background(), dstArg)
+	if err != nil {
+		t.Fatalf("Head(dst): %v", err)
+	}
+	wantDigest, _ := srcImg.Digest()
+	if desc.Digest != wantDigest {
+		t.Fatalf("dst digest after confirm=yes = %s, want %s (src)", desc.Digest, wantDigest)
+	}
+}
+
+// TestCopy_OverwriteAllTagsPartialSkip: three tags, dst already has tag2;
+// interactive prompter returns false for tag2 only. tag1 and tag3 copy;
+// tag2 is marked skipped. Structured summary reports {succeeded:2,
+// skipped:1, failed:0}.
+func TestCopy_OverwriteAllTagsPartialSkip(t *testing.T) {
+	srcHost := testServer(t)
+	dstHost := testServer(t)
+	writeCopyCredsFile(t, dstHost, "proj")
+
+	for _, tag := range []string{"v1", "v2", "v3"} {
+		_ = primeSourceImageNew(t, srcHost, "ns/app:"+tag)
+	}
+	// Dst already has v2 (distinct image so we can detect no-overwrite).
+	dstExistingV2 := primeSourceImageNew(t, dstHost, "proj/ns/app:v2")
+
+	prevTTY := isTerminalFn
+	isTerminalFn = func(_ io.Writer) bool { return true }
+	t.Cleanup(func() { isTerminalFn = prevTTY })
+
+	// Only v2 triggers the prompt (others don't exist at dst); decline.
+	mock := tuitest.New().AddConfirm(false)
+	f := &cmdutil.TestFactory{PrompterOverride: mock, OutputFormatOverride: "json"}
+	streams, out, _ := copyStreams("")
+
+	if err := runCopyForTest(t, f, streams, srcHost+"/ns/app", "--all-tags"); err != nil {
+		t.Fatalf("copy --all-tags (partial skip): %v", err)
+	}
+
+	var payload allTagsOutput
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, out.String())
+	}
+	if payload.Summary.Succeeded != 2 || payload.Summary.Skipped != 1 || payload.Summary.Failed != 0 {
+		t.Errorf("summary = %+v, want {Succeeded:2 Skipped:1 Failed:0}", payload.Summary)
+	}
+	if payload.Summary.Total != 3 {
+		t.Errorf("summary.Total = %d, want 3", payload.Summary.Total)
+	}
+
+	statusByTag := map[string]string{}
+	for _, r := range payload.Results {
+		statusByTag[r.Tag] = r.Status
+	}
+	if statusByTag["v2"] != "skipped" {
+		t.Errorf("v2 status = %q, want skipped", statusByTag["v2"])
+	}
+	if statusByTag["v1"] != "succeeded" || statusByTag["v3"] != "succeeded" {
+		t.Errorf("v1/v3 status = %+v, want both succeeded", statusByTag)
+	}
+
+	// Confirm dst v2 manifest was NOT replaced.
+	dstReg := newGGCRRegistry(testCreds(dstHost))
+	desc, err := dstReg.Head(context.Background(), dstHost+"/proj/ns/app:v2")
+	if err != nil {
+		t.Fatalf("Head(v2): %v", err)
+	}
+	origDigest, _ := dstExistingV2.Digest()
+	if desc.Digest != origDigest {
+		t.Fatalf("v2 manifest was replaced: got %s, want %s (original)", desc.Digest, origDigest)
+	}
+}
+
+// TestCopy_OverwriteAgentModeReturnsConfirmationRequired: agent mode with
+// dst existing and no --yes returns the CONFIRMATION_REQUIRED AgentError
+// and does not perform any Write.
+func TestCopy_OverwriteAgentModeReturnsConfirmationRequired(t *testing.T) {
+	srcHost := testServer(t)
+	dstHost := testServer(t)
+	writeCopyCredsFile(t, dstHost, "proj")
+
+	_ = primeSourceImageNew(t, srcHost, "ns/app:v1")
+	_ = primeSourceImageNew(t, dstHost, "proj/app:v1")
+
+	// Count writes on the destination to prove none happened.
+	var dstWrites atomic.Int32
+	prev := clientBuilder
+	clientBuilder = func(creds *options.RegistryCredentials, cfg RetryConfig) Registry {
+		return &writeCountingRegistry{inner: prev(creds, cfg), writes: &dstWrites}
+	}
+	t.Cleanup(func() { clientBuilder = prev })
+
+	// Agent mode: no TTY, AgentMode() true.
+	prevTTY := isTerminalFn
+	isTerminalFn = func(_ io.Writer) bool { return false }
+	t.Cleanup(func() { isTerminalFn = prevTTY })
+
+	f := &cmdutil.TestFactory{AgentModeOverride: true}
+	streams, _, _ := copyStreams("")
+
+	err := runCopyForTest(t, f, streams, srcHost+"/ns/app:v1", dstHost+"/proj/app:v1")
+	if err == nil {
+		t.Fatal("expected CONFIRMATION_REQUIRED error in agent mode")
+	}
+	var ae *cmdutil.AgentError
+	if !errors.As(err, &ae) {
+		t.Fatalf("expected *AgentError, got %T (%v)", err, err)
+	}
+	if ae.Code != "CONFIRMATION_REQUIRED" {
+		t.Errorf("Code = %q, want CONFIRMATION_REQUIRED", ae.Code)
+	}
+	if dstWrites.Load() != 0 {
+		t.Errorf("unexpected destination writes: %d", dstWrites.Load())
+	}
+}
+
+// TestCopy_OverwriteAgentModeWithYesAllowed: agent mode + --yes (which
+// implies --overwrite) replaces the existing dst manifest successfully.
+func TestCopy_OverwriteAgentModeWithYesAllowed(t *testing.T) {
+	srcHost := testServer(t)
+	dstHost := testServer(t)
+	writeCopyCredsFile(t, dstHost, "proj")
+
+	srcImg := primeSourceImageNew(t, srcHost, "ns/app:v1")
+	_ = primeSourceImageNew(t, dstHost, "proj/app:v1")
+
+	prevTTY := isTerminalFn
+	isTerminalFn = func(_ io.Writer) bool { return false }
+	t.Cleanup(func() { isTerminalFn = prevTTY })
+
+	f := &cmdutil.TestFactory{AgentModeOverride: true}
+	streams, _, _ := copyStreams("")
+
+	srcArg := srcHost + "/ns/app:v1"
+	dstArg := dstHost + "/proj/app:v1"
+	if err := runCopyForTest(t, f, streams, srcArg, dstArg, "--yes"); err != nil {
+		t.Fatalf("copy --yes (agent): %v", err)
+	}
+
+	dstReg := newGGCRRegistry(testCreds(dstHost))
+	desc, err := dstReg.Head(context.Background(), dstArg)
+	if err != nil {
+		t.Fatalf("Head(dst): %v", err)
+	}
+	wantDigest, _ := srcImg.Digest()
+	if desc.Digest != wantDigest {
+		t.Fatalf("dst digest = %s, want %s (src)", desc.Digest, wantDigest)
+	}
+}
+
 // ---------- test helpers: registry fakes ----------
 
 // emptyTagsRegistry returns "" for Catalog and [] for Tags. Anything else
@@ -1240,4 +1633,17 @@ func (r *tagFailingRegistry) Write(_ context.Context, ref string, _ v1.Image, op
 		}
 	}
 	return nil
+}
+
+// Head returns manifest-unknown so copy's --overwrite pre-flight treats
+// every destination tag as absent and routes straight to Write (where the
+// failTag-matching logic fires). The embedded Registry is nil, so without
+// this the call would panic.
+func (r *tagFailingRegistry) Head(_ context.Context, _ string) (*v1.Descriptor, error) {
+	return nil, &transport.Error{
+		Errors: []transport.Diagnostic{
+			{Code: transport.ManifestUnknownErrorCode, Message: "not found"},
+		},
+		StatusCode: http.StatusNotFound,
+	}
 }

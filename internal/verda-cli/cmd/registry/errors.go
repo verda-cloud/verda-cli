@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"net/url"
 	"strings"
 	"time"
@@ -182,6 +183,19 @@ func translateTransportError(terr *transport.Error) error {
 			Code:     kindRegistryInvalidReference,
 			Message:  fmt.Sprintf("Invalid reference: %s.", raw),
 			ExitCode: cmdutil.ExitBadArgs,
+		}
+	}
+
+	// HEAD responses have no body, so ggcr's test registry (and some
+	// production registries) can surface a 404 without a structured
+	// Diagnostic slice. Classify those as tag_not_found so callers
+	// (e.g. copy's overwrite pre-flight) can treat them as "safe to
+	// write" rather than bailing with an opaque internal_error.
+	if terr.StatusCode == http.StatusNotFound {
+		return &cmdutil.AgentError{
+			Code:     kindRegistryTagNotFound,
+			Message:  "Tag or digest not found in repository.",
+			ExitCode: cmdutil.ExitNotFound,
 		}
 	}
 

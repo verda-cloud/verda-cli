@@ -405,6 +405,19 @@ func (r *writeErrorRegistry) Write(_ context.Context, _ string, _ v1.Image, opts
 	return r.writeErr
 }
 
+// Head returns manifest-unknown so the copy command's --overwrite pre-flight
+// check treats the destination as absent and proceeds to Write (where the
+// canned writeErr surfaces). Without this the embedded nil Registry would
+// panic on the dispatch.
+func (r *writeErrorRegistry) Head(_ context.Context, _ string) (*v1.Descriptor, error) {
+	return nil, &transport.Error{
+		Errors: []transport.Diagnostic{
+			{Code: transport.ManifestUnknownErrorCode, Message: "not found"},
+		},
+		StatusCode: http.StatusNotFound,
+	}
+}
+
 // TestPush_AuthFailureAtWrite: Registry.Write returns a transport.Error
 // with UnauthorizedErrorCode; push translates it to registry_auth_failed.
 func TestPush_AuthFailureAtWrite(t *testing.T) {

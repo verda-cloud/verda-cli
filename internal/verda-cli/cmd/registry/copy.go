@@ -27,6 +27,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/authn"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/spf13/cobra"
+	"github.com/verda-cloud/verdagostack/pkg/tui"
 
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/options"
@@ -49,6 +50,7 @@ const (
 	copyStatusCopied    = "copied"
 	copyStatusFailed    = "failed"
 	copyStatusSucceeded = "succeeded"
+	copyStatusSkipped   = "skipped"
 )
 
 // sourceKeychainBuilder is the package-level swap point for resolving
@@ -77,6 +79,9 @@ type copyOptions struct {
 	SrcUsername      string // required with --src-auth basic
 	SrcPasswordStdin bool   // required with --src-auth basic
 	AllTags          bool   // copy every tag in the source repository
+	DryRun           bool   // resolve + summarize; skip writes
+	Overwrite        bool   // allow replacing existing destination tag
+	Yes              bool   // skip confirmation; implies --overwrite in agent mode
 }
 
 // copyPayload is the structured-output shape for `copy`. Mirrors push's
@@ -168,6 +173,9 @@ func NewCmdCopy(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 	flags.StringVar(&opts.SrcUsername, "src-username", "", "Source registry username (required with --src-auth basic)")
 	flags.BoolVar(&opts.SrcPasswordStdin, "src-password-stdin", false, "Read the source registry password from stdin (required with --src-auth basic)")
 	flags.BoolVar(&opts.AllTags, "all-tags", false, "Copy every tag in the source repository")
+	flags.BoolVar(&opts.DryRun, "dry-run", false, "Resolve and summarize what would be copied; no writes. Ignores --overwrite.")
+	flags.BoolVar(&opts.Overwrite, "overwrite", false, "Allow replacing an existing destination tag (ignored under --dry-run)")
+	flags.BoolVar(&opts.Yes, "yes", false, "Skip the overwrite confirmation prompt; implies --overwrite")
 
 	return cmd
 }
@@ -204,6 +212,14 @@ func runCopy(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams,
 		return err
 	}
 
+	// --yes implies --overwrite — matches s3 rm/rb's pattern where --yes
+	// means "I've already decided." Keeping the two as separate flags lets
+	// a user say "overwrite yes, but also surface progress" without
+	// suppressing future confirmation prompts unrelated to this action.
+	if opts.Yes {
+		opts.Overwrite = true
+	}
+
 	retryCfg := RetryConfig{MaxAttempts: opts.Retries}
 	srcReg := sourceRegistryBuilder(srcAuth, retryCfg)
 	dstReg := buildClient(creds, retryCfg)
@@ -222,6 +238,33 @@ func runCopy(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams,
 
 	srcString := srcRef.String()
 	dstString := dstRef.String()
+
+	if opts.DryRun {
+		return runCopyDryRunSingle(ctx, srcReg, srcString, dstString, f, ioStreams)
+	}
+
+	// Overwrite guard: inspect dst before writing. Dry-run skips this by
+	// design (it never writes; the user is asking "what would happen").
+	decision, derr := resolveOverwriteDecision(ctx, dstReg, dstString, opts, f, ioStreams)
+	if derr != nil {
+		return derr
+	}
+	if decision == overwriteSkip {
+		if isStructuredFormat(f.OutputFormat()) {
+			payload := copyPayload{
+				Source:      srcString,
+				Destination: dstString,
+				Status:      copyStatusSkipped,
+			}
+			wrote, werr := cmdutil.WriteStructured(ioStreams.Out, f.OutputFormat(), payload)
+			if wrote {
+				return werr
+			}
+		}
+		_, _ = fmt.Fprintf(ioStreams.ErrOut, "skipped %s -> %s (destination exists; pass --overwrite to replace)\n",
+			srcString, dstString)
+		return nil
+	}
 
 	result := performCopy(ctx, cancel, srcReg, dstReg, srcString, dstString, creds, opts, f, ioStreams)
 
@@ -599,6 +642,179 @@ func buildCopyPayload(src, dst string, r copyResult) copyPayload {
 	return p
 }
 
+// ---------- --dry-run / --overwrite shared machinery ----------
+
+// overwriteDecision enumerates the three outcomes of the dst-existence check.
+type overwriteDecision int
+
+const (
+	overwriteProceed overwriteDecision = iota // dst absent, or --overwrite / --yes set, or user confirmed
+	overwriteSkip                             // dst present and user declined (or non-TTY with no overwrite flag)
+)
+
+// copyDryRunRow is the per-tag row in the --dry-run structured payload. Layer
+// counts and total-bytes are sourced from v1.Image.Manifest().Layers so the
+// output reflects what ggcr would actually upload (compressed layer sizes),
+// not on-disk uncompressed sizes. The summary is assembled from these rows.
+type copyDryRunRow struct {
+	Src          string `json:"src"           yaml:"src"`
+	Dst          string `json:"dst"           yaml:"dst"`
+	Layers       int    `json:"layers"        yaml:"layers"`
+	TotalBytes   int64  `json:"total_bytes"   yaml:"total_bytes"`
+	ManifestSize int64  `json:"manifest_size" yaml:"manifest_size"`
+}
+
+// copyDryRunSummary aggregates counts + bytes across the dry-run rows.
+type copyDryRunSummary struct {
+	Tags       int   `json:"tags"        yaml:"tags"`
+	TotalBytes int64 `json:"total_bytes" yaml:"total_bytes"`
+}
+
+// copyDryRunOutput is the structured-output envelope for --dry-run.
+type copyDryRunOutput struct {
+	Results []copyDryRunRow   `json:"results" yaml:"results"`
+	Summary copyDryRunSummary `json:"summary" yaml:"summary"`
+}
+
+// runCopyDryRunSingle executes the dry-run path for the single-ref copy. It
+// fetches the src manifest, tallies layer bytes + manifest size, and renders
+// the summary. No destination mutation occurs.
+func runCopyDryRunSingle(ctx context.Context, srcReg Registry, srcString, dstString string, f cmdutil.Factory, ioStreams cmdutil.IOStreams) error {
+	row, err := dryRunRowFor(ctx, srcReg, srcString, dstString)
+	if err != nil {
+		return err
+	}
+	return renderCopyDryRun(ioStreams, f.OutputFormat(), []copyDryRunRow{row})
+}
+
+// dryRunRowFor reads the source manifest and returns the corresponding row.
+// Extracted so --all-tags can reuse it inside its fan-out.
+func dryRunRowFor(ctx context.Context, srcReg Registry, srcString, dstString string) (copyDryRunRow, error) {
+	img, err := srcReg.Read(ctx, srcString)
+	if err != nil {
+		return copyDryRunRow{}, translateError(err)
+	}
+	mf, err := img.Manifest()
+	if err != nil {
+		return copyDryRunRow{}, translateError(err)
+	}
+	manifestSize, err := img.Size()
+	if err != nil {
+		// Manifest-size is a convenience; if the image can't report it we
+		// fall back to 0 rather than blocking the dry-run.
+		manifestSize = 0
+	}
+	var total int64
+	for i := range mf.Layers {
+		total += mf.Layers[i].Size
+	}
+	return copyDryRunRow{
+		Src:          srcString,
+		Dst:          dstString,
+		Layers:       len(mf.Layers),
+		TotalBytes:   total,
+		ManifestSize: manifestSize,
+	}, nil
+}
+
+// renderCopyDryRun prints either a structured payload or a human-friendly
+// table + footer. Shared by single-ref and --all-tags dry-runs.
+func renderCopyDryRun(ioStreams cmdutil.IOStreams, outputFormat string, rows []copyDryRunRow) error {
+	summary := copyDryRunSummary{Tags: len(rows)}
+	for _, r := range rows {
+		summary.TotalBytes += r.TotalBytes
+	}
+
+	if isStructuredFormat(outputFormat) {
+		payload := copyDryRunOutput{Results: rows, Summary: summary}
+		_, werr := cmdutil.WriteStructured(ioStreams.Out, outputFormat, payload)
+		return werr
+	}
+
+	// Human: a simple aligned table; no ANSI so scripts can still grep.
+	_, _ = fmt.Fprintf(ioStreams.Out, "%-40s  %-40s  %7s  %12s\n",
+		"SOURCE", "DESTINATION", "LAYERS", "TOTAL BYTES")
+	for _, r := range rows {
+		_, _ = fmt.Fprintf(ioStreams.Out, "%-40s  %-40s  %7d  %12s\n",
+			r.Src, r.Dst, r.Layers, formatBytes(r.TotalBytes))
+	}
+	_, _ = fmt.Fprintf(ioStreams.Out, "Dry run: would copy %d tag%s, %s (0 B after cross-repo blob mount if src == dst registry).\n",
+		summary.Tags, pluralS(summary.Tags), formatBytes(summary.TotalBytes))
+	return nil
+}
+
+// resolveOverwriteDecision runs the Head-check + confirmation flow for a
+// single destination ref. Returns overwriteSkip when the user declined (or
+// the environment can't prompt and --overwrite/--yes wasn't provided); the
+// error return carries agent-mode CONFIRMATION_REQUIRED or a surfaced Head
+// error.
+func resolveOverwriteDecision(
+	ctx context.Context,
+	dstReg Registry,
+	dstString string,
+	opts *copyOptions,
+	f cmdutil.Factory,
+	ioStreams cmdutil.IOStreams,
+) (overwriteDecision, error) {
+	// --overwrite means "don't check, just replace". (--yes normalized to
+	// --overwrite by the RunE.) This saves a Head round-trip and matches
+	// the intent: the user has already committed.
+	if opts.Overwrite {
+		return overwriteProceed, nil
+	}
+	_, herr := dstReg.Head(ctx, dstString)
+	if herr != nil {
+		translated := translateError(herr)
+		if isNotFoundError(translated) {
+			// Destination absent — safe to write, no prompt needed.
+			return overwriteProceed, nil
+		}
+		// Any other error is surfaced to the caller as a copy error so
+		// the user sees e.g. auth failures before we spend time reading
+		// the source side.
+		return overwriteProceed, translated
+	}
+	// Destination exists. Decide how to handle the conflict.
+	if f.AgentMode() {
+		// Agent mode never prompts; the caller must pass --yes or
+		// --overwrite explicitly.
+		return overwriteProceed, cmdutil.NewConfirmationRequiredError("copy")
+	}
+	// Non-agent: prompt when we have a TTY; otherwise skip safely.
+	if !isTerminalFn(ioStreams.ErrOut) {
+		return overwriteSkip, nil
+	}
+	confirmed, cerr := f.Prompter().Confirm(ctx,
+		fmt.Sprintf("Destination %s exists. Overwrite?", dstString),
+		tui.WithConfirmDefault(false),
+	)
+	if cerr != nil {
+		// Treat prompt errors as "do not overwrite" — users pressing
+		// Ctrl-C or a broken TTY shouldn't trigger destructive writes.
+		return overwriteSkip, nil //nolint:nilerr // deliberate: decline, don't error
+	}
+	if confirmed {
+		return overwriteProceed, nil
+	}
+	return overwriteSkip, nil
+}
+
+// isNotFoundError returns true when translateError classified the underlying
+// error as a "destination does not exist yet" shape. Both
+// registry_tag_not_found (manifest-unknown on the tag) and
+// registry_repo_not_found (name-unknown on the whole repo) mean the target
+// ref is safe to write.
+func isNotFoundError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var ae *cmdutil.AgentError
+	if !errors.As(err, &ae) {
+		return false
+	}
+	return ae.Code == kindRegistryTagNotFound || ae.Code == kindRegistryRepoNotFound
+}
+
 // ---------- --all-tags implementation ----------
 
 // copyTagResult is the per-tag row in the --all-tags structured payload.
@@ -607,7 +823,7 @@ type copyTagResult struct {
 	Src        string `json:"src"                    yaml:"src"`
 	Dst        string `json:"dst"                    yaml:"dst"`
 	Bytes      int64  `json:"bytes"                  yaml:"bytes"`
-	Status     string `json:"status"                 yaml:"status"` // "succeeded" | "failed"
+	Status     string `json:"status"                 yaml:"status"` // "succeeded" | "failed" | "skipped"
 	Error      string `json:"error,omitempty"        yaml:"error,omitempty"`
 	ErrorCode  string `json:"error_code,omitempty"   yaml:"error_code,omitempty"`
 	DurationMs int64  `json:"duration_ms"            yaml:"duration_ms"`
@@ -618,6 +834,7 @@ type allTagsSummary struct {
 	Total     int `json:"total"     yaml:"total"`
 	Succeeded int `json:"succeeded" yaml:"succeeded"`
 	Failed    int `json:"failed"    yaml:"failed"`
+	Skipped   int `json:"skipped"   yaml:"skipped"`
 }
 
 // allTagsOutput is the --all-tags structured-output shape.
@@ -633,14 +850,20 @@ type copyJob struct {
 }
 
 // copyJobResult is a completed unit of work returned by a worker.
+//
+// Skipped=true indicates the destination tag was found to already exist and
+// the user declined to overwrite it (interactive prompt) or the environment
+// had no way to prompt. Err takes precedence over Skipped — a failed Head
+// check surfaces as a regular failure, not a skip.
 type copyJobResult struct {
-	Index int
-	Tag   string
-	Src   string
-	Dst   string
-	Err   error
-	Bytes int64
-	Took  time.Duration
+	Index   int
+	Tag     string
+	Src     string
+	Dst     string
+	Err     error
+	Bytes   int64
+	Took    time.Duration
+	Skipped bool
 }
 
 // resolveImageJobs clamps the requested image-level parallelism against the
@@ -686,6 +909,120 @@ func resolveImageJobs(userValue, tagCount, hwConcurrency int) int {
 	return half
 }
 
+// renderAllTagsEmpty emits the friendly no-tags message + an empty
+// structured envelope (shape picked based on dry-run vs real run).
+func renderAllTagsEmpty(outputFormat string, ioStreams cmdutil.IOStreams, dryRun bool) error {
+	_, _ = fmt.Fprintln(ioStreams.Out, "No tags found in source repository.")
+	if !isStructuredFormat(outputFormat) {
+		return nil
+	}
+	if dryRun {
+		_, werr := cmdutil.WriteStructured(ioStreams.Out, outputFormat, copyDryRunOutput{Results: []copyDryRunRow{}})
+		return werr
+	}
+	empty := allTagsOutput{Results: []copyTagResult{}}
+	_, werr := cmdutil.WriteStructured(ioStreams.Out, outputFormat, empty)
+	return werr
+}
+
+// runCopyDryRunAllTags materializes the dry-run rows for every source tag and
+// hands them to the shared renderer. Short-circuits on the first read error
+// so the user sees an actionable failure rather than a partial summary.
+//
+//nolint:gocritic // hugeParam: Ref is an immutable value type; contract uses value receivers uniformly.
+func runCopyDryRunAllTags(
+	ctx context.Context,
+	f cmdutil.Factory,
+	ioStreams cmdutil.IOStreams,
+	srcReg Registry,
+	srcRef Ref,
+	dstBase Ref,
+	tags []string,
+) error {
+	rows := make([]copyDryRunRow, 0, len(tags))
+	for _, tag := range tags {
+		row, rerr := dryRunRowFor(ctx, srcReg,
+			srcRef.WithTag(tag).String(),
+			dstBase.WithTag(tag).String(),
+		)
+		if rerr != nil {
+			return rerr
+		}
+		rows = append(rows, row)
+	}
+	return renderCopyDryRun(ioStreams, f.OutputFormat(), rows)
+}
+
+// renderAllTagsHuman prints the per-tag lines + the aggregate summary for
+// the non-structured --all-tags flow. Extracted to keep runCopyAllTagsFlow
+// under the cyclomatic-complexity threshold.
+func renderAllTagsHuman(ioStreams cmdutil.IOStreams, results []copyJobResult, summary allTagsSummary, progress string) {
+	for i := range results {
+		r := &results[i]
+		switch {
+		case r.Err != nil:
+			_, _ = fmt.Fprintf(ioStreams.ErrOut, "FAILED %s -> %s: %v\n", r.Src, r.Dst, r.Err)
+		case r.Skipped:
+			if progress != progressNone {
+				_, _ = fmt.Fprintf(ioStreams.ErrOut, "skipped %s -> %s (destination exists; pass --overwrite to replace)\n",
+					r.Src, r.Dst)
+			}
+		default:
+			if progress != progressNone {
+				_, _ = fmt.Fprintf(ioStreams.Out, "copied %s -> %s\n", r.Src, r.Dst)
+			}
+		}
+	}
+	if progress != progressNone {
+		_, _ = fmt.Fprintf(ioStreams.Out, "Copied %d of %d tag%s (%d skipped, %d failed).\n",
+			summary.Succeeded, summary.Total, pluralS(summary.Total), summary.Skipped, summary.Failed)
+	}
+}
+
+// assembleAllTagsResults runs the pool on the tags the user didn't skip and
+// appends synthetic skipped entries for the ones they did, so the structured
+// output surfaces every tag with an explicit status.
+//
+//nolint:gocritic // hugeParam: Ref uses value receivers uniformly (see refname.go).
+func assembleAllTagsResults(
+	ctx context.Context,
+	cancel context.CancelFunc,
+	srcReg Registry,
+	dstReg Registry,
+	srcRef Ref,
+	dstBase Ref,
+	tags []string,
+	skip map[string]struct{},
+	creds *options.RegistryCredentials,
+	opts *copyOptions,
+	f cmdutil.Factory,
+	ioStreams cmdutil.IOStreams,
+) []copyJobResult {
+	toCopy := make([]string, 0, len(tags))
+	for _, t := range tags {
+		if _, yes := skip[t]; !yes {
+			toCopy = append(toCopy, t)
+		}
+	}
+	imageJobs := resolveImageJobs(opts.ImageJobs, len(toCopy), runtime.NumCPU())
+	var results []copyJobResult
+	if len(toCopy) > 0 {
+		results = runCopyAllTagsPool(ctx, cancel, srcReg, dstReg, srcRef, dstBase, toCopy, imageJobs, creds, opts, f, ioStreams)
+	}
+	for _, tag := range tags {
+		if _, yes := skip[tag]; !yes {
+			continue
+		}
+		results = append(results, copyJobResult{
+			Tag:     tag,
+			Src:     srcRef.WithTag(tag).String(),
+			Dst:     dstBase.WithTag(tag).String(),
+			Skipped: true,
+		})
+	}
+	return results
+}
+
 // runCopyAllTagsFlow is the --all-tags entry point. It validates src/dst
 // shape, fetches the tag list, and delegates the fan-out to
 // runCopyAllTagsPool.
@@ -728,41 +1065,30 @@ func runCopyAllTagsFlow(
 		return translateError(err)
 	}
 	if len(tags) == 0 {
-		_, _ = fmt.Fprintln(ioStreams.Out, "No tags found in source repository.")
-		if isStructuredFormat(f.OutputFormat()) {
-			// Still emit an empty structured payload so scripts get a
-			// parseable envelope.
-			empty := allTagsOutput{Results: []copyTagResult{}}
-			_, werr := cmdutil.WriteStructured(ioStreams.Out, f.OutputFormat(), empty)
-			return werr
-		}
-		return nil
+		return renderAllTagsEmpty(f.OutputFormat(), ioStreams, opts.DryRun)
 	}
 
-	imageJobs := resolveImageJobs(opts.ImageJobs, len(tags), runtime.NumCPU())
+	if opts.DryRun {
+		return runCopyDryRunAllTags(ctx, f, ioStreams, srcReg, srcRef, dstBase, tags)
+	}
 
-	results := runCopyAllTagsPool(ctx, cancel, srcReg, dstReg, srcRef, dstBase, tags, imageJobs, creds, opts, f, ioStreams)
+	// Pre-flight overwrite check: we inspect every dst ref first so we can
+	// short-circuit before any Write lands. In agent mode the very first
+	// existing dst raises CONFIRMATION_REQUIRED; in interactive mode the
+	// user decides per-tag, and declined tags are recorded as skipped.
+	skip, oerr := resolveAllTagsOverwrite(ctx, dstReg, dstBase, tags, opts, f, ioStreams)
+	if oerr != nil {
+		return oerr
+	}
 
+	results := assembleAllTagsResults(ctx, cancel, srcReg, dstReg, srcRef, dstBase, tags, skip, creds, opts, f, ioStreams)
 	summary := summarizeCopyResults(results)
 
 	if handled, err := writeAllTagsStructured(ioStreams, f.OutputFormat(), results, summary); handled {
 		return err
 	}
 
-	// Human-readable summary.
-	for _, r := range results {
-		if r.Err != nil {
-			_, _ = fmt.Fprintf(ioStreams.ErrOut, "FAILED %s -> %s: %v\n", r.Src, r.Dst, r.Err)
-			continue
-		}
-		if opts.Progress != progressNone {
-			_, _ = fmt.Fprintf(ioStreams.Out, "copied %s -> %s\n", r.Src, r.Dst)
-		}
-	}
-	if opts.Progress != progressNone {
-		_, _ = fmt.Fprintf(ioStreams.Out, "Copied %d of %d tag%s (%d failed).\n",
-			summary.Succeeded, summary.Total, pluralS(summary.Total), summary.Failed)
-	}
+	renderAllTagsHuman(ioStreams, results, summary, opts.Progress)
 
 	if summary.Failed > 0 {
 		return newPartialFailureError(summary)
@@ -1036,13 +1362,17 @@ func copyOneTag(
 }
 
 // summarizeCopyResults computes the aggregate counts for the structured
-// payload and the exit-code decision.
+// payload and the exit-code decision. Precedence: Err > Skipped > Succeeded
+// so a tag that failed the Head check is counted as failed, not skipped.
 func summarizeCopyResults(results []copyJobResult) allTagsSummary {
 	s := allTagsSummary{Total: len(results)}
 	for _, r := range results {
-		if r.Err != nil {
+		switch {
+		case r.Err != nil:
 			s.Failed++
-		} else {
+		case r.Skipped:
+			s.Skipped++
+		default:
 			s.Succeeded++
 		}
 	}
@@ -1064,13 +1394,16 @@ func buildAllTagsOutput(results []copyJobResult, summary allTagsSummary) allTags
 			DurationMs: r.Took.Milliseconds(),
 			Status:     copyStatusSucceeded,
 		}
-		if r.Err != nil {
+		switch {
+		case r.Err != nil:
 			row.Status = copyStatusFailed
 			row.Error = r.Err.Error()
 			var ae *cmdutil.AgentError
 			if errors.As(r.Err, &ae) {
 				row.ErrorCode = ae.Code
 			}
+		case r.Skipped:
+			row.Status = copyStatusSkipped
 		}
 		out.Results[i] = row
 	}
@@ -1089,7 +1422,64 @@ func newPartialFailureError(s allTagsSummary) error {
 			"total":     s.Total,
 			"succeeded": s.Succeeded,
 			"failed":    s.Failed,
+			"skipped":   s.Skipped,
 		},
 		ExitCode: cmdutil.ExitAPI,
 	}
+}
+
+// resolveAllTagsOverwrite pre-flights every destination ref in the --all-tags
+// set. Returns a set of tags the user (or environment) declined to overwrite
+// so the caller can skip them in the worker pool. Agent mode short-circuits
+// on the first existing dst with NewConfirmationRequiredError — rationale:
+// surface the issue ASAP so the caller can decide once rather than racing
+// partial writes. Non-TTY non-agent callers get the safe default (skip).
+//
+//nolint:gocritic // hugeParam: Ref is an immutable value type; contract uses value receivers uniformly (see refname.go).
+func resolveAllTagsOverwrite(
+	ctx context.Context,
+	dstReg Registry,
+	dstBase Ref,
+	tags []string,
+	opts *copyOptions,
+	f cmdutil.Factory,
+	ioStreams cmdutil.IOStreams,
+) (map[string]struct{}, error) {
+	skip := map[string]struct{}{}
+	// --overwrite (or --yes, which normalizes to --overwrite) skips the
+	// scan entirely. The worker pool's Write will replace whatever's
+	// there — ggcr's Write is idempotent on manifest replace.
+	if opts.Overwrite {
+		return skip, nil
+	}
+	for _, tag := range tags {
+		dstRef := dstBase.WithTag(tag).String()
+		_, herr := dstReg.Head(ctx, dstRef)
+		if herr != nil {
+			if isNotFoundError(translateError(herr)) {
+				continue
+			}
+			// Any other Head error (auth, unreachable, etc.) is fatal;
+			// bubbling it here avoids racing partial writes under a
+			// broken destination.
+			return nil, translateError(herr)
+		}
+		// Destination exists.
+		if f.AgentMode() {
+			return nil, cmdutil.NewConfirmationRequiredError("copy")
+		}
+		if !isTerminalFn(ioStreams.ErrOut) {
+			// Non-TTY non-agent: can't prompt; default to safe skip.
+			skip[tag] = struct{}{}
+			continue
+		}
+		confirmed, cerr := f.Prompter().Confirm(ctx,
+			fmt.Sprintf("Destination %s exists. Overwrite?", dstRef),
+			tui.WithConfirmDefault(false),
+		)
+		if cerr != nil || !confirmed {
+			skip[tag] = struct{}{}
+		}
+	}
+	return skip, nil
 }
