@@ -25,6 +25,9 @@ Resolved in `client.go` `NewClient` + `resolveEndpoint`:
 3. `DefaultEndpoint` fallback for endpoint only (host/region are required via flag or profile)
 4. `verda_s3_auth_mode`: `credentials` (implemented), `api` (stub -- not yet implemented)
 
+### Profile fallback (s3-specific)
+S3 commands are in `skipCredentialResolution` (see `cmd/cmd.go`), so `Options.Complete()` never runs and `AuthOptions.Profile` stays empty. `loadCredsFromFactory` in `helper.go` therefore falls back to `defaultProfileName` ("default") when `Profile == ""`. Without this, `LoadS3CredentialsForProfile(path, "")` would load ini.v1's synthetic `DEFAULT` section instead of the user's `[default]` section, and `s3 ls`/`cp`/etc. would falsely report "no S3 credentials configured" right after a successful `s3 configure`. `s3 show` applies the same fallback inline.
+
 ### Error translation
 Every SDK response error is funneled through `translateError` in `errors.go`, which maps smithy codes (`NoSuchBucket`, `NoSuchKey`, `BucketAlreadyExists`, `AccessDenied`, auth errors, etc.) to project-wide `cmdutil.AgentError` kinds. Smithy imports are isolated to `errors.go`; command files never import `smithy-go` directly.
 

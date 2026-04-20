@@ -24,7 +24,6 @@ import (
 	"github.com/spf13/cobra"
 
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
-	"github.com/verda-cloud/verda-cli/internal/verda-cli/options"
 )
 
 // Presigner is the minimal interface over *s3.PresignClient used by the
@@ -38,17 +37,9 @@ type Presigner interface {
 var presignerBuilder = defaultPresignerBuilder
 
 func defaultPresignerBuilder(ctx context.Context, f cmdutil.Factory, ov ClientOverrides) (Presigner, error) {
-	profile := f.Options().AuthOptions.Profile
-	path, err := resolveCredentialsFile("")
+	creds, err := loadCredsFromFactory(f)
 	if err != nil {
 		return nil, err
-	}
-
-	creds, err := options.LoadS3CredentialsForProfile(path, profile)
-	if err != nil {
-		// Missing file / missing profile: still try with an empty credentials struct
-		// so NewClient's friendly error fires (pointing users at `verda s3 configure`).
-		creds = &options.S3Credentials{}
 	}
 
 	sdkClient, err := NewClient(ctx, creds, creds.AuthMode, ov)

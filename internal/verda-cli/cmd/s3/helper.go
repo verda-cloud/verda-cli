@@ -34,17 +34,9 @@ func buildClient(ctx context.Context, f cmdutil.Factory, ov ClientOverrides) (AP
 }
 
 func buildClientDefault(ctx context.Context, f cmdutil.Factory, ov ClientOverrides) (API, error) {
-	profile := f.Options().AuthOptions.Profile
-	path, err := resolveCredentialsFile("")
+	creds, err := loadCredsFromFactory(f)
 	if err != nil {
 		return nil, err
-	}
-
-	creds, err := options.LoadS3CredentialsForProfile(path, profile)
-	if err != nil {
-		// Missing file / missing profile: still try with an empty credentials struct
-		// so NewClient's friendly error fires (pointing users at `verda s3 configure`).
-		creds = &options.S3Credentials{}
 	}
 
 	sdkClient, err := NewClient(ctx, creds, creds.AuthMode, ov)
@@ -52,6 +44,30 @@ func buildClientDefault(ctx context.Context, f cmdutil.Factory, ov ClientOverrid
 		return nil, err
 	}
 	return (*sdkS3Client)(sdkClient), nil
+}
+
+// loadCredsFromFactory resolves the credentials file + active profile, then
+// loads S3 credentials for that profile. Returns an empty (but non-nil)
+// S3Credentials on miss so the caller can hand it to NewClient and surface
+// the "no S3 credentials configured" friendly error.
+//
+// S3 commands are exempt from Options.Complete() (see cmd.go skipCredentialResolution),
+// so AuthOptions.Profile is never auto-resolved here. Fall back to defaultProfileName
+// to match the "[default]" section that `verda s3 configure` writes.
+func loadCredsFromFactory(f cmdutil.Factory) (*options.S3Credentials, error) {
+	profile := f.Options().AuthOptions.Profile
+	if profile == "" {
+		profile = defaultProfileName
+	}
+	path, err := resolveCredentialsFile("")
+	if err != nil {
+		return nil, err
+	}
+	creds, err := options.LoadS3CredentialsForProfile(path, profile)
+	if err != nil {
+		return &options.S3Credentials{}, nil //nolint:nilerr // intentional: missing creds → empty struct so NewClient surfaces the "verda s3 configure" hint
+	}
+	return creds, nil
 }
 
 // sdkS3Client is a newtype alias around *s3.Client that satisfies the local

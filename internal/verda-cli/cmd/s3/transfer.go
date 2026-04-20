@@ -27,7 +27,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
-	"github.com/verda-cloud/verda-cli/internal/verda-cli/options"
 )
 
 // Transporter is the minimal upload/download surface used by cp/mv/sync.
@@ -43,17 +42,9 @@ type Transporter interface {
 var transporterBuilder = defaultTransporterBuilder
 
 func defaultTransporterBuilder(ctx context.Context, f cmdutil.Factory, ov ClientOverrides) (Transporter, error) {
-	profile := f.Options().AuthOptions.Profile
-	path, err := resolveCredentialsFile("")
+	creds, err := loadCredsFromFactory(f)
 	if err != nil {
 		return nil, err
-	}
-
-	creds, err := options.LoadS3CredentialsForProfile(path, profile)
-	if err != nil {
-		// Missing file / missing profile: still try with an empty credentials struct
-		// so NewClient's friendly error fires.
-		creds = &options.S3Credentials{}
 	}
 
 	sdkClient, err := NewClient(ctx, creds, creds.AuthMode, ov)
