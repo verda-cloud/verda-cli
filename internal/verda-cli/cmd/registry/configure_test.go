@@ -181,24 +181,10 @@ func TestConfigure_AgentModeWithoutFlagsErrors(t *testing.T) {
 	}
 }
 
-func TestConfigure_InteractiveWithoutFlagsReturnsFriendlyError(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "credentials")
-	t.Setenv("VERDA_REGISTRY_CREDENTIALS_FILE", path)
-	t.Setenv("VERDA_HOME", dir)
-
-	f := cmdutil.NewTestFactory(nil)
-	// AgentModeOverride defaults false → interactive path.
-	streams, _, _ := newTestStreams("")
-
-	err := runConfigureForTest(t, f, streams /* no flags */)
-	if err == nil {
-		t.Fatal("expected friendly error, got nil")
-	}
-	if !strings.Contains(err.Error(), "Task 7") && !strings.Contains(err.Error(), "wizard") {
-		t.Errorf("expected wizard-not-wired hint, got: %v", err)
-	}
-}
+// The Task-6 placeholder that returned a friendly "wizard not yet wired"
+// error has been replaced by the Task-7 wizard. End-to-end testing of the
+// full bubbletea flow would require a fake TTY; buildConfigureFlow is
+// exercised directly in TestBuildConfigureFlow_* below instead.
 
 func TestConfigure_PreservesExistingS3KeysInSameProfile(t *testing.T) {
 	dir := t.TempDir()

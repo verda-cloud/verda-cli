@@ -23,6 +23,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/verda-cloud/verdagostack/pkg/tui/wizard"
+
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/options"
 )
@@ -46,10 +48,8 @@ type configureOptions struct {
 
 // NewCmdConfigure creates the `verda registry configure` command.
 //
-// Only the flag-driven / --paste / agent-mode path is wired here. The
-// interactive bubbletea wizard (Task 7) is not yet hooked up; callers that
-// hit the no-flags, TTY branch receive a friendly error telling them to use
-// flags or wait for the wizard.
+// Three input modes: --paste, --username+--password-stdin+--endpoint, or an
+// interactive bubbletea wizard when no input flags are supplied on a TTY.
 func NewCmdConfigure(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 	opts := &configureOptions{
 		Profile:       defaultProfileName,
@@ -113,6 +113,19 @@ func NewCmdConfigure(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Comm
 
 // runConfigure is the RunE body, split out for testability.
 func runConfigure(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *configureOptions) error {
+	// If no non-interactive input mode was supplied and we're not in agent
+	// mode, drive the interactive wizard to populate opts.Paste (plus the
+	// derived Username/Endpoint) and opts.ExpiresInDays / opts.DockerConfig
+	// before falling through to the flag-driven resolution path below.
+	if shouldRunConfigureWizard(f, opts) {
+		flow := buildConfigureFlow(opts)
+		engine := wizard.NewEngine(f.Prompter(), f.Status(),
+			wizard.WithOutput(ioStreams.ErrOut), wizard.WithExitConfirmation())
+		if err := engine.Run(cmd.Context(), flow); err != nil {
+			return err
+		}
+	}
+
 	creds, err := resolveRegistryInputs(cmd, f, ioStreams, opts)
 	if err != nil {
 		return err
@@ -186,10 +199,29 @@ func resolveRegistryInputs(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdu
 			"must provide --paste OR --username + --password-stdin + --endpoint in agent mode")
 
 	default:
-		return nil, errors.New(
-			"interactive configure wizard not yet wired; pass --paste \"docker login ...\" " +
-				"or --username + --password-stdin + --endpoint (Task 7 will add the wizard)")
+		// After the wizard runs, one of the two non-interactive branches
+		// above should match. If we land here, the wizard didn't populate
+		// opts.Paste (e.g. the user canceled). Fall back to a usage error
+		// rather than silently succeeding.
+		return nil, cmdutil.UsageErrorf(cmd,
+			"must provide --paste OR --username + --password-stdin + --endpoint")
 	}
+}
+
+// shouldRunConfigureWizard reports whether runConfigure should drive the
+// interactive bubbletea wizard. It triggers only when no non-interactive
+// input mode was supplied and the caller is not in agent mode.
+func shouldRunConfigureWizard(f cmdutil.Factory, opts *configureOptions) bool {
+	if f.AgentMode() {
+		return false
+	}
+	if strings.TrimSpace(opts.Paste) != "" {
+		return false
+	}
+	if strings.TrimSpace(opts.Username) != "" && opts.PasswordStdin {
+		return false
+	}
+	return true
 }
 
 // computeExpiry returns a clean, second-truncated UTC timestamp for `days`
