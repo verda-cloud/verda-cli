@@ -35,6 +35,7 @@ import (
 const (
 	kindRegistryAuthFailed        = "registry_auth_failed"
 	kindRegistryCredentialExpired = "registry_credential_expired" //nolint:gosec // error-code constant, not a credential
+	kindRegistryNotConfigured     = "registry_not_configured"
 	kindRegistryRepoNotFound      = "registry_repo_not_found"
 	kindRegistryTagNotFound       = "registry_tag_not_found"
 	kindRegistryAccessDenied      = "registry_access_denied"
