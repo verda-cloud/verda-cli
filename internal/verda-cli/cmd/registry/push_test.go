@@ -428,7 +428,7 @@ verda_registry_project_id = proj
 	}
 	reg := &writeErrorRegistry{writeErr: authErr}
 	origBuilder := clientBuilder
-	clientBuilder = func(_ *options.RegistryCredentials) Registry { return reg }
+	clientBuilder = func(_ *options.RegistryCredentials, _ RetryConfig) Registry { return reg }
 	t.Cleanup(func() { clientBuilder = origBuilder })
 
 	f := cmdutil.NewTestFactory(nil)

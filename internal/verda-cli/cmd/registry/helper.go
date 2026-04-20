@@ -21,8 +21,13 @@ import (
 
 // clientBuilder is the package-level swap point. Tests reassign it to
 // return a fake Registry backed by an in-process test server. Production
-// code funnels through buildClient → clientBuilder → newGGCRRegistry.
-var clientBuilder = newGGCRRegistry
+// code funnels through buildClient → clientBuilder →
+// newGGCRRegistryWithRetry.
+//
+// The builder accepts a RetryConfig so push's --retries flag can flow
+// into the transport. Call sites that don't yet expose a retries knob
+// (ls, tags, login) pass RetryConfig{}, which disables retries.
+var clientBuilder = newGGCRRegistryWithRetry
 
 // daemonListerBuilder is the parallel swap point for the local Docker
 // daemon lister. Tests (push, Task 19) reassign it to return a fake
@@ -37,10 +42,11 @@ var daemonListerBuilder = NewDaemonLister
 // the push command. Tests reassign it to return a fake SourceLoader.
 var sourceLoaderBuilder = NewDefaultSourceLoader
 
-// buildClient returns a Registry for the given credentials, routed
-// through clientBuilder so tests can substitute a fake.
-func buildClient(creds *options.RegistryCredentials) Registry {
-	return clientBuilder(creds)
+// buildClient returns a Registry for the given credentials and retry
+// policy, routed through clientBuilder so tests can substitute a fake.
+// Pass RetryConfig{} to disable retries.
+func buildClient(creds *options.RegistryCredentials, cfg RetryConfig) Registry {
+	return clientBuilder(creds, cfg)
 }
 
 // loadCredsFromFactory loads registry credentials for the current

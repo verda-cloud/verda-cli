@@ -17,6 +17,7 @@ package registry
 import (
 	"context"
 	"fmt"
+	"net/http"
 
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
@@ -60,20 +61,57 @@ type WriteOptions struct {
 // google/go-containerregistry. It carries the target host so relative
 // refs like "my-app:v1" can default to the configured registry.
 type ggcrRegistry struct {
-	host string // e.g. "vccr.io"
-	auth authn.Authenticator
+	host      string // e.g. "vccr.io"
+	auth      authn.Authenticator
+	transport http.RoundTripper // nil => ggcr default transport
 }
 
-// newGGCRRegistry builds a ggcrRegistry from credentials. The host is
-// taken verbatim from creds.Endpoint (host only — no scheme, no path).
+// newGGCRRegistry builds a ggcrRegistry from credentials with retries
+// disabled. Callers that want retries should use
+// newGGCRRegistryWithRetry instead.
 func newGGCRRegistry(creds *options.RegistryCredentials) Registry {
-	return &ggcrRegistry{
+	return newGGCRRegistryWithRetry(creds, RetryConfig{})
+}
+
+// newGGCRRegistryWithRetry builds a ggcrRegistry from credentials and
+// wires a retrying http.RoundTripper into every remote.* call. A zero
+// RetryConfig disables retries (the RoundTripper falls back to the ggcr
+// default transport).
+func newGGCRRegistryWithRetry(creds *options.RegistryCredentials, cfg RetryConfig) Registry {
+	reg := &ggcrRegistry{
 		host: creds.Endpoint,
 		auth: authn.FromConfig(authn.AuthConfig{
 			Username: creds.Username,
 			Password: creds.Secret,
 		}),
 	}
+	if cfg.enabled() {
+		// Clone DefaultTransport so connection-level tuning (proxy,
+		// timeouts) mirrors stdlib behavior, then wrap with retries.
+		base, ok := http.DefaultTransport.(*http.Transport)
+		var rt http.RoundTripper
+		if ok {
+			rt = base.Clone()
+		} else {
+			rt = http.DefaultTransport
+		}
+		reg.transport = NewRetryingTransport(rt, cfg)
+	}
+	return reg
+}
+
+// remoteOptions returns the base remote.Option list for this registry.
+// Every remote.* call site funnels through this helper so transport +
+// auth + ctx wiring stays consistent.
+func (g *ggcrRegistry) remoteOptions(ctx context.Context) []remote.Option {
+	opts := []remote.Option{
+		remote.WithAuth(g.auth),
+		remote.WithContext(ctx),
+	}
+	if g.transport != nil {
+		opts = append(opts, remote.WithTransport(g.transport))
+	}
+	return opts
 }
 
 // parseRef parses a user-supplied ref, defaulting the registry to g.host
@@ -102,7 +140,7 @@ func (g *ggcrRegistry) Catalog(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parse registry %q: %w", g.host, err)
 	}
-	return remote.Catalog(ctx, reg, remote.WithAuth(g.auth), remote.WithContext(ctx))
+	return remote.Catalog(ctx, reg, g.remoteOptions(ctx)...)
 }
 
 // Tags lists all tags for a repository.
@@ -111,7 +149,7 @@ func (g *ggcrRegistry) Tags(ctx context.Context, repo string) ([]string, error) 
 	if err != nil {
 		return nil, err
 	}
-	return remote.List(r, remote.WithAuth(g.auth), remote.WithContext(ctx))
+	return remote.List(r, g.remoteOptions(ctx)...)
 }
 
 // Head fetches the manifest descriptor for a ref without downloading
@@ -121,7 +159,7 @@ func (g *ggcrRegistry) Head(ctx context.Context, ref string) (*v1.Descriptor, er
 	if err != nil {
 		return nil, err
 	}
-	return remote.Head(r, remote.WithAuth(g.auth), remote.WithContext(ctx))
+	return remote.Head(r, g.remoteOptions(ctx)...)
 }
 
 // Write pushes an image to ref. Jobs == 0 falls back to ggcr's default
@@ -132,10 +170,7 @@ func (g *ggcrRegistry) Write(ctx context.Context, ref string, img v1.Image, opts
 	if err != nil {
 		return err
 	}
-	remoteOpts := []remote.Option{
-		remote.WithAuth(g.auth),
-		remote.WithContext(ctx),
-	}
+	remoteOpts := g.remoteOptions(ctx)
 	if opts.Jobs > 0 {
 		remoteOpts = append(remoteOpts, remote.WithJobs(opts.Jobs))
 	}
@@ -152,5 +187,5 @@ func (g *ggcrRegistry) Read(ctx context.Context, ref string) (v1.Image, error) {
 	if err != nil {
 		return nil, err
 	}
-	return remote.Image(r, remote.WithAuth(g.auth), remote.WithContext(ctx))
+	return remote.Image(r, g.remoteOptions(ctx)...)
 }

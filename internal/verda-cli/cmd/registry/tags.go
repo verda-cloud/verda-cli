@@ -163,7 +163,9 @@ func runTags(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams,
 			ref.Tag, rawRepo)
 	}
 
-	reg := buildClient(creds)
+	// tags does not yet expose a --retries flag; pass an empty
+	// RetryConfig so the ggcr default transport is used.
+	reg := buildClient(creds, RetryConfig{})
 
 	ctx, cancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
 	defer cancel()

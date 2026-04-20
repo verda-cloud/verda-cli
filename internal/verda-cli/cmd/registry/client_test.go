@@ -247,12 +247,12 @@ func TestBuildClient_UsesSwap(t *testing.T) {
 	t.Cleanup(func() { clientBuilder = orig })
 
 	sentinel := newGGCRRegistry(testCreds("vccr.io"))
-	clientBuilder = func(creds *options.RegistryCredentials) Registry {
+	clientBuilder = func(creds *options.RegistryCredentials, cfg RetryConfig) Registry {
 		called = true
 		return sentinel
 	}
 
-	got := buildClient(&options.RegistryCredentials{Endpoint: "vccr.io"})
+	got := buildClient(&options.RegistryCredentials{Endpoint: "vccr.io"}, RetryConfig{})
 	if !called {
 		t.Fatal("swapped builder not invoked")
 	}

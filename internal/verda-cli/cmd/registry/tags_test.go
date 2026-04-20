@@ -421,7 +421,7 @@ func TestTags_NetworkError(t *testing.T) {
 	}
 	// Install via the package-level swap point, same as ls_test.
 	orig := clientBuilder
-	clientBuilder = func(creds *options.RegistryCredentials) Registry { return fake }
+	clientBuilder = func(creds *options.RegistryCredentials, cfg RetryConfig) Registry { return fake }
 	t.Cleanup(func() { clientBuilder = orig })
 
 	writeLsCredsFile(t, healthyVCRCredsBody("vccr.io", "proj"))

@@ -43,7 +43,7 @@ type pushOptions struct {
 	Source          string // auto|daemon|oci|tar
 	Jobs            int    // layer-level parallelism (0 = ggcr default)
 	ImageJobs       int    // image-level parallelism (v1: always 1, stored for future)
-	Retries         int    // stored; wired in Task 21 (retry transport)
+	Retries         int    // flows into the retrying http.RoundTripper
 	Progress        string // auto|plain|json|none
 	NoMount         bool   // disables cross-repo blob mount (v1: flag stored; not yet wired)
 }
@@ -142,7 +142,7 @@ func NewCmdPush(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 	flags.StringVar(&opts.Source, "source", opts.Source, "Image source: auto|daemon|oci|tar")
 	flags.IntVar(&opts.Jobs, "jobs", 0, "Layer-level parallelism (0 = ggcr default)")
 	flags.IntVar(&opts.ImageJobs, "image-jobs", opts.ImageJobs, "Image-level parallelism (v1: always 1)")
-	flags.IntVar(&opts.Retries, "retries", opts.Retries, "Retries for transient errors (stored; wiring lands in a follow-up task)")
+	flags.IntVar(&opts.Retries, "retries", opts.Retries, "Maximum attempts for idempotent HTTP operations on transient errors")
 	flags.StringVar(&opts.Progress, "progress", opts.Progress, "Progress output: auto|plain|json|none")
 	flags.BoolVar(&opts.NoMount, "no-mount", false, "Disable cross-repo blob mount (v1: flag is a no-op)")
 
@@ -179,7 +179,10 @@ func runPush(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams,
 
 	src := ImageSource(opts.Source)
 
-	reg := buildClient(creds)
+	// Route push's --retries into the retrying transport. Retries only
+	// fire for idempotent operations (GET/HEAD/PUT/DELETE/PATCH); blob
+	// upload POSTs are excluded by design.
+	reg := buildClient(creds, RetryConfig{MaxAttempts: opts.Retries})
 
 	ping := func(ctx context.Context) error {
 		lister, err := daemonListerBuilder()

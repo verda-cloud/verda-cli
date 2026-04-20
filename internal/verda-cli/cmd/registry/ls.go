@@ -134,7 +134,9 @@ func runLs(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, o
 		return err
 	}
 
-	reg := buildClient(creds)
+	// ls does not yet expose a --retries flag; pass an empty RetryConfig
+	// so the ggcr default transport is used (retries disabled).
+	reg := buildClient(creds, RetryConfig{})
 
 	ctx, cancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
 	defer cancel()

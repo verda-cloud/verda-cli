@@ -103,7 +103,7 @@ verda_registry_expires_at = ` + past + `
 func withFakeRegistry(t *testing.T, fake Registry) {
 	t.Helper()
 	orig := clientBuilder
-	clientBuilder = func(creds *options.RegistryCredentials) Registry { return fake }
+	clientBuilder = func(creds *options.RegistryCredentials, cfg RetryConfig) Registry { return fake }
 	t.Cleanup(func() { clientBuilder = orig })
 }
 
@@ -320,7 +320,7 @@ func TestLs_LimitCapsMetadata(t *testing.T) {
 	writeLsCredsFile(t, healthyLsCredsBody(host))
 
 	// Verify Catalog shape directly — ensures all 5 names come back.
-	reg := buildClient(&options.RegistryCredentials{Endpoint: host, Username: "u", Secret: "p"})
+	reg := buildClient(&options.RegistryCredentials{Endpoint: host, Username: "u", Secret: "p"}, RetryConfig{})
 	allRepos, err := reg.Catalog(context.Background())
 	if err != nil {
 		t.Fatalf("direct Catalog: %v", err)
