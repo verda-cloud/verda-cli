@@ -81,6 +81,9 @@ func SetUsageTemplate(cmd *cobra.Command, groups CommandGroups) {
 		b.WriteString(group.Message)
 		b.WriteString("\n")
 		for _, c := range group.Commands {
+			if c.Hidden {
+				continue
+			}
 			fmt.Fprintf(&b, "  %-18s %s\n", c.Name(), c.Short)
 		}
 		b.WriteString("\n")

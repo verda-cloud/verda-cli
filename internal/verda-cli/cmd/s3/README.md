@@ -2,6 +2,8 @@
 
 AWS-CLI-style object storage commands for Verda's S3-compatible endpoint. Uses a separate credential set (keys prefixed `verda_s3_`) so object-storage access is independent of the main API credentials while still sharing the profile system.
 
+> **Pre-release.** The `s3` command tree is gated behind `VERDA_S3_ENABLED=1` and hidden from `verda --help`. Without the env var, `verda s3 ...` returns "unknown command". When the feature ships GA, drop the gate in `internal/verda-cli/cmd/cmd.go` (`s3Enabled` + the `if`) and remove `Hidden: true` from `internal/verda-cli/cmd/s3/s3.go`.
+
 ## Quick reference
 
 | Command | Description |
@@ -154,3 +156,51 @@ Profiles work across both API and S3 credentials. Create a second profile via:
 verda s3 configure --profile staging
 ```
 Switch with `--profile staging` on any command, or persist it with `verda auth use staging`.
+
+## Interactive vs Non-Interactive
+
+Only `configure` has an interactive wizard. Every other subcommand is one-shot: it takes positional URIs + flags and either succeeds or returns a structured error.
+
+- **`configure` wizard**: triggers when any of `--access-key`, `--secret-key`, `--endpoint` is missing. Supply all three (plus optionally `--profile`, `--region`, `--credentials-file`) to skip the wizard entirely.
+- **Destructive prompts** (`rb`, `rm`): an interactive `prompter.Confirm()` warns before deletion unless `--yes` is passed. `cp`, `mv`, `sync`, `sync --delete` do not prompt (AWS convention — the verb itself is the commitment).
+- **Agent mode** (`--agent`): disables every interactive prompt, implies `--output json`, and requires `--yes` for any destructive operation. Without `--yes`, destructive subcommands return `cmdutil.AgentError{Code: "CONFIRMATION_REQUIRED"}` so calling agents know exactly what to add.
+
+## Architecture Notes
+
+Key files:
+
+- `s3.go` — parent command registration
+- `configure.go`, `wizard.go`, `path.go` — credential setup wizard + flag mode + credentials file path resolution
+- `show.go` — credential status readout (no secrets)
+- `client.go` — `API` interface (mockable SDK subset), `NewClient` factory, `resolveEndpoint`, `validateAuthMode`
+- `helper.go` — `clientBuilder` swap point for tests, `sdkS3Client` newtype wrapping `*s3.Client` into the `API` interface
+- `errors.go` — `translateError` mapping smithy error codes to `cmdutil.AgentError`
+- `uri.go` — `s3://bucket/key` parser (`Parse`, `URI`, `IsS3URI`)
+- `transfer.go` — `Transporter` interface (upload + download), `Copier`, `safeJoin` (path-traversal guard), `inferContentType`
+- `ls.go`, `cp.go`, `mv.go`, `rm.go`, `sync.go`, `mb.go`, `rb.go`, `presign.go` — one subcommand each
+
+SDK usage (AWS SDK v2):
+
+- `ListBuckets`, `ListObjectsV2`, `HeadBucket`, `HeadObject`, `GetObject`, `PutObject`, `DeleteObject`, `DeleteObjects`, `CreateBucket`, `DeleteBucket`, `CopyObject` — through the `API` interface
+- `feature/s3/manager.Uploader/Downloader` — multipart upload/download (wrapped by `Transporter`)
+- `s3.NewPresignClient` — presigned GET URLs (wrapped by `Presigner`)
+
+Business logic:
+
+- **Credential resolution**: per-invocation flags > profile keys (`verda_s3_*`) > `DefaultEndpoint` fallback for endpoint
+- **Filter matching**: `filepath.Match` against the relative path (not basename). `*` does not cross `/`. Shared `matchFilters` lives in `rm.go`.
+- **Batching**: `DeleteObjects` in groups of 1000 (`maxDeleteBatch` in `rb.go`) for `rm --recursive` and `rb --force`.
+- **Pagination**: `ContinuationToken` loop for every `ListObjectsV2`, with a defensive break if a server returns `IsTruncated=true` but an empty `NextContinuationToken`.
+- **CopySource encoding**: per-component `url.PathEscape(bucket) + "/" + url.PathEscape(key)` — never escape the whole thing as one string.
+- **Sync comparison**: default is "src size differs OR src newer"; `--exact-timestamps` flips to "src size differs OR any mtime difference".
+- **Path traversal guard**: `safeJoin` on every s3-to-local download, so adversarial keys containing `../` cannot escape the destination directory.
+
+Wizard flow (`configure`):
+
+1. Profile name (default `default`)
+2. S3 access key ID (masked)
+3. S3 secret access key (password prompt)
+4. S3 endpoint URL (must start with `http://` or `https://`)
+5. S3 region (default `us-east-1`)
+
+All five steps are skipped individually when the corresponding flag is already set — so `verda s3 configure --access-key X --endpoint Y` only prompts for the secret and region.

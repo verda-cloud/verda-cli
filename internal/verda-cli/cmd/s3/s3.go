@@ -25,6 +25,11 @@ func NewCmdS3(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "s3",
 		Short: "Manage S3 object storage",
+		// Pre-release: hide from `verda --help`. Removal is a one-line change
+		// when S3 ships GA. The env-var gate in cmd/cmd.go decides whether
+		// the command is even registered; this Hidden flag covers the case
+		// where it is registered (testers with VERDA_S3_ENABLED set).
+		Hidden: true,
 		Long: cmdutil.LongDesc(`
 			Manage S3-compatible object storage credentials and operations.
 

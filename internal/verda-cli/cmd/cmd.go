@@ -17,6 +17,7 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"os"
 	"runtime/debug"
 
 	"github.com/spf13/cobra"
@@ -132,6 +133,20 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) (*cobra.Command, *clioptions.Op
 
 	f := cmdutil.NewFactory(opts)
 
+	resourceCmds := []*cobra.Command{
+		availability.NewCmdAvailability(f, ioStreams),
+		images.NewCmdImages(f, ioStreams),
+		instancetypes.NewCmdInstanceTypes(f, ioStreams),
+		locations.NewCmdLocations(f, ioStreams),
+		sshkey.NewCmdSSHKey(f, ioStreams),
+		startupscript.NewCmdStartupScript(f, ioStreams),
+		template.NewCmdTemplate(f, ioStreams),
+		volume.NewCmdVolume(f, ioStreams),
+	}
+	if s3Enabled() {
+		resourceCmds = append(resourceCmds, s3.NewCmdS3(f, ioStreams))
+	}
+
 	groups := cmdutil.CommandGroups{
 		{
 			Message: "Auth Commands:",
@@ -147,18 +162,8 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) (*cobra.Command, *clioptions.Op
 			},
 		},
 		{
-			Message: "Resource Commands:",
-			Commands: []*cobra.Command{
-				availability.NewCmdAvailability(f, ioStreams),
-				images.NewCmdImages(f, ioStreams),
-				instancetypes.NewCmdInstanceTypes(f, ioStreams),
-				locations.NewCmdLocations(f, ioStreams),
-				s3.NewCmdS3(f, ioStreams),
-				sshkey.NewCmdSSHKey(f, ioStreams),
-				startupscript.NewCmdStartupScript(f, ioStreams),
-				template.NewCmdTemplate(f, ioStreams),
-				volume.NewCmdVolume(f, ioStreams),
-			},
+			Message:  "Resource Commands:",
+			Commands: resourceCmds,
 		},
 		{
 			Message: "Info Commands:",
@@ -189,6 +194,15 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) (*cobra.Command, *clioptions.Op
 	cmdutil.SetUsageTemplate(cmd, groups)
 
 	return cmd, opts
+}
+
+// s3Enabled gates the pre-release S3 object-storage commands. The whole
+// command tree is omitted from registration unless VERDA_S3_ENABLED is "1"
+// or "true". When the feature ships GA, delete this function, drop the
+// gate in NewRootCommand, and remove `Hidden: true` from cmd/s3/s3.go.
+func s3Enabled() bool {
+	v := os.Getenv("VERDA_S3_ENABLED")
+	return v == "1" || v == "true"
 }
 
 // skipCredentialResolution returns true for commands that should work
