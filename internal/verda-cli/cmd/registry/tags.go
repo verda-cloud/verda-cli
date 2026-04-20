@@ -18,7 +18,6 @@ import (
 	"context"
 	"fmt"
 	"sort"
-	"strconv"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -294,7 +293,7 @@ func renderTagsHuman(ioStreams cmdutil.IOStreams, payload tagsPayload, metadataC
 		sizeStr := "--"
 		if i < metadataCap {
 			digestStr = truncateDigest(r.Digest)
-			sizeStr = formatTagBytes(r.Size)
+			sizeStr = formatBytes(r.Size)
 		}
 		pushed := "--"
 		if r.PushedAt != nil {
@@ -316,41 +315,4 @@ func truncateDigest(d string) string {
 		return d[:len(prefix)+12] + "…"
 	}
 	return d
-}
-
-// formatTagBytes renders a byte count in binary-unit form (1 KiB = 1024 B),
-// matching the `ls -h` convention used by most container tooling.
-//
-// Rules:
-//   - n < 0        → "--" (unknown / not looked up)
-//   - n < 1024     → "<n> B" (no decimals)
-//   - n < 10*unit  → two decimals (e.g. "4.25 GiB")
-//   - n < 100*unit → one decimal  (e.g. "42.3 MiB")
-//   - otherwise    → zero decimals (e.g. "512 MiB")
-//
-// The task spec suggests "one decimal for < 100, two for < 10" — this
-// function matches that contract exactly.
-func formatTagBytes(n int64) string {
-	if n < 0 {
-		return "--"
-	}
-	const unit = 1024
-	if n < unit {
-		return strconv.FormatInt(n, 10) + " B"
-	}
-	units := []string{"KiB", "MiB", "GiB", "TiB", "PiB", "EiB"}
-	value := float64(n) / unit
-	idx := 0
-	for value >= unit && idx < len(units)-1 {
-		value /= unit
-		idx++
-	}
-	switch {
-	case value < 10:
-		return fmt.Sprintf("%.2f %s", value, units[idx])
-	case value < 100:
-		return fmt.Sprintf("%.1f %s", value, units[idx])
-	default:
-		return fmt.Sprintf("%.0f %s", value, units[idx])
-	}
 }

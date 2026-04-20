@@ -21,6 +21,7 @@ import (
 	"io"
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/spf13/cobra"
 
 	v1 "github.com/google/go-containerregistry/pkg/v1"
@@ -31,7 +32,10 @@ import (
 
 // progressValue sentinels for the --progress flag.
 const (
-	progressNone = "none"
+	progressAuto  = "auto"
+	progressPlain = "plain"
+	progressJSON  = "json"
+	progressNone  = "none"
 )
 
 // pushOptions bundles flag state for `verda registry push`.
@@ -206,10 +210,15 @@ func runPush(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams,
 
 	progressEnabled := !isStructuredFormat(f.OutputFormat()) && opts.Progress != progressNone
 
-	results := make([]pushResult, 0, len(args))
-	for _, rawLocal := range args {
-		r := pushOneImage(ctx, reg, loader, creds, src, rawLocal, opts, ioStreams, progressEnabled)
-		results = append(results, r)
+	var results []pushResult
+	if shouldUseBubbletea(opts, f.OutputFormat(), ioStreams.ErrOut) {
+		results = runPushBubbletea(ctx, cancel, reg, loader, creds, src, args, opts, ioStreams)
+	} else {
+		results = make([]pushResult, 0, len(args))
+		for _, rawLocal := range args {
+			r := pushOneImage(ctx, reg, loader, creds, src, rawLocal, opts, ioStreams, progressEnabled)
+			results = append(results, r)
+		}
 	}
 
 	if isStructuredFormat(f.OutputFormat()) {
@@ -446,4 +455,84 @@ func firstError(results []pushResult) error {
 		}
 	}
 	return nil
+}
+
+// runPushBubbletea runs the auto+TTY push flow behind a bubbletea model.
+// It blocks until every image either finishes or the user cancels, then
+// returns a []pushResult in the same shape as the plain path so the caller
+// can reuse the structured-output / human-summary rendering.
+//
+// Contract:
+//   - TUI writes only to ioStreams.ErrOut (stdout stays clean for -o table
+//     human summary + JSON mode, though JSON mode never enters this path).
+//   - Ctrl-C triggers the cancel function, which the outer context uses to
+//     abort in-flight ggcr HTTP requests.
+//   - Progress channel drains synchronously per image so there are no
+//     goroutine leaks — ggcr closes the channel on Write return and the
+//     forwarding goroutine exits, then the main worker signals the model.
+func runPushBubbletea(
+	ctx context.Context,
+	cancel context.CancelFunc,
+	reg Registry,
+	loader SourceLoader,
+	creds *options.RegistryCredentials,
+	src ImageSource,
+	args []string,
+	opts *pushOptions,
+	ioStreams cmdutil.IOStreams,
+) []pushResult {
+	rows := make([]imageRow, len(args))
+	for i, raw := range args {
+		rows[i] = imageRow{Ref: raw, State: stateQueued}
+	}
+
+	model := newPushViewModel(creds.Endpoint, creds.ProjectID, rows, cancel)
+	program := tea.NewProgram(model, tea.WithOutput(ioStreams.ErrOut))
+
+	results := make([]pushResult, len(args))
+	go func() {
+		for i, rawLocal := range args {
+			dst, err := resolveDestination(rawLocal, creds, opts.Repo, opts.Tag)
+			if err != nil {
+				results[i] = pushResult{Ref: rawLocal, Err: err}
+				program.Send(pushResultMsg{Index: i, Err: err})
+				continue
+			}
+			results[i].Ref = rawLocal
+			results[i].Dst = dst
+
+			img, err := loader.Load(ctx, src, rawLocal)
+			if err != nil {
+				results[i].Err = err
+				program.Send(pushResultMsg{Index: i, Err: err})
+				continue
+			}
+
+			progressCh := make(chan v1.Update, 16)
+			forwardDone := make(chan struct{})
+			go func(idx int) {
+				defer close(forwardDone)
+				for u := range progressCh {
+					program.Send(pushProgressMsg{Index: idx, Update: u})
+				}
+			}(i)
+
+			wo := WriteOptions{Jobs: opts.Jobs, Progress: progressCh}
+			writeErr := reg.Write(ctx, dst, img, wo)
+			<-forwardDone
+
+			writeErr = translateErrorWithExpiry(writeErr, creds)
+			results[i].Err = writeErr
+			program.Send(pushResultMsg{Index: i, Err: writeErr})
+		}
+	}()
+
+	if _, err := program.Run(); err != nil {
+		// program.Run errors are TUI setup failures (rare): surface on
+		// ErrOut and leave the results slice as-is; the caller's firstError
+		// will still flag any per-image failures.
+		_, _ = fmt.Fprintf(ioStreams.ErrOut, "push: progress view error: %v\n", err)
+	}
+
+	return results
 }
