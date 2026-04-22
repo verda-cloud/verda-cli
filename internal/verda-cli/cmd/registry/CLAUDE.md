@@ -2,7 +2,7 @@
 
 ## Quick Reference
 
-- Parent: `verda registry` (alias: `vcr`)
+- Parent: `verda registry` (aliases: `vccr` canonical, `vcr` legacy)
 - Subcommands: `configure`, `show`, `login`, `ls`, `tags`, `push`, `copy` (alias `cp`)
 - Files:
   - `registry.go` -- Parent command registration. `Hidden: true`; register gated on `VERDA_REGISTRY_ENABLED=1` in `cmd/cmd.go`.

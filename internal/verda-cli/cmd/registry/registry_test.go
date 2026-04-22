@@ -33,8 +33,11 @@ func TestNewCmdRegistry_BasicWiring(t *testing.T) {
 	if !cmd.Hidden {
 		t.Errorf("command should be Hidden pre-GA")
 	}
+	if !sliceContains(cmd.Aliases, "vccr") {
+		t.Errorf("alias \"vccr\" missing; got %v", cmd.Aliases)
+	}
 	if !sliceContains(cmd.Aliases, "vcr") {
-		t.Errorf("alias \"vcr\" missing; got %v", cmd.Aliases)
+		t.Errorf("legacy alias \"vcr\" missing; got %v", cmd.Aliases)
 	}
 }
 

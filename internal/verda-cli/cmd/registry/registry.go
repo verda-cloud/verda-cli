@@ -24,8 +24,8 @@ import (
 func NewCmdRegistry(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "registry",
-		Aliases: []string{"vcr"},
-		Short:   "Manage Verda Container Registry credentials and images",
+		Aliases: []string{"vccr", "vcr"},
+		Short:   "Manage the Verda Cloud Container Registry (vccr.io)",
 		Hidden:  true, // pre-GA; also gated in cmd/cmd.go via VERDA_REGISTRY_ENABLED
 		Long: cmdutil.LongDesc(`
 			Manage Verda Container Registry (vccr.io) credentials, browse
