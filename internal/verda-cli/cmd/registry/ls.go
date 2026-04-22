@@ -235,5 +235,5 @@ func renderLsHuman(ioStreams cmdutil.IOStreams, payload lsPayload) {
 // isStructured so registry commands stay consistent without a cross-package
 // import cycle.
 func isStructuredFormat(format string) bool {
-	return format == "json" || format == "yaml"
+	return format == progressJSON || format == "yaml"
 }
