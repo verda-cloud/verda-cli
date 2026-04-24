@@ -73,6 +73,18 @@ func formatBytesPerSec(bps float64) string {
 	return formatBytes(int64(bps)) + "/s"
 }
 
+// isStructuredFormat reports whether the output format is a machine-readable
+// one that must not be interleaved with human lines. Shared by every registry
+// subcommand that emits JSON/YAML payloads (tags, push, copy, push_view).
+func isStructuredFormat(format string) bool {
+	return format == progressJSON || format == "yaml"
+}
+
+// untaggedLabel is the placeholder shown in the TAGS column for artifacts
+// with no tags — SBOMs, referrer manifests, and dangling digests. Mirrors
+// Harbor's web UI phrasing so the CLI and UI read the same.
+const untaggedLabel = "<untagged>"
+
 // formatMMSS renders a duration as MM:SS for durations under an hour and
 // HH:MM:SS once it reaches one hour. Negative durations clamp to "00:00".
 // Pure; no clock access.

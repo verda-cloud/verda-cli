@@ -101,27 +101,6 @@ func TestRegistry_WriteThenRead(t *testing.T) {
 	}
 }
 
-func TestRegistry_Catalog(t *testing.T) {
-	r, host := newTestRegistry(t)
-
-	writeRandomImage(t, r, host+"/proj/alpha:v1")
-	writeRandomImage(t, r, host+"/proj/beta:v1")
-
-	repos, err := r.Catalog(context.Background())
-	if err != nil {
-		t.Fatalf("Catalog: %v", err)
-	}
-	sort.Strings(repos)
-
-	want := map[string]bool{"proj/alpha": true, "proj/beta": true}
-	for _, got := range repos {
-		delete(want, got)
-	}
-	if len(want) != 0 {
-		t.Fatalf("missing repos in catalog: %v (got %v)", want, repos)
-	}
-}
-
 func TestRegistry_Tags(t *testing.T) {
 	r, host := newTestRegistry(t)
 

@@ -101,12 +101,15 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) (*cobra.Command, *clioptions.Op
 			return nil
 		},
 		PersistentPostRun: func(cmd *cobra.Command, _ []string) {
-			// Show version-update hint (best-effort, never fails the command).
+			// Version-update hint is best-effort and ONLY runs on commands
+			// where the user is plausibly interested in version info
+			// (doctor, update, help, and bare `verda`). Business commands
+			// like `vm list` or `vccr ls` never do a network fetch for a
+			// cosmetic hint. See shouldCheckVersion below.
 			if opts.Agent || opts.Output != "table" {
 				return
 			}
-			switch cmd.Name() {
-			case "update", "doctor", "completion":
+			if !shouldCheckVersion(cmd) {
 				return
 			}
 			latest, current, err := cmdutil.CheckVersion(cmd.Context())
@@ -241,6 +244,34 @@ func skipCredentialResolution(cmd *cobra.Command) bool {
 	case pName == "registry":
 		return true
 	case cmd.Name() == "doctor" && pName == "verda":
+		return true
+	}
+	return false
+}
+
+// shouldCheckVersion returns true for commands where the user is plausibly
+// interested in version information, so it's okay to spend up to a couple of
+// seconds on a GitHub fetch after the command runs. Everything else (business
+// commands like `vm list`, `vccr ls`, `volume rm`, etc.) must never pay that
+// cost for a cosmetic hint — they read no cache and perform no network I/O.
+//
+// Included:
+//   - `verda doctor`             (explicit diagnostic; network expected)
+//   - `verda update`             (canonical place for version info)
+//   - `verda help` / help on any
+//     subcommand via `help` verb  (user is reading docs)
+//   - bare `verda`               (no args, prints help — new-user first run)
+//
+// Not included: every subcommand bare-invocation (e.g. `verda vm` with no
+// subcommand). Those also print help, but users running them are browsing
+// a specific feature area, not asking about the CLI itself.
+func shouldCheckVersion(cmd *cobra.Command) bool {
+	switch cmd.Name() {
+	case "doctor", "update", "help":
+		return true
+	case "verda":
+		// Root command, typically invoked as `verda` (no args) — cobra
+		// runs RunE which calls cmd.Help(), then PersistentPostRun.
 		return true
 	}
 	return false

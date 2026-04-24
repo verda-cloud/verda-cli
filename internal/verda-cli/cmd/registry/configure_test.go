@@ -282,6 +282,199 @@ verda_client_secret = api-secret
 	}
 }
 
+// TestConfigure_UsernamePasswordStdin_DefaultsEndpointToProduction:
+// when --endpoint is omitted and no saved profile exists, the command
+// silently falls back to defaultRegistryEndpoint ("vccr.io") and emits a
+// provenance line on stderr so users on staging can tell what happened.
+func TestConfigure_UsernamePasswordStdin_DefaultsEndpointToProduction(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "credentials")
+	t.Setenv("VERDA_REGISTRY_CREDENTIALS_FILE", path)
+	t.Setenv("VERDA_HOME", dir)
+
+	f := cmdutil.NewTestFactory(nil)
+	streams, _, errOut := newTestStreams("s3cret\n")
+
+	err := runConfigureForTest(t, f, streams,
+		"--username", "vcr-abc+cli",
+		"--password-stdin",
+	)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	cfg, err := ini.Load(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if got := cfg.Section("default").Key("verda_registry_endpoint").String(); got != defaultRegistryEndpoint {
+		t.Errorf("endpoint = %q, want %q", got, defaultRegistryEndpoint)
+	}
+	if !strings.Contains(errOut.String(), "production default") {
+		t.Errorf("stderr should explain the production-default choice, got: %q", errOut.String())
+	}
+	if !strings.Contains(errOut.String(), defaultRegistryEndpoint) {
+		t.Errorf("stderr should name the chosen endpoint, got: %q", errOut.String())
+	}
+}
+
+// TestConfigure_UsernamePasswordStdin_ReusesSavedEndpoint: a previously
+// saved endpoint for the same profile is reused on rotation, so staging
+// users don't accidentally rotate onto the production host.
+func TestConfigure_UsernamePasswordStdin_ReusesSavedEndpoint(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "credentials")
+	t.Setenv("VERDA_REGISTRY_CREDENTIALS_FILE", path)
+	t.Setenv("VERDA_HOME", dir)
+
+	existing := `[default]
+verda_registry_username = vcr-abc+oldcli
+verda_registry_secret = oldsecret
+verda_registry_endpoint = registry.staging.internal.datacrunch.io
+verda_registry_project_id = abc
+`
+	if err := os.WriteFile(path, []byte(existing), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	f := cmdutil.NewTestFactory(nil)
+	streams, _, errOut := newTestStreams("newsecret\n")
+
+	err := runConfigureForTest(t, f, streams,
+		"--username", "vcr-abc+newcli",
+		"--password-stdin",
+	)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	cfg, err := ini.Load(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	got := cfg.Section("default").Key("verda_registry_endpoint").String()
+	if got != "registry.staging.internal.datacrunch.io" {
+		t.Errorf("endpoint = %q, want saved staging host preserved", got)
+	}
+	if cfg.Section("default").Key("verda_registry_secret").String() != "newsecret" {
+		t.Error("secret should have been updated to the new rotation value")
+	}
+	if !strings.Contains(errOut.String(), "saved in profile") {
+		t.Errorf("stderr should explain reuse of saved endpoint, got: %q", errOut.String())
+	}
+}
+
+// TestConfigure_UsernamePasswordStdin_FlagWinsOverSaved: an explicit
+// --endpoint flag beats any saved profile value.
+func TestConfigure_UsernamePasswordStdin_FlagWinsOverSaved(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "credentials")
+	t.Setenv("VERDA_REGISTRY_CREDENTIALS_FILE", path)
+	t.Setenv("VERDA_HOME", dir)
+
+	existing := `[default]
+verda_registry_username = vcr-abc+oldcli
+verda_registry_secret = oldsecret
+verda_registry_endpoint = registry.staging.internal.datacrunch.io
+verda_registry_project_id = abc
+`
+	if err := os.WriteFile(path, []byte(existing), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	f := cmdutil.NewTestFactory(nil)
+	streams, _, errOut := newTestStreams("newsecret\n")
+
+	err := runConfigureForTest(t, f, streams,
+		"--username", "vcr-abc+newcli",
+		"--password-stdin",
+		"--endpoint", "vccr.io",
+	)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	cfg, err := ini.Load(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if got := cfg.Section("default").Key("verda_registry_endpoint").String(); got != "vccr.io" {
+		t.Errorf("endpoint = %q, want %q (flag should win)", got, "vccr.io")
+	}
+	// No provenance line should be emitted when the user set --endpoint
+	// explicitly; that stderr chatter is only for the surprise-avoidance
+	// case.
+	if strings.Contains(errOut.String(), "Using registry endpoint") {
+		t.Errorf("stderr should not emit provenance line when --endpoint is explicit, got: %q", errOut.String())
+	}
+}
+
+// TestConfigure_UsernamePasswordStdin_NamedProfileDoesNotLeakDefault:
+// when --profile points to a section that doesn't exist yet (or has no
+// saved endpoint), we fall back to the production default rather than
+// accidentally reusing another profile's saved host.
+func TestConfigure_UsernamePasswordStdin_NamedProfileDoesNotLeakDefault(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "credentials")
+	t.Setenv("VERDA_REGISTRY_CREDENTIALS_FILE", path)
+	t.Setenv("VERDA_HOME", dir)
+
+	// [default] has staging. [staging] section doesn't exist yet.
+	existing := `[default]
+verda_registry_endpoint = registry.staging.internal.datacrunch.io
+`
+	if err := os.WriteFile(path, []byte(existing), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	f := cmdutil.NewTestFactory(nil)
+	streams, _, _ := newTestStreams("stgsecret\n")
+
+	err := runConfigureForTest(t, f, streams,
+		"--profile", "staging",
+		"--username", "vcr-abc+cli",
+		"--password-stdin",
+	)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	cfg, err := ini.Load(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	stg := cfg.Section("staging")
+	if got := stg.Key("verda_registry_endpoint").String(); got != defaultRegistryEndpoint {
+		t.Errorf("staging endpoint = %q, want %q (not the default-profile's host)",
+			got, defaultRegistryEndpoint)
+	}
+}
+
+// TestConfigure_UsernamePasswordStdin_SuggestsPasteOnUsageError: when
+// neither --paste nor --username+--password-stdin is supplied in agent
+// mode (where the wizard can't run), the error hints at --paste as the
+// easier path so users on unknown hosts aren't stuck.
+func TestConfigure_UsernamePasswordStdin_SuggestsPasteOnUsageError(t *testing.T) {
+	// This test exists to pin the wording: if someone renames the hint
+	// they should update the web UI docs in lockstep.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "credentials")
+	t.Setenv("VERDA_REGISTRY_CREDENTIALS_FILE", path)
+	t.Setenv("VERDA_HOME", dir)
+
+	f := cmdutil.NewTestFactory(nil)
+	f.AgentModeOverride = true
+	streams, _, _ := newTestStreams("")
+
+	err := runConfigureForTest(t, f, streams /* no flags */)
+	if err == nil {
+		t.Fatal("expected usage error, got nil")
+	}
+	if !strings.Contains(err.Error(), "--paste") {
+		t.Errorf("agent-mode usage error should mention --paste as an option, got: %v", err)
+	}
+}
+
 func TestConfigure_ExpiresInRespected(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "credentials")

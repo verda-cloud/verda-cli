@@ -45,6 +45,7 @@ func NewCmdRegistry(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Comma
 		NewCmdTags(f, ioStreams),
 		NewCmdPush(f, ioStreams),
 		NewCmdCopy(f, ioStreams),
+		NewCmdDelete(f, ioStreams),
 	)
 	return cmd
 }

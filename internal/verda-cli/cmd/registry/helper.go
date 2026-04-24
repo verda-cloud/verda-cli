@@ -42,11 +42,28 @@ var daemonListerBuilder = NewDaemonLister
 // the push command. Tests reassign it to return a fake SourceLoader.
 var sourceLoaderBuilder = NewDefaultSourceLoader
 
+// harborListerBuilder is the swap point for the Harbor REST client used
+// by `ls`. Tests reassign it to return a fake RepositoryLister with a
+// canned repository set. Production code funnels through
+// buildHarborLister -> harborListerBuilder -> newHarborClient.
+//
+// A separate swap point (rather than reusing clientBuilder) mirrors the
+// interface split: Registry is ggcr/Docker-v2 shaped; RepositoryLister
+// is Harbor-REST shaped. See harbor.go for the rationale.
+var harborListerBuilder = newHarborClient
+
 // buildClient returns a Registry for the given credentials and retry
 // policy, routed through clientBuilder so tests can substitute a fake.
 // Pass RetryConfig{} to disable retries.
 func buildClient(creds *options.RegistryCredentials, cfg RetryConfig) Registry {
 	return clientBuilder(creds, cfg)
+}
+
+// buildHarborLister returns a RepositoryLister for the given credentials
+// and retry policy, routed through harborListerBuilder so tests can
+// substitute a fake.
+func buildHarborLister(creds *options.RegistryCredentials, cfg RetryConfig) RepositoryLister {
+	return harborListerBuilder(creds, cfg)
 }
 
 // loadCredsFromFactory loads registry credentials for the current

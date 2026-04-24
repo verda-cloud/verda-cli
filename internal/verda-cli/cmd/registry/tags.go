@@ -156,7 +156,7 @@ func runTags(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams,
 	// If the caller typed a tag (e.g. "app:v1") surface a note to ErrOut so
 	// agent-mode stdout remains clean. The tag is discarded — we only need
 	// the repository path to list tags.
-	if ref.Tag != "" && ref.Tag != "latest" {
+	if ref.Tag != "" && ref.Tag != defaultTag {
 		_, _ = fmt.Fprintf(ioStreams.ErrOut,
 			"Note: ignoring tag %q in %q; tags always lists every tag in the repository.\n",
 			ref.Tag, rawRepo)

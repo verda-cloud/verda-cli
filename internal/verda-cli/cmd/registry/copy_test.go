@@ -713,10 +713,6 @@ type writeCountRegistry struct {
 	counter *atomic.Bool
 }
 
-func (w *writeCountRegistry) Catalog(ctx context.Context) ([]string, error) {
-	return w.inner.Catalog(ctx)
-}
-
 func (w *writeCountRegistry) Tags(ctx context.Context, repo string) ([]string, error) {
 	return w.inner.Tags(ctx, repo)
 }
@@ -1532,8 +1528,8 @@ func TestCopy_OverwriteAgentModeWithYesAllowed(t *testing.T) {
 
 // ---------- test helpers: registry fakes ----------
 
-// emptyTagsRegistry returns "" for Catalog and [] for Tags. Anything else
-// panics via the nil-embedded Registry.
+// emptyTagsRegistry returns [] for Tags. Anything else panics via the
+// nil-embedded Registry.
 type emptyTagsRegistry struct {
 	Registry // nil; accidental Read/Write panics.
 }
@@ -1550,9 +1546,6 @@ type writeCountingRegistry struct {
 	writes *atomic.Int32
 }
 
-func (w *writeCountingRegistry) Catalog(ctx context.Context) ([]string, error) {
-	return w.inner.Catalog(ctx)
-}
 func (w *writeCountingRegistry) Tags(ctx context.Context, repo string) ([]string, error) {
 	return w.inner.Tags(ctx, repo)
 }
@@ -1578,9 +1571,6 @@ type throttleRegistry struct {
 	writeDelay  time.Duration
 }
 
-func (r *throttleRegistry) Catalog(ctx context.Context) ([]string, error) {
-	return r.inner.Catalog(ctx)
-}
 func (r *throttleRegistry) Tags(ctx context.Context, repo string) ([]string, error) {
 	return r.inner.Tags(ctx, repo)
 }

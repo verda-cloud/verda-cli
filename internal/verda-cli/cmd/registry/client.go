@@ -34,9 +34,6 @@ import (
 // this file mirrors the s3 package's discipline of isolating SDK
 // imports to client.go + errors.go.
 type Registry interface {
-	// Catalog returns all repository names visible to the current credentials.
-	Catalog(ctx context.Context) ([]string, error)
-
 	// Tags returns tag names for the given repository (e.g. "my-app" or "ns/app").
 	Tags(ctx context.Context, repo string) ([]string, error)
 
@@ -132,15 +129,6 @@ func (g *ggcrRegistry) parseRepo(repo string) (name.Repository, error) {
 		return name.Repository{}, fmt.Errorf("parse repository %q: %w", repo, err)
 	}
 	return r, nil
-}
-
-// Catalog lists all repositories on the registry.
-func (g *ggcrRegistry) Catalog(ctx context.Context) ([]string, error) {
-	reg, err := name.NewRegistry(g.host)
-	if err != nil {
-		return nil, fmt.Errorf("parse registry %q: %w", g.host, err)
-	}
-	return remote.Catalog(ctx, reg, g.remoteOptions(ctx)...)
 }
 
 // Tags lists all tags for a repository.

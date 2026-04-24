@@ -33,6 +33,13 @@ const (
 	defaultProfileName     = "default"
 	defaultExpiresInDays   = 30
 	registryConfigureShort = "Configure Verda Container Registry credentials"
+
+	// defaultRegistryEndpoint is the production VCR host used when the user
+	// runs `--username/--password-stdin` without an explicit `--endpoint`
+	// AND no endpoint has been saved for the profile. Staging and custom
+	// deployments require either `--paste` (which carries the host inline)
+	// or an explicit `--endpoint` flag.
+	defaultRegistryEndpoint = "vccr.io"
 )
 
 type configureOptions struct {
@@ -48,8 +55,10 @@ type configureOptions struct {
 
 // NewCmdConfigure creates the `verda registry configure` command.
 //
-// Three input modes: --paste, --username+--password-stdin+--endpoint, or an
-// interactive bubbletea wizard when no input flags are supplied on a TTY.
+// Three input modes: --paste, --username+--password-stdin (with --endpoint
+// optional — resolved from the saved profile or falling back to
+// defaultRegistryEndpoint), or an interactive bubbletea wizard when no
+// input flags are supplied on a TTY.
 func NewCmdConfigure(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 	opts := &configureOptions{
 		Profile:       defaultProfileName,
@@ -68,23 +77,51 @@ func NewCmdConfigure(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Comm
 			Default file: ~/.verda/credentials
 			Override with --credentials-file or VERDA_REGISTRY_CREDENTIALS_FILE.
 
+			Where to find the values
+			  The Verda web UI's "Registry credentials created" dialog shows:
+
+			    Full credentials name         → --username
+			    Secret                        → stdin (with --password-stdin)
+			    Registry authentication command → paste verbatim into --paste
+
+			  The third field is the only place the registry URL appears after
+			  you close the dialog, so the easiest path is to copy that whole
+			  string and use --paste. The URL looks like:
+
+			    docker login -u vcr-<project-id>+<name> -p <secret> <host>
+
+			  where <host> is ` + "`vccr.io`" + ` on production and a longer
+			  staging hostname on non-production deployments.
+
 			Two non-interactive input modes are supported:
 
-			  --paste   Paste the full ` + "`docker login ...`" + ` command the Verda
-			            web UI prints when you provision a credential.
-			  --username + --password-stdin + --endpoint
-			            Classic Docker-style: username and endpoint as flags,
-			            secret read from stdin.
+			  --paste   (recommended) Paste the full ` + "`docker login ...`" + `
+			            command the web UI prints. The host is extracted
+			            automatically.
+			  --username + --password-stdin [+ --endpoint]
+			            Classic Docker-style: username as a flag, secret on
+			            stdin. --endpoint defaults to the previously-saved
+			            endpoint for this profile, or ` + "`" + defaultRegistryEndpoint + "`" + ` on
+			            production. Staging/custom deployments must pass
+			            --endpoint explicitly the first time.
 		`),
 		Example: cmdutil.Examples(`
-			# Paste the docker login command from the web UI
+			# Recommended: paste the full command from the web UI's
+			# "Registry authentication command" field
 			verda registry configure --paste "docker login -u vcr-abc+cli -p s3cret vccr.io"
 
-			# Classic form: secret on stdin
+			# Production: --endpoint defaults to vccr.io, so only
+			# --username and the stdin secret are required
 			echo -n "$SECRET" | verda registry configure \
 			  --username vcr-abc+cli \
-			  --endpoint vccr.io \
 			  --password-stdin
+
+			# Staging / custom: pass --endpoint explicitly the first time;
+			# subsequent rotations on the same profile reuse the saved host
+			echo -n "$SECRET" | verda registry configure \
+			  --username vcr-abc+cli \
+			  --password-stdin \
+			  --endpoint registry.staging.internal.datacrunch.io
 
 			# Different profile, custom expiry
 			verda registry configure \
@@ -103,7 +140,9 @@ func NewCmdConfigure(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Comm
 	flags.StringVar(&opts.CredentialsFile, "credentials-file", "", "Path to the shared credentials file")
 	flags.StringVar(&opts.Username, "username", "", "Registry username (vcr-<project-id>+<name>)")
 	flags.BoolVar(&opts.PasswordStdin, "password-stdin", false, "Read the registry secret from stdin")
-	flags.StringVar(&opts.Endpoint, "endpoint", "", "Registry host (e.g. \"vccr.io\")")
+	flags.StringVar(&opts.Endpoint, "endpoint", "",
+		"Registry host (e.g. \"vccr.io\"). Defaults to the saved endpoint for this profile, "+
+			"or \""+defaultRegistryEndpoint+"\" on production.")
 	flags.IntVar(&opts.ExpiresInDays, "expires-in", opts.ExpiresInDays, "Days from now until the credentials expire")
 	flags.StringVar(&opts.Paste, "paste", "", "Full `docker login ...` command to parse (alternative to --username/--password-stdin)")
 	flags.BoolVar(&opts.DockerConfig, "docker-config", false, "Also write ~/.docker/config.json (not yet implemented in this subcommand)")
@@ -172,8 +211,13 @@ func resolveRegistryInputs(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdu
 		}, nil
 
 	case strings.TrimSpace(opts.Username) != "" && opts.PasswordStdin:
-		if strings.TrimSpace(opts.Endpoint) == "" {
-			return nil, cmdutil.UsageErrorf(cmd, "--endpoint is required with --username/--password-stdin")
+		endpoint, source := resolveEndpointForFlags(opts)
+		if endpoint == "" {
+			return nil, cmdutil.UsageErrorf(cmd,
+				"--endpoint is required with --username/--password-stdin.\n"+
+					"The endpoint appears in the 'Registry authentication command' field of the Verda web UI,\n"+
+					"e.g. `docker login -u ... -p ... vccr.io` → --endpoint vccr.io.\n"+
+					"Or use --paste to supply the full command in one go.")
 		}
 		secret, err := readSecretFromStdin(ioStreams.In)
 		if err != nil {
@@ -186,10 +230,19 @@ func resolveRegistryInputs(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdu
 		if err != nil {
 			return nil, cmdutil.UsageErrorf(cmd, "%s", err.Error())
 		}
+		// Surface endpoint provenance when it wasn't set by the user, so a
+		// silent production-default or profile-reuse doesn't surprise
+		// anyone running on staging. Kept to stderr + non-agent mode so
+		// JSON consumers and scripts piping stdout stay clean.
+		if source != endpointSourceFlag && !f.AgentMode() {
+			_, _ = fmt.Fprintf(ioStreams.ErrOut,
+				"Using registry endpoint %q (%s). Pass --endpoint to override.\n",
+				endpoint, source)
+		}
 		return &options.RegistryCredentials{
 			Username:  opts.Username,
 			Secret:    secret,
-			Endpoint:  opts.Endpoint,
+			Endpoint:  endpoint,
 			ProjectID: projectID,
 			ExpiresAt: expiresAt,
 		}, nil
@@ -206,6 +259,55 @@ func resolveRegistryInputs(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdu
 		return nil, cmdutil.UsageErrorf(cmd,
 			"must provide --paste OR --username + --password-stdin + --endpoint")
 	}
+}
+
+// Endpoint source labels used by resolveEndpointForFlags to explain (in
+// stderr) why a particular endpoint was chosen when --endpoint was absent.
+const (
+	endpointSourceFlag    = "flag"
+	endpointSourceSaved   = "saved in profile"
+	endpointSourceDefault = "production default"
+)
+
+// resolveEndpointForFlags decides which registry endpoint to use when the
+// caller drove the --username/--password-stdin path. Resolution order:
+//
+//  1. explicit --endpoint flag            → as-is
+//  2. saved endpoint for opts.Profile     → reused (credential rotation)
+//  3. defaultRegistryEndpoint (vccr.io)   → production fallback
+//
+// The returned source tag is used by the caller to explain non-explicit
+// choices on stderr so staging users don't silently get a vccr.io default.
+// Returns ("", "") only if something catastrophic prevents all three paths
+// from yielding a value — currently unreachable but left for safety.
+func resolveEndpointForFlags(opts *configureOptions) (endpoint, source string) {
+	if e := strings.TrimSpace(opts.Endpoint); e != "" {
+		return e, endpointSourceFlag
+	}
+	if e := loadSavedEndpoint(opts.Profile, opts.CredentialsFile); e != "" {
+		return e, endpointSourceSaved
+	}
+	return defaultRegistryEndpoint, endpointSourceDefault
+}
+
+// loadSavedEndpoint returns the previously-saved verda_registry_endpoint
+// for the given profile, or "" if none is set / the file is missing /
+// the profile section doesn't exist. Errors are intentionally swallowed:
+// the caller treats absence the same as a missing key and falls through
+// to defaultRegistryEndpoint.
+func loadSavedEndpoint(profile, credentialsFile string) string {
+	if strings.TrimSpace(profile) == "" {
+		profile = defaultProfileName
+	}
+	path := credentialsFilePath(credentialsFile)
+	if path == "" {
+		return ""
+	}
+	creds, err := options.LoadRegistryCredentialsForProfile(path, profile)
+	if err != nil || creds == nil {
+		return ""
+	}
+	return strings.TrimSpace(creds.Endpoint)
 }
 
 // shouldRunConfigureWizard reports whether runConfigure should drive the

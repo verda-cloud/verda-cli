@@ -55,10 +55,14 @@ func buildConfigureFlow(opts *configureOptions) *wizard.Flow {
 // command from the Verda web UI and routes it through parseDockerLogin. On
 // success the parsed fields populate opts so the existing persistence path
 // in runConfigure works unchanged.
+//
+// The description names the exact UI field ("Registry authentication
+// command") so the user knows what to look for on the credential-created
+// dialog, rather than hunting for a free-form "docker login" string.
 func configureStepPaste(opts *configureOptions) wizard.Step {
 	return wizard.Step{
 		Name:        "paste",
-		Description: "Paste the `docker login …` command from the Verda UI",
+		Description: "Paste the 'Registry authentication command' from the Verda UI (docker login -u … -p … <host>)",
 		Prompt:      wizard.TextInputPrompt,
 		Required:    true,
 		Validate: func(v any) error {

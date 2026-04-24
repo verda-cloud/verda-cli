@@ -2,6 +2,8 @@
 
 Read `CLAUDE.md` first. This file defines how you execute, not what the project is.
 
+Applies to every AI agent working in this repo. Primary targets are Claude Code (reads `CLAUDE.md`) and OpenAI Codex (reads this file). `CLAUDE.md` (project knowledge) + this file (execution contract) + `.golangci.yaml` (enforced style) form the complete brief. A `.cursor/rules/main.mdc` pointer exists for Cursor users but is not actively maintained.
+
 ## Mandatory Read-First, Plan-First Workflow
 
 Do NOT write code until you have completed all steps below. No exceptions.
@@ -44,7 +46,10 @@ Skipping these steps leads to pattern violations, broken dual-mode, and pricing 
 ## Done Checklist
 
 - [ ] `make build` passes
-- [ ] `make test` passes
+- [ ] `make lint` passes with zero issues (do not rely on pre-commit to surface these)
+- [ ] `make test` passes (runs lint + unit tests)
 - [ ] `--help` renders correctly for changed commands
 - [ ] Interactive and non-interactive modes both work
 - [ ] No leftover debug code, TODOs, or commented-out blocks
+
+If `make lint` reports issues, fix them *before* announcing completion. See `CLAUDE.md` § "Go House Style" for the patterns that prevent the common hits (http.NoBody, American spelling, reused constants, rangeValCopy, nilerr annotations, etc.).

@@ -47,7 +47,60 @@ const (
 	kindRegistryInternalError      = "registry_internal_error"
 	kindRegistryNoImageSource      = "registry_no_image_source"
 	kindRegistryCopyPartialFailure = "registry_copy_partial_failure"
+	kindRegistryDeleteBlocked      = "registry_delete_blocked"
 )
+
+// registryDeleteBlockedRecoveryMessage is the user-facing text for a 412
+// "Precondition Failed" from Harbor's delete endpoints. Harbor uses 412 to
+// signal project-policy blocks — Tag Immutability rules and Tag Retention
+// rules are the two production sources. The practical fix is always "edit
+// the policy in the web UI then retry", so the message funnels users there
+// first and keeps support as the escalation path.
+const registryDeleteBlockedRecoveryMessage = "Deletion is blocked by a Verda project policy.\n" +
+	"\n" +
+	"To fix:\n" +
+	"  1. Open the project in the Verda web UI and review Tag Immutability\n" +
+	"     and Tag Retention rules — one of them matches the artifact / tag\n" +
+	"     you are trying to delete.\n" +
+	"  2. Adjust or remove the rule, then retry the `verda registry delete`\n" +
+	"     command. If the rule is required and you still need the artifact\n" +
+	"     gone, contact Verda support at support@verda.cloud."
+
+// registryAuthFailedRecoveryMessage is the user-facing text for a 401 /
+// "UNAUTHORIZED" from the registry after the pre-flight expiry check has
+// already passed. If the credential were merely expired, translateError-
+// WithExpiry rewrites the code to registry_credential_expired — so by the
+// time this message fires the credential is still inside its expiry
+// window, which means the secret was revoked server-side (the web UI
+// "delete credential" action) or otherwise invalidated.
+//
+// Every 401-surfacing AgentError in this package reuses this constant so
+// the recovery steps stay in sync across `ls` (Harbor REST) and
+// push/tags/copy/login (ggcr transport). Update this one place when the
+// portal URL or support address changes.
+const registryAuthFailedRecoveryMessage = "Registry authentication failed. Your credential may be invalid or revoked.\n" +
+	"\n" +
+	"To fix:\n" +
+	"  1. Create a new credential in the Verda web UI and run `verda registry configure`\n" +
+	"     with the docker-login string the UI shows.\n" +
+	"  2. If the problem persists, contact Verda support at support@verda.cloud."
+
+// registryAccessDeniedRecoveryMessage is the user-facing text for a 403
+// from the Harbor REST listing endpoints (`ls` / artifact drill-down).
+// 403 here means the credential itself is valid but the robot account
+// does not carry the required `list repository` / `pull artifact`
+// permission bit. The practical fix from a user's perspective is
+// identical to 401 — mint a fresh credential — because a freshly-minted
+// robot inherits the current permission policy, which (post-Apr 2026)
+// includes the listing permissions. Contacting support is the second
+// step when a rotation doesn't help.
+const registryAccessDeniedRecoveryMessage = "Your registry credential does not have permission for this operation.\n" +
+	"\n" +
+	"To fix:\n" +
+	"  1. Create a new credential in the Verda web UI (newly-minted credentials include\n" +
+	"     the required list / pull permissions) and run `verda registry configure` with\n" +
+	"     the docker-login string the UI shows.\n" +
+	"  2. If the problem persists, contact Verda support at support@verda.cloud."
 
 // translateError maps a generic ggcr/network error to a *cmdutil.AgentError.
 // It does NOT know about credential expiry. Callers that have the active
@@ -66,6 +119,15 @@ func translateError(err error) error {
 	// Leave context cancellation / deadline errors untouched so higher
 	// layers can handle them uniformly.
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
+
+	// Pre-translated errors (e.g. from harbor.go's translateHarborError, or
+	// any future pluggable client) pass through unchanged. Without this
+	// guard they hit the fallback below and get rewrapped as
+	// registry_internal_error, hiding the original structured code.
+	var pre *cmdutil.AgentError
+	if errors.As(err, &pre) {
 		return err
 	}
 
@@ -132,7 +194,7 @@ func translateTransportError(terr *transport.Error) error {
 	case hasDiagnosticCode(terr, transport.UnauthorizedErrorCode):
 		return &cmdutil.AgentError{
 			Code:     kindRegistryAuthFailed,
-			Message:  "Registry authentication failed. Run `verda registry configure`.",
+			Message:  registryAuthFailedRecoveryMessage,
 			ExitCode: cmdutil.ExitAuth,
 		}
 	case hasDiagnosticCode(terr, transport.NameUnknownErrorCode):

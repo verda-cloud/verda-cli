@@ -44,3 +44,45 @@ func TestSkipCredentialResolution_RegistryChildren(t *testing.T) {
 		t.Error("child of `registry` should skip credential resolution")
 	}
 }
+
+func TestShouldCheckVersion(t *testing.T) {
+	// newCmd returns a *cobra.Command whose Name() is `name` (cobra derives
+	// Name from the first token of Use).
+	newCmd := func(name string) *cobra.Command { return &cobra.Command{Use: name} }
+
+	for _, tc := range []struct {
+		name string
+		cmd  *cobra.Command
+		want bool
+	}{
+		// ---- Yes: CLI-meta commands the user is already asking about. ----
+		{"doctor", newCmd("doctor"), true},
+		{"update", newCmd("update"), true},
+		{"help", newCmd("help"), true},
+		{"verda root (bare)", newCmd("verda"), true},
+
+		// ---- No: resource / business commands. They must NEVER do a
+		// network fetch or even read the cache to print a cosmetic hint.
+		{"vm", newCmd("vm"), false},
+		{"vm list", newCmd("list"), false}, // subcommand runs with its own Name
+		{"vccr/registry", newCmd("registry"), false},
+		{"s3", newCmd("s3"), false},
+		{"volume", newCmd("volume"), false},
+		{"template", newCmd("template"), false},
+		{"cost", newCmd("cost"), false},
+		{"status", newCmd("status"), false},
+		{"completion", newCmd("completion"), false},
+		{"settings", newCmd("settings"), false},
+
+		// Previously these short-circuited with an early return in PostRun;
+		// with the new gate, shouldCheckVersion just returns false for them.
+		{"mcp", newCmd("mcp"), false},
+		{"skills", newCmd("skills"), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := shouldCheckVersion(tc.cmd); got != tc.want {
+				t.Errorf("shouldCheckVersion(%q) = %v, want %v", tc.cmd.Name(), got, tc.want)
+			}
+		})
+	}
+}
