@@ -89,3 +89,41 @@ func renderContainerSummary(w io.Writer, opts *containerCreateOptions) {
 
 	_, _ = fmt.Fprintln(w)
 }
+
+// renderBatchjobSummary is the batchjob counterpart to renderContainerSummary.
+// Smaller review card — no spot, no scaling triggers, no concurrency, no
+// healthcheck — but calls out the deadline prominently since it's the one
+// batchjob-only field.
+func renderBatchjobSummary(w io.Writer, opts *batchjobCreateOptions) {
+	label := lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Bold(true)
+	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	header := lipgloss.NewStyle().Foreground(lipgloss.Color("5")).Bold(true)
+
+	_, _ = fmt.Fprintf(w, "\n  %s\n", header.Render("Batch-job summary"))
+
+	kv := func(k, v string) {
+		_, _ = fmt.Fprintf(w, "  %-22s %s\n", label.Render(k), v)
+	}
+
+	kv("Name", opts.Name)
+	kv("Image", opts.Image)
+	kv("Compute", fmt.Sprintf("%s x%d", opts.Compute, opts.ComputeSize))
+	if opts.RegistryCreds != "" {
+		kv("Registry creds", opts.RegistryCreds)
+	} else {
+		kv("Registry creds", dim.Render("public"))
+	}
+	kv("Port", strconv.Itoa(opts.Port))
+	if n := len(opts.Env) + len(opts.EnvSecret); n > 0 {
+		kv("Env vars", strconv.Itoa(n))
+	}
+	kv("Max replicas", strconv.Itoa(opts.MaxReplicas))
+	kv("Deadline", opts.Deadline.String())
+	kv("Request TTL", opts.RequestTTL.String())
+	if len(opts.SecretMounts) > 0 {
+		kv("Secret mounts", strconv.Itoa(len(opts.SecretMounts)))
+	}
+	kv("General storage", fmt.Sprintf("%s  %d GiB (fixed)", defaultGeneralStoragePath, opts.GeneralStorageSize))
+	kv("Shared memory", fmt.Sprintf("%s  %d MiB", defaultSHMPath, opts.SHMSize))
+	_, _ = fmt.Fprintln(w)
+}

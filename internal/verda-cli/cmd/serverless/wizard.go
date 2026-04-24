@@ -17,14 +17,17 @@ package serverless
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/verda-cloud/verdagostack/pkg/tui"
 	"github.com/verda-cloud/verdagostack/pkg/tui/wizard"
 )
+
+// Container-specific wizard steps. Steps shared with batchjob live in
+// wizard_shared.go; the container flow below wires them up together with
+// container-only fields (spot, healthcheck, min replicas, concurrency,
+// queue-load presets, CPU/GPU util triggers, scale-up/down delays).
 
 const (
 	computeTypeOnDemand = "on-demand"
@@ -34,67 +37,49 @@ const (
 	healthcheckOff = "off"
 
 	utilOff = "off"
+
+	registryPublicValue = "__public__"
 )
 
 // buildContainerCreateFlow returns the full wizard flow for `verda serverless
-// container create`. Each step has a matching flag on containerCreateOptions,
+// container create`. Every step has a matching flag on containerCreateOptions,
 // so the same opts struct drives both the wizard and the non-interactive path.
 // The final deploy confirmation is NOT a wizard step — the caller prints the
-// summary and runs a bare Confirm after the flow returns, so the review card
-// has full-width layout control.
+// summary and runs a bare Confirm after the flow returns.
 func buildContainerCreateFlow(_ context.Context, getClient clientFunc, opts *containerCreateOptions) *wizard.Flow {
 	cache := &apiCache{}
 	return &wizard.Flow{
 		Name: "container-create",
 		Steps: []wizard.Step{
-			stepContainerName(opts),
-			stepContainerComputeType(opts),
-			stepContainerCompute(getClient, cache, opts),
-			stepContainerComputeSize(opts),
-			stepContainerImage(opts),
-			stepContainerRegistryCreds(getClient, cache, opts),
-			stepContainerPort(opts),
-			stepContainerHealthcheck(opts),
-			stepContainerHealthcheckPort(opts),
-			stepContainerHealthcheckPath(opts),
-			stepContainerEnvVars(opts),
-			stepContainerMinReplicas(opts),
-			stepContainerMaxReplicas(opts),
-			stepContainerConcurrency(opts),
-			stepContainerQueuePreset(opts),
-			stepContainerQueueLoadCustom(opts),
-			stepContainerCPUUtil(opts),
-			stepContainerGPUUtil(opts),
-			stepContainerScaleUpDelay(opts),
-			stepContainerScaleDownDelay(opts),
-			stepContainerRequestTTL(opts),
-			stepContainerSecretMounts(getClient, cache, opts),
+			stepName(&opts.Name),
+			stepContainerComputeType(&opts.Spot),
+			stepCompute(getClient, cache, &opts.Compute),
+			stepComputeSize(&opts.ComputeSize),
+			stepImage(&opts.Image),
+			stepRegistryCreds(getClient, cache, &opts.RegistryCreds),
+			stepPort(&opts.Port),
+			stepContainerHealthcheck(&opts.HealthcheckOff),
+			stepContainerHealthcheckPort(&opts.HealthcheckPort),
+			stepContainerHealthcheckPath(&opts.HealthcheckPath),
+			stepEnvVars(&opts.Env),
+			stepContainerMinReplicas(&opts.MinReplicas),
+			stepMaxReplicas(&opts.MaxReplicas),
+			stepContainerConcurrency(&opts.Concurrency),
+			stepContainerQueuePreset(&opts.QueuePreset),
+			stepContainerQueueLoadCustom(&opts.QueueLoad),
+			stepContainerCPUUtil(&opts.CPUUtil),
+			stepContainerGPUUtil(&opts.GPUUtil),
+			stepContainerScaleUpDelay(&opts.ScaleUpDelay),
+			stepContainerScaleDownDelay(&opts.ScaleDownDelay),
+			stepRequestTTL(&opts.RequestTTL),
+			stepSecretMounts(getClient, cache, &opts.SecretMounts),
 		},
 	}
 }
 
-// --- 1. Deployment name ---
+// --- Compute type (on-demand | spot) ---
 
-func stepContainerName(opts *containerCreateOptions) wizard.Step {
-	return wizard.Step{
-		Name:        "name",
-		Description: "Deployment name (URL slug, immutable)",
-		Prompt:      wizard.TextInputPrompt,
-		Required:    true,
-		Default:     func(_ map[string]any) any { return opts.Name },
-		Validate: func(v any) error {
-			return validateDeploymentName(strings.TrimSpace(v.(string)))
-		},
-		Setter:   func(v any) { opts.Name = strings.TrimSpace(v.(string)) },
-		Resetter: func() { opts.Name = "" },
-		IsSet:    func() bool { return opts.Name != "" },
-		Value:    func() any { return opts.Name },
-	}
-}
-
-// --- 2. Compute type (on-demand | spot) ---
-
-func stepContainerComputeType(opts *containerCreateOptions) wizard.Step {
+func stepContainerComputeType(spot *bool) wizard.Step {
 	return wizard.Step{
 		Name:        "compute-type",
 		Description: "Compute type",
@@ -105,16 +90,16 @@ func stepContainerComputeType(opts *containerCreateOptions) wizard.Step {
 			wizard.Choice{Label: "Spot", Value: computeTypeSpot, Description: "Lower price; may be reclaimed at any time"},
 		),
 		Default: func(_ map[string]any) any {
-			if opts.Spot {
+			if *spot {
 				return computeTypeSpot
 			}
 			return computeTypeOnDemand
 		},
-		Setter:   func(v any) { opts.Spot = v.(string) == computeTypeSpot },
-		Resetter: func() { opts.Spot = false },
-		IsSet:    func() bool { return false }, // always prompt
+		Setter:   func(v any) { *spot = v.(string) == computeTypeSpot },
+		Resetter: func() { *spot = false },
+		IsSet:    func() bool { return false },
 		Value: func() any {
-			if opts.Spot {
+			if *spot {
 				return computeTypeSpot
 			}
 			return computeTypeOnDemand
@@ -122,168 +107,9 @@ func stepContainerComputeType(opts *containerCreateOptions) wizard.Step {
 	}
 }
 
-// --- 3. Compute resource (GPU/CPU pick from /serverless-compute-resources) ---
+// --- Healthcheck (on/off + port + path) ---
 
-func stepContainerCompute(getClient clientFunc, cache *apiCache, opts *containerCreateOptions) wizard.Step {
-	return wizard.Step{
-		Name:        "compute",
-		Description: "Compute resource",
-		Prompt:      wizard.SelectPrompt,
-		Required:    true,
-		Loader: func(ctx context.Context, _ tui.Prompter, _ tui.Status, _ *wizard.Store) ([]wizard.Choice, error) {
-			res, err := cache.fetchComputeResources(ctx, getClient)
-			if err != nil {
-				return nil, err
-			}
-			choices := make([]wizard.Choice, 0, len(res))
-			for i := range res {
-				r := &res[i]
-				desc := "available"
-				if !r.IsAvailable {
-					desc = "unavailable"
-				}
-				choices = append(choices, wizard.Choice{
-					Label:       fmt.Sprintf("%s  (size %d)", r.Name, r.Size),
-					Value:       r.Name,
-					Description: desc,
-				})
-			}
-			if len(choices) == 0 {
-				return nil, errors.New("no serverless compute resources available")
-			}
-			return choices, nil
-		},
-		Default:  func(_ map[string]any) any { return opts.Compute },
-		Setter:   func(v any) { opts.Compute = v.(string) },
-		Resetter: func() { opts.Compute = "" },
-		IsSet:    func() bool { return opts.Compute != "" },
-		Value:    func() any { return opts.Compute },
-	}
-}
-
-// --- 4. Compute size (count of GPUs or vCPUs) ---
-
-func stepContainerComputeSize(opts *containerCreateOptions) wizard.Step {
-	return wizard.Step{
-		Name:        "compute-size",
-		Description: "Compute size (number of GPUs/vCPUs per replica)",
-		Prompt:      wizard.TextInputPrompt,
-		Required:    true,
-		Default: func(_ map[string]any) any {
-			if opts.ComputeSize > 0 {
-				return strconv.Itoa(opts.ComputeSize)
-			}
-			return "1"
-		},
-		Validate: parsePositiveIntValidator("compute size"),
-		Setter: func(v any) {
-			n, _ := strconv.Atoi(strings.TrimSpace(v.(string)))
-			opts.ComputeSize = n
-		},
-		Resetter: func() { opts.ComputeSize = 0 },
-		IsSet:    func() bool { return opts.ComputeSize > 0 },
-		Value:    func() any { return strconv.Itoa(opts.ComputeSize) },
-	}
-}
-
-// --- 5. Container image ---
-
-func stepContainerImage(opts *containerCreateOptions) wizard.Step {
-	return wizard.Step{
-		Name:        "image",
-		Description: "Container image (e.g. ghcr.io/org/app:v1.2)",
-		Prompt:      wizard.TextInputPrompt,
-		Required:    true,
-		Default:     func(_ map[string]any) any { return opts.Image },
-		Validate: func(v any) error {
-			img := strings.TrimSpace(v.(string))
-			if img == "" {
-				return errors.New("image is required")
-			}
-			return rejectLatestTag(img)
-		},
-		Setter:   func(v any) { opts.Image = strings.TrimSpace(v.(string)) },
-		Resetter: func() { opts.Image = "" },
-		IsSet:    func() bool { return opts.Image != "" },
-		Value:    func() any { return opts.Image },
-	}
-}
-
-// --- 6. Registry credentials ---
-
-const registryPublicValue = "__public__"
-
-func stepContainerRegistryCreds(getClient clientFunc, cache *apiCache, opts *containerCreateOptions) wizard.Step {
-	return wizard.Step{
-		Name:        "registry-creds",
-		Description: "Registry credentials (for private images)",
-		Prompt:      wizard.SelectPrompt,
-		Required:    false,
-		Loader: func(ctx context.Context, _ tui.Prompter, _ tui.Status, _ *wizard.Store) ([]wizard.Choice, error) {
-			choices := []wizard.Choice{
-				{Label: "Public (no credentials)", Value: registryPublicValue},
-			}
-			creds, err := cache.fetchRegistryCreds(ctx, getClient)
-			if err != nil {
-				// Non-fatal: offer public-only and let the user continue.
-				return choices, nil //nolint:nilerr // degrade gracefully on missing permissions
-			}
-			for _, c := range creds {
-				choices = append(choices, wizard.Choice{
-					Label: c.Name,
-					Value: c.Name,
-				})
-			}
-			return choices, nil
-		},
-		Default: func(_ map[string]any) any {
-			if opts.RegistryCreds == "" {
-				return registryPublicValue
-			}
-			return opts.RegistryCreds
-		},
-		Setter: func(v any) {
-			s := v.(string)
-			if s == registryPublicValue {
-				opts.RegistryCreds = ""
-				return
-			}
-			opts.RegistryCreds = s
-		},
-		Resetter: func() { opts.RegistryCreds = "" },
-		IsSet:    func() bool { return opts.RegistryCreds != "" },
-		Value: func() any {
-			if opts.RegistryCreds == "" {
-				return registryPublicValue
-			}
-			return opts.RegistryCreds
-		},
-	}
-}
-
-// --- 7. Exposed HTTP port ---
-
-func stepContainerPort(opts *containerCreateOptions) wizard.Step {
-	return wizard.Step{
-		Name:        "port",
-		Description: "Exposed HTTP port",
-		Prompt:      wizard.TextInputPrompt,
-		Required:    true,
-		Default:     func(_ map[string]any) any { return strconv.Itoa(opts.Port) },
-		Validate:    parsePortValidator("port"),
-		Setter: func(v any) {
-			n, _ := strconv.Atoi(strings.TrimSpace(v.(string)))
-			opts.Port = n
-		},
-		Resetter: func() { opts.Port = defaultExposedPort },
-		IsSet:    func() bool { return false }, // always show the step; default carries the pre-set value
-		Value:    func() any { return strconv.Itoa(opts.Port) },
-	}
-}
-
-// --- 8-10. Healthcheck (on/off + port + path) ---
-
-func stepContainerHealthcheck(opts *containerCreateOptions) wizard.Step {
+func stepContainerHealthcheck(off *bool) wizard.Step {
 	return wizard.Step{
 		Name:        "healthcheck",
 		Description: "Healthcheck",
@@ -294,16 +120,16 @@ func stepContainerHealthcheck(opts *containerCreateOptions) wizard.Step {
 			wizard.Choice{Label: "Off", Value: healthcheckOff, Description: "Route requests immediately"},
 		),
 		Default: func(_ map[string]any) any {
-			if opts.HealthcheckOff {
+			if *off {
 				return healthcheckOff
 			}
 			return healthcheckOn
 		},
-		Setter:   func(v any) { opts.HealthcheckOff = v.(string) == healthcheckOff },
-		Resetter: func() { opts.HealthcheckOff = false },
+		Setter:   func(v any) { *off = v.(string) == healthcheckOff },
+		Resetter: func() { *off = false },
 		IsSet:    func() bool { return false },
 		Value: func() any {
-			if opts.HealthcheckOff {
+			if *off {
 				return healthcheckOff
 			}
 			return healthcheckOn
@@ -311,7 +137,7 @@ func stepContainerHealthcheck(opts *containerCreateOptions) wizard.Step {
 	}
 }
 
-func stepContainerHealthcheckPort(opts *containerCreateOptions) wizard.Step {
+func stepContainerHealthcheckPort(port *int) wizard.Step {
 	return wizard.Step{
 		Name:        "healthcheck-port",
 		Description: "Healthcheck port (blank = same as exposed)",
@@ -322,8 +148,8 @@ func stepContainerHealthcheckPort(opts *containerCreateOptions) wizard.Step {
 			return c["healthcheck"] == healthcheckOff
 		},
 		Default: func(_ map[string]any) any {
-			if opts.HealthcheckPort > 0 {
-				return strconv.Itoa(opts.HealthcheckPort)
+			if *port > 0 {
+				return strconv.Itoa(*port)
 			}
 			return ""
 		},
@@ -337,19 +163,19 @@ func stepContainerHealthcheckPort(opts *containerCreateOptions) wizard.Step {
 		Setter: func(v any) {
 			s := strings.TrimSpace(v.(string))
 			if s == "" {
-				opts.HealthcheckPort = 0
+				*port = 0
 				return
 			}
 			n, _ := strconv.Atoi(s)
-			opts.HealthcheckPort = n
+			*port = n
 		},
-		Resetter: func() { opts.HealthcheckPort = 0 },
-		IsSet:    func() bool { return opts.HealthcheckPort > 0 },
-		Value:    func() any { return strconv.Itoa(opts.HealthcheckPort) },
+		Resetter: func() { *port = 0 },
+		IsSet:    func() bool { return *port > 0 },
+		Value:    func() any { return strconv.Itoa(*port) },
 	}
 }
 
-func stepContainerHealthcheckPath(opts *containerCreateOptions) wizard.Step {
+func stepContainerHealthcheckPath(path *string) wizard.Step {
 	return wizard.Step{
 		Name:        "healthcheck-path",
 		Description: "Healthcheck path",
@@ -359,109 +185,57 @@ func stepContainerHealthcheckPath(opts *containerCreateOptions) wizard.Step {
 		ShouldSkip: func(c map[string]any) bool {
 			return c["healthcheck"] == healthcheckOff
 		},
-		Default:  func(_ map[string]any) any { return opts.HealthcheckPath },
-		Setter:   func(v any) { opts.HealthcheckPath = strings.TrimSpace(v.(string)) },
-		Resetter: func() { opts.HealthcheckPath = defaultHealthcheckPath },
+		Default:  func(_ map[string]any) any { return *path },
+		Setter:   func(v any) { *path = strings.TrimSpace(v.(string)) },
+		Resetter: func() { *path = defaultHealthcheckPath },
 		IsSet:    func() bool { return false },
-		Value:    func() any { return opts.HealthcheckPath },
+		Value:    func() any { return *path },
 	}
 }
 
-// --- 11. Env vars (loop) ---
+// --- Min replicas (container-only; batchjob has no min) ---
 
-func stepContainerEnvVars(opts *containerCreateOptions) wizard.Step {
-	return wizard.Step{
-		Name:        "env-vars",
-		Description: "Environment variables (optional)",
-		Prompt:      wizard.SelectPrompt,
-		Required:    false,
-		Loader: func(ctx context.Context, prompter tui.Prompter, _ tui.Status, _ *wizard.Store) ([]wizard.Choice, error) {
-			// Loop: add env vars until the user says "done".
-			for {
-				add, err := prompter.Confirm(ctx, fmt.Sprintf("Add environment variable? (have %d)", len(opts.Env)), tui.WithConfirmDefault(false))
-				if err != nil || !add {
-					return nil, nil //nolint:nilerr // prompter cancel is a clean exit
-				}
-				entry, err := promptEnvVar(ctx, prompter)
-				if err != nil {
-					return nil, err
-				}
-				if entry == nil {
-					continue
-				}
-				opts.Env = append(opts.Env, entry.Name+"="+entry.ValueOrReferenceToSecret)
-			}
-		},
-		Setter:   func(_ any) {},
-		Resetter: func() {},
-		IsSet:    func() bool { return len(opts.Env) > 0 },
-		Value:    func() any { return "" },
-	}
-}
-
-// --- 12. Min replicas ---
-
-func stepContainerMinReplicas(opts *containerCreateOptions) wizard.Step {
+func stepContainerMinReplicas(target *int) wizard.Step {
 	return wizard.Step{
 		Name:        "min-replicas",
 		Description: "Min replicas (0 = scale-to-zero)",
 		Prompt:      wizard.TextInputPrompt,
 		Required:    false,
-		Default:     func(_ map[string]any) any { return strconv.Itoa(opts.MinReplicas) },
+		Default:     func(_ map[string]any) any { return strconv.Itoa(*target) },
 		Validate:    parseNonNegativeIntValidator("min replicas"),
 		Setter: func(v any) {
 			n, _ := strconv.Atoi(strings.TrimSpace(v.(string)))
-			opts.MinReplicas = n
+			*target = n
 		},
-		Resetter: func() { opts.MinReplicas = 0 },
+		Resetter: func() { *target = 0 },
 		IsSet:    func() bool { return false },
-		Value:    func() any { return strconv.Itoa(opts.MinReplicas) },
+		Value:    func() any { return strconv.Itoa(*target) },
 	}
 }
 
-// --- 13. Max replicas ---
+// --- Concurrency ---
 
-func stepContainerMaxReplicas(opts *containerCreateOptions) wizard.Step {
-	return wizard.Step{
-		Name:        "max-replicas",
-		Description: "Max replicas",
-		Prompt:      wizard.TextInputPrompt,
-		Required:    true,
-		Default:     func(_ map[string]any) any { return strconv.Itoa(opts.MaxReplicas) },
-		Validate:    parsePositiveIntValidator("max replicas"),
-		Setter: func(v any) {
-			n, _ := strconv.Atoi(strings.TrimSpace(v.(string)))
-			opts.MaxReplicas = n
-		},
-		Resetter: func() { opts.MaxReplicas = defaultMaxReplicas },
-		IsSet:    func() bool { return false },
-		Value:    func() any { return strconv.Itoa(opts.MaxReplicas) },
-	}
-}
-
-// --- 14. Concurrent requests per replica ---
-
-func stepContainerConcurrency(opts *containerCreateOptions) wizard.Step {
+func stepContainerConcurrency(target *int) wizard.Step {
 	return wizard.Step{
 		Name:        "concurrency",
 		Description: "Concurrent requests per replica (1 for image-gen, higher for LLMs)",
 		Prompt:      wizard.TextInputPrompt,
 		Required:    true,
-		Default:     func(_ map[string]any) any { return strconv.Itoa(opts.Concurrency) },
+		Default:     func(_ map[string]any) any { return strconv.Itoa(*target) },
 		Validate:    parsePositiveIntValidator("concurrency"),
 		Setter: func(v any) {
 			n, _ := strconv.Atoi(strings.TrimSpace(v.(string)))
-			opts.Concurrency = n
+			*target = n
 		},
-		Resetter: func() { opts.Concurrency = defaultConcurrency },
+		Resetter: func() { *target = defaultConcurrency },
 		IsSet:    func() bool { return false },
-		Value:    func() any { return strconv.Itoa(opts.Concurrency) },
+		Value:    func() any { return strconv.Itoa(*target) },
 	}
 }
 
-// --- 15. Queue-load preset ---
+// --- Queue-load preset + custom value ---
 
-func stepContainerQueuePreset(opts *containerCreateOptions) wizard.Step {
+func stepContainerQueuePreset(target *string) wizard.Step {
 	return wizard.Step{
 		Name:        "queue-preset",
 		Description: "Queue-load preset",
@@ -473,17 +247,15 @@ func stepContainerQueuePreset(opts *containerCreateOptions) wizard.Step {
 			wizard.Choice{Label: "Cost saver", Value: presetCostSaver, Description: "Fewer replicas; requests may wait longer in queue."},
 			wizard.Choice{Label: "Custom", Value: presetCustom, Description: "Specify a queue-load threshold yourself."},
 		),
-		Default:  func(_ map[string]any) any { return opts.QueuePreset },
-		Setter:   func(v any) { opts.QueuePreset = v.(string) },
-		Resetter: func() { opts.QueuePreset = presetBalanced },
+		Default:  func(_ map[string]any) any { return *target },
+		Setter:   func(v any) { *target = v.(string) },
+		Resetter: func() { *target = presetBalanced },
 		IsSet:    func() bool { return false },
-		Value:    func() any { return opts.QueuePreset },
+		Value:    func() any { return *target },
 	}
 }
 
-// --- 16. Custom queue-load (only when preset == custom) ---
-
-func stepContainerQueueLoadCustom(opts *containerCreateOptions) wizard.Step {
+func stepContainerQueueLoadCustom(target *int) wizard.Step {
 	return wizard.Step{
 		Name:        "queue-load-custom",
 		Description: "Custom queue-load threshold (1..1000)",
@@ -494,8 +266,8 @@ func stepContainerQueueLoadCustom(opts *containerCreateOptions) wizard.Step {
 			return c["queue-preset"] != presetCustom
 		},
 		Default: func(_ map[string]any) any {
-			if opts.QueueLoad > 0 {
-				return strconv.Itoa(opts.QueueLoad)
+			if *target > 0 {
+				return strconv.Itoa(*target)
 			}
 			return strconv.Itoa(queueLoadBalanced)
 		},
@@ -508,26 +280,22 @@ func stepContainerQueueLoadCustom(opts *containerCreateOptions) wizard.Step {
 		},
 		Setter: func(v any) {
 			n, _ := strconv.Atoi(strings.TrimSpace(v.(string)))
-			opts.QueueLoad = n
+			*target = n
 		},
-		Resetter: func() { opts.QueueLoad = 0 },
-		IsSet:    func() bool { return opts.QueueLoad > 0 },
-		Value:    func() any { return strconv.Itoa(opts.QueueLoad) },
+		Resetter: func() { *target = 0 },
+		IsSet:    func() bool { return *target > 0 },
+		Value:    func() any { return strconv.Itoa(*target) },
 	}
 }
 
-// --- 17. CPU utilization trigger ---
+// --- Utilization triggers (CPU/GPU) ---
 
-func stepContainerCPUUtil(opts *containerCreateOptions) wizard.Step {
-	return utilThresholdStep("cpu-util", "CPU utilization trigger",
-		&opts.CPUUtil)
+func stepContainerCPUUtil(target *int) wizard.Step {
+	return utilThresholdStep("cpu-util", "CPU utilization trigger", target)
 }
 
-// --- 18. GPU utilization trigger ---
-
-func stepContainerGPUUtil(opts *containerCreateOptions) wizard.Step {
-	return utilThresholdStep("gpu-util", "GPU utilization trigger",
-		&opts.GPUUtil)
+func stepContainerGPUUtil(target *int) wizard.Step {
+	return utilThresholdStep("gpu-util", "GPU utilization trigger", target)
 }
 
 // utilThresholdStep builds a step that asks "off | <threshold>" as a text
@@ -576,127 +344,12 @@ func utilThresholdStep(name, desc string, target *int) wizard.Step {
 	}
 }
 
-// --- 19. Scale-up delay ---
+// --- Scale-up / scale-down delays ---
 
-func stepContainerScaleUpDelay(opts *containerCreateOptions) wizard.Step {
-	return durationStep("scale-up-delay", "Scale-up delay", &opts.ScaleUpDelay, 0)
+func stepContainerScaleUpDelay(target *time.Duration) wizard.Step {
+	return durationStep("scale-up-delay", "Scale-up delay", target, 0)
 }
 
-// --- 20. Scale-down delay ---
-
-func stepContainerScaleDownDelay(opts *containerCreateOptions) wizard.Step {
-	return durationStep("scale-down-delay", "Scale-down delay", &opts.ScaleDownDelay, defaultScaleDownDelay)
-}
-
-// --- 21. Request TTL ---
-
-func stepContainerRequestTTL(opts *containerCreateOptions) wizard.Step {
-	return durationStep("request-ttl", "Request time-to-live (pending queue)", &opts.RequestTTL, defaultRequestTTL)
-}
-
-func durationStep(name, desc string, target *time.Duration, def time.Duration) wizard.Step {
-	return wizard.Step{
-		Name:        name,
-		Description: desc + " (e.g. 0s, 300s, 5m)",
-		Prompt:      wizard.TextInputPrompt,
-		Required:    false,
-		Default: func(_ map[string]any) any {
-			if *target > 0 {
-				return target.String()
-			}
-			return def.String()
-		},
-		Validate: func(v any) error {
-			s := strings.TrimSpace(v.(string))
-			if s == "" {
-				return nil
-			}
-			d, err := time.ParseDuration(s)
-			if err != nil || d < 0 {
-				return errors.New("must be a non-negative duration (e.g. 0s, 300s, 5m)")
-			}
-			return nil
-		},
-		Setter: func(v any) {
-			s := strings.TrimSpace(v.(string))
-			if s == "" {
-				*target = def
-				return
-			}
-			d, _ := time.ParseDuration(s)
-			*target = d
-		},
-		Resetter: func() { *target = def },
-		IsSet:    func() bool { return false },
-		Value:    func() any { return target.String() },
-	}
-}
-
-// --- 22. Secret mounts (loop) ---
-
-func stepContainerSecretMounts(getClient clientFunc, cache *apiCache, opts *containerCreateOptions) wizard.Step {
-	return wizard.Step{
-		Name:        "secret-mounts",
-		Description: "Secret mounts (optional)",
-		Prompt:      wizard.SelectPrompt,
-		Required:    false,
-		Loader: func(ctx context.Context, prompter tui.Prompter, _ tui.Status, _ *wizard.Store) ([]wizard.Choice, error) {
-			for {
-				add, err := prompter.Confirm(ctx, fmt.Sprintf("Add a secret mount? (have %d)", len(opts.SecretMounts)), tui.WithConfirmDefault(false))
-				if err != nil || !add {
-					return nil, nil //nolint:nilerr // prompter cancel is a clean exit
-				}
-				secrets, _ := cache.fetchSecrets(ctx, getClient)
-				fileSecrets, _ := cache.fetchFileSecrets(ctx, getClient)
-				if len(secrets)+len(fileSecrets) == 0 {
-					_, _ = prompter.Confirm(ctx, "No secrets available in this project. Press Enter to continue.", tui.WithConfirmDefault(true))
-					return nil, nil
-				}
-				mount, err := promptSecretMount(ctx, prompter, secrets, fileSecrets)
-				if err != nil {
-					return nil, err
-				}
-				if mount == nil {
-					continue
-				}
-				opts.SecretMounts = append(opts.SecretMounts, mount.SecretName+":"+mount.MountPath)
-			}
-		},
-		Setter:   func(_ any) {},
-		Resetter: func() {},
-		IsSet:    func() bool { return len(opts.SecretMounts) > 0 },
-		Value:    func() any { return "" },
-	}
-}
-
-// --- Shared validators ---
-
-func parsePositiveIntValidator(field string) func(any) error {
-	return func(v any) error {
-		n, err := strconv.Atoi(strings.TrimSpace(v.(string)))
-		if err != nil || n < 1 {
-			return fmt.Errorf("%s must be a positive integer", field)
-		}
-		return nil
-	}
-}
-
-func parseNonNegativeIntValidator(field string) func(any) error {
-	return func(v any) error {
-		n, err := strconv.Atoi(strings.TrimSpace(v.(string)))
-		if err != nil || n < 0 {
-			return fmt.Errorf("%s must be an integer >= 0", field)
-		}
-		return nil
-	}
-}
-
-func parsePortValidator(field string) func(any) error {
-	return func(v any) error {
-		n, err := strconv.Atoi(strings.TrimSpace(v.(string)))
-		if err != nil || n < 1 || n > 65535 {
-			return fmt.Errorf("%s must be an integer in 1..65535", field)
-		}
-		return nil
-	}
+func stepContainerScaleDownDelay(target *time.Duration) wizard.Step {
+	return durationStep("scale-down-delay", "Scale-down delay", target, defaultScaleDownDelay)
 }

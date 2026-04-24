@@ -22,6 +22,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
+	"github.com/verda-cloud/verdagostack/pkg/tui/wizard"
 
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
@@ -122,9 +123,9 @@ func runBatchjobCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.
 			return cmdutil.NewMissingFlagsError(missing)
 		}
 	} else if opts.Name == "" || opts.Image == "" || opts.Compute == "" || opts.Deadline <= 0 {
-		// TODO(wizard): launch the batchjob wizard here.
-		return errors.New("missing required flags: --name, --image, --compute, --deadline are required " +
-			"(interactive wizard is coming; track progress in docs/plans/2026-04-24-serverless-container-design.md)")
+		if err := runBatchjobWizard(cmd.Context(), f, ioStreams, opts); err != nil {
+			return err
+		}
 	}
 
 	req, err := opts.request()
@@ -133,6 +134,15 @@ func runBatchjobCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.
 	}
 
 	cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), "Request payload:", req)
+
+	if !f.AgentMode() && !opts.Yes {
+		renderBatchjobSummary(ioStreams.ErrOut, opts)
+		confirmed, err := f.Prompter().Confirm(cmd.Context(), fmt.Sprintf("Deploy %s?", opts.Name))
+		if err != nil || !confirmed {
+			_, _ = fmt.Fprintln(ioStreams.ErrOut, "Canceled.")
+			return nil
+		}
+	}
 
 	ctx, cancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
 	defer cancel()
@@ -151,6 +161,17 @@ func runBatchjobCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.
 	_, _ = fmt.Fprintf(ioStreams.Out, "Created batch-job deployment %q\n", deployment.Name)
 	_, _ = fmt.Fprintf(ioStreams.Out, "Endpoint: %s\n", deployment.EndpointBaseURL)
 	return nil
+}
+
+// runBatchjobWizard drives the batchjob create flow and fills any fields the
+// user hasn't pre-set via flags. Shares nine of its ten steps with the
+// container wizard; the only batchjob-specific step is the deadline.
+func runBatchjobWizard(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *batchjobCreateOptions) error {
+	flow := buildBatchjobCreateFlow(ctx, f.VerdaClient, opts)
+	engine := wizard.NewEngine(f.Prompter(), f.Status(),
+		wizard.WithOutput(ioStreams.ErrOut),
+		wizard.WithExitConfirmation())
+	return engine.Run(ctx, flow)
 }
 
 func missingBatchjobCreateFlags(opts *batchjobCreateOptions) []string {

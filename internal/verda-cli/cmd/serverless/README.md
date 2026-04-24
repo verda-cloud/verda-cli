@@ -100,6 +100,14 @@ verda serverless container delete my-endpoint         # destructive; requires --
 
 ### Create
 
+Interactive wizard (launches when any of `--name`/`--image`/`--compute`/`--deadline` is missing):
+
+```bash
+verda serverless batchjob create
+```
+
+Non-interactive:
+
 ```bash
 verda serverless batchjob create \
   --name nightly-embed \
@@ -108,7 +116,7 @@ verda serverless batchjob create \
   --deadline 30m
 ```
 
-**Required flags** (both interactive and agent modes, until the wizard lands): `--name`, `--image`, `--compute`, `--deadline`.
+**Required flags** (agent mode): `--name`, `--image`, `--compute`, `--deadline`.
 
 **Batch jobs cannot use spot compute.** There is no `--spot` flag; the underlying API has no `IsSpot` field for jobs. This is intentional.
 
