@@ -39,6 +39,7 @@ Each command directory has its own `CLAUDE.md` (domain knowledge) and `README.md
 | `cmd/volume/` | CLAUDE.md, README.md | Volume lifecycle, trash, actions |
 | `cmd/sshkey/` | CLAUDE.md, README.md | SSH key management |
 | `cmd/startupscript/` | CLAUDE.md, README.md | Startup script management |
+| `cmd/registry/` | CLAUDE.md, README.md | Container registry (vccr.io): configure, show, login, ls, tags, push, copy — pre-release behind `VERDA_REGISTRY_ENABLED=1` |
 | `cmd/update/` | CLAUDE.md, README.md | CLI self-update |
 | `cmd/settings/` | CLAUDE.md, README.md | CLI settings management |
 | `cmd/availability/` | — | Instance availability by location |
@@ -66,6 +67,22 @@ Each command directory has its own `CLAUDE.md` (domain knowledge) and `README.md
 - Never use v1 imports — they won't compile
 
 ## Conventions
+
+### Go House Style — avoid avoidable lint hits
+
+The repo lints with `golangci-lint` via `make lint` (included in `make test`). These are the patterns the linters enforce — write them correctly the first time instead of fixing them in a second pass:
+
+- **HTTP bodies** — use `http.NoBody` for GET/DELETE/etc., never `nil`. Close with `defer func() { _ = resp.Body.Close() }()`, not bare `defer resp.Body.Close()` (errcheck).
+- **American English** — `behavior`, `canceled`, `artifact`, `checkered`, `gray`. `misspell` runs with `locale: US` and rejects British spellings in code and comments.
+- **Reuse constants** — before writing a string literal that might repeat, grep for an existing one. Current package-level constants worth knowing: `defaultTag` (`"latest"`) in `cmd/registry/refname.go`, `progressJSON` (`"json"`) in `cmd/registry/push.go`, `untaggedLabel` (`"<untagged>"`) in `cmd/registry/format.go`. `goconst` fails on ≥3 occurrences.
+- **Strings over fmt.Sprintf** — `"prefix " + s` beats `fmt.Sprintf("prefix %s", s)` when there's only one substitution (perfsprint).
+- **Range indexing for structs ≥96 B** — `for i := range xs { x := &xs[i] }` avoids the per-iteration copy `for _, x := range xs` incurs (gocritic rangeValCopy). `ArtifactInfo`, `VMDescribeResult`, etc. all cross the threshold.
+- **Intentional `return nil` after error** — prompter cancellation returns an error that we deliberately swallow. Annotate with `return nil //nolint:nilerr // intentional: prompter cancel is a clean exit` so `nilerr` doesn't flag it and the reason survives.
+- **No blank line after `{`** — `whitespace` linter flags it. Go straight into the first statement.
+- **Type inference over explicit declaration** — `rt := http.DefaultTransport` over `var rt http.RoundTripper = http.DefaultTransport` (staticcheck ST1023).
+- **Complexity budgets** — `gocyclo` trips at 20, `nestif` at 5. Extract helpers before you hit them; refactoring after the fact is more churn.
+
+`.golangci.yaml` is the authoritative list — all of the above come from linters enabled there.
 
 ### Every API-calling command MUST:
 
@@ -125,9 +142,15 @@ make build                    # Must compile
 make test                     # Must pass (tests + lint)
 ```
 
+`make test` runs `golangci-lint` — **never** report work as complete with lint failures outstanding. Fix them before the "done" message; don't defer to the pre-commit hook. See the "Go House Style" section above for the patterns that prevent the common hits.
+
 If you modified a command, also verify:
 - `./bin/verda <command> --help` renders correctly
 - Interactive mode works (prompts appear)
 - Non-interactive mode works (flags only, no prompts)
 - `--agent -o json` mode works (structured output, no TUI)
 - `--debug` shows request/response payloads
+
+## Other Agents
+
+This repo targets Claude Code and OpenAI Codex. Claude auto-loads this file; Codex auto-loads `AGENTS.md` (execution contract). A `.cursor/rules/main.mdc` pointer exists for Cursor users but is not a primary target — if Cursor drops out of the stack, delete it rather than letting it drift.

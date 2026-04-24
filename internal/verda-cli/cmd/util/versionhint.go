@@ -86,11 +86,14 @@ func SaveVersionCache(path string, c *VersionCache) error {
 }
 
 // FetchLatestVersion queries the GitHub releases API for the latest release
-// tag of verda-cli.
+// tag of verda-cli. The per-request timeout is intentionally tight (2s): the
+// only callers are `doctor`, `update`, and help/root — if GitHub is slow or
+// unreachable we'd rather skip the hint than make the user wait, and a live
+// CLI on a reachable network comfortably returns in well under 2s.
 func FetchLatestVersion(ctx context.Context) (string, error) {
 	const url = "https://api.github.com/repos/verda-cloud/verda-cli/releases/latest"
 
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)

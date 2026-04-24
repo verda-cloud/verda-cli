@@ -21,7 +21,10 @@ import (
 	"runtime"
 )
 
-const verdaDirName = ".verda"
+const (
+	verdaDirName = ".verda"
+	windowsOS    = "windows"
+)
 
 // VerdaDir returns the path to the Verda configuration directory.
 //
@@ -88,7 +91,7 @@ func WriteSecureFile(path string, data []byte) error {
 		return fmt.Errorf("cannot write %s: %w", path, err)
 	}
 	// On Unix, enforce 0600 even if umask was permissive.
-	if runtime.GOOS != "windows" {
+	if runtime.GOOS != windowsOS {
 		_ = os.Chmod(path, 0o600)
 	}
 	return nil
@@ -100,7 +103,7 @@ func mkdirSecure(dir string) error {
 		return err
 	}
 	// On Unix, enforce 0700 on the leaf directory.
-	if runtime.GOOS != "windows" {
+	if runtime.GOOS != windowsOS {
 		_ = os.Chmod(dir, 0o700) //nolint:gosec // 0700 is correct for a config directory
 	}
 	return nil

@@ -35,6 +35,7 @@ import (
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/instancetypes"
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/locations"
 	mcpcmd "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/mcp"
+	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/registry"
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/s3"
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/settings"
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/skills"
@@ -100,12 +101,15 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) (*cobra.Command, *clioptions.Op
 			return nil
 		},
 		PersistentPostRun: func(cmd *cobra.Command, _ []string) {
-			// Show version-update hint (best-effort, never fails the command).
+			// Version-update hint is best-effort and ONLY runs on commands
+			// where the user is plausibly interested in version info
+			// (doctor, update, help, and bare `verda`). Business commands
+			// like `vm list` or `vccr ls` never do a network fetch for a
+			// cosmetic hint. See shouldCheckVersion below.
 			if opts.Agent || opts.Output != "table" {
 				return
 			}
-			switch cmd.Name() {
-			case "update", "doctor", "completion":
+			if !shouldCheckVersion(cmd) {
 				return
 			}
 			latest, current, err := cmdutil.CheckVersion(cmd.Context())
@@ -145,6 +149,9 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) (*cobra.Command, *clioptions.Op
 	}
 	if s3Enabled() {
 		resourceCmds = append(resourceCmds, s3.NewCmdS3(f, ioStreams))
+	}
+	if registryEnabled() {
+		resourceCmds = append(resourceCmds, registry.NewCmdRegistry(f, ioStreams))
 	}
 
 	groups := cmdutil.CommandGroups{
@@ -205,6 +212,16 @@ func s3Enabled() bool {
 	return v == "1" || v == "true"
 }
 
+// registryEnabled gates the pre-release Verda Container Registry commands.
+// The whole command tree is omitted from registration unless
+// VERDA_REGISTRY_ENABLED is "1" or "true". When the feature ships GA,
+// delete this function, drop the gate in NewRootCommand, and remove
+// `Hidden: true` from cmd/registry/registry.go.
+func registryEnabled() bool {
+	v := os.Getenv("VERDA_REGISTRY_ENABLED")
+	return v == "1" || v == "true"
+}
+
 // skipCredentialResolution returns true for commands that should work
 // without valid credentials (diagnostics, profile switching, etc.).
 func skipCredentialResolution(cmd *cobra.Command) bool {
@@ -224,7 +241,37 @@ func skipCredentialResolution(cmd *cobra.Command) bool {
 		return true
 	case pName == "s3":
 		return true
+	case pName == "registry":
+		return true
 	case cmd.Name() == "doctor" && pName == "verda":
+		return true
+	}
+	return false
+}
+
+// shouldCheckVersion returns true for commands where the user is plausibly
+// interested in version information, so it's okay to spend up to a couple of
+// seconds on a GitHub fetch after the command runs. Everything else (business
+// commands like `vm list`, `vccr ls`, `volume rm`, etc.) must never pay that
+// cost for a cosmetic hint — they read no cache and perform no network I/O.
+//
+// Included:
+//   - `verda doctor`             (explicit diagnostic; network expected)
+//   - `verda update`             (canonical place for version info)
+//   - `verda help` / help on any
+//     subcommand via `help` verb  (user is reading docs)
+//   - bare `verda`               (no args, prints help — new-user first run)
+//
+// Not included: every subcommand bare-invocation (e.g. `verda vm` with no
+// subcommand). Those also print help, but users running them are browsing
+// a specific feature area, not asking about the CLI itself.
+func shouldCheckVersion(cmd *cobra.Command) bool {
+	switch cmd.Name() {
+	case "doctor", "update", "help":
+		return true
+	case "verda":
+		// Root command, typically invoked as `verda` (no args) — cobra
+		// runs RunE which calls cmd.Help(), then PersistentPostRun.
 		return true
 	}
 	return false
