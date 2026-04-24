@@ -37,6 +37,7 @@ import (
 	mcpcmd "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/mcp"
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/registry"
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/s3"
+	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/serverless"
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/settings"
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/skills"
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/ssh"
@@ -166,6 +167,12 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) (*cobra.Command, *clioptions.Op
 			Commands: []*cobra.Command{
 				vm.NewCmdVM(f, ioStreams),
 				ssh.NewCmdSSH(f, ioStreams),
+			},
+		},
+		{
+			Message: "Serverless Commands:",
+			Commands: []*cobra.Command{
+				serverless.NewCmdServerless(f, ioStreams),
 			},
 		},
 		{
