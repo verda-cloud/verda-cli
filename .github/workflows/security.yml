@@ -41,7 +41,12 @@ jobs:
         run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.5.0
 
       - name: Run gosec via golangci-lint
-        run: golangci-lint run --no-config -E gosec ./...
+        # --default=none + -E gosec scopes this step to gosec findings only.
+        # Without --default=none, golangci-lint's "standard" linter set
+        # (errcheck, govet, staticcheck, ...) also runs, which duplicates
+        # `make lint` and bypasses the project's test-file exclusions in
+        # .golangci.yaml — producing noise unrelated to security.
+        run: golangci-lint run --no-config --default=none -E gosec ./...
 
   gitleaks:
     name: Gitleaks (secret scanning)
