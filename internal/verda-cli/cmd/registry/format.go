@@ -18,6 +18,8 @@ import (
 	"fmt"
 	"strconv"
 	"time"
+
+	"github.com/verda-cloud/verda-cli/internal/verda-cli/options"
 )
 
 // formatBytes renders a byte count in binary-unit form (1 KiB = 1024 B),
@@ -77,7 +79,7 @@ func formatBytesPerSec(bps float64) string {
 // one that must not be interleaved with human lines. Shared by every registry
 // subcommand that emits JSON/YAML payloads (tags, push, copy, push_view).
 func isStructuredFormat(format string) bool {
-	return format == progressJSON || format == "yaml"
+	return format == options.OutputJSON || format == options.OutputYAML
 }
 
 // untaggedLabel is the placeholder shown in the TAGS column for artifacts

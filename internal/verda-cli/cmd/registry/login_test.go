@@ -98,6 +98,7 @@ func expectedAuth(user, secret string) string {
 // tests can assert key preservation without a Go struct.
 func readConfigTop(t *testing.T, path string) map[string]json.RawMessage {
 	t.Helper()
+	// #nosec G304 -- test path is built from t.TempDir(); not attacker-controlled.
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read docker config %s: %v", path, err)
@@ -232,6 +233,7 @@ func TestLogin_PreservesUnknownKeys(t *testing.T) {
 
 	top := readConfigTop(t, configPath)
 
+	// #nosec G101 -- these are JSON field names and shape fragments, not real credentials.
 	for key, wantSubstr := range map[string]string{
 		"credsStore":       `"osxkeychain"`,
 		"HttpHeaders":      `"User-Agent"`,
@@ -305,6 +307,7 @@ func TestLogin_RemovesPlaintextFields(t *testing.T) {
 	}
 
 	// Parse the raw auths sub-object so we can see every field the writer emitted.
+	// #nosec G304 -- configPath is built from t.TempDir(); not attacker-controlled.
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		t.Fatalf("read: %v", err)
@@ -511,6 +514,7 @@ func TestLogin_IdempotentOutput(t *testing.T) {
 		t.Fatalf("login 1: %v", err)
 	}
 	configPath := filepath.Join(home, ".docker", "config.json")
+	// #nosec G304 -- configPath is built from home = t.TempDir(); not attacker-controlled.
 	first, err := os.ReadFile(configPath)
 	if err != nil {
 		t.Fatalf("read first: %v", err)
@@ -522,6 +526,7 @@ func TestLogin_IdempotentOutput(t *testing.T) {
 	if err := runLoginForTest(t, f, streams2); err != nil {
 		t.Fatalf("login 2: %v", err)
 	}
+	// #nosec G304 -- configPath is built from home = t.TempDir(); not attacker-controlled.
 	second, err := os.ReadFile(configPath)
 	if err != nil {
 		t.Fatalf("read second: %v", err)

@@ -1005,7 +1005,7 @@ func assembleAllTagsResults(
 		}
 	}
 	imageJobs := resolveImageJobs(opts.ImageJobs, len(toCopy), runtime.NumCPU())
-	var results []copyJobResult
+	results := make([]copyJobResult, 0, len(tags))
 	if len(toCopy) > 0 {
 		results = runCopyAllTagsPool(ctx, cancel, srcReg, dstReg, srcRef, dstBase, toCopy, imageJobs, creds, opts, f, ioStreams)
 	}

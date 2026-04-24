@@ -197,6 +197,8 @@ func writeDockerLogin(path string, creds *options.RegistryCredentials) error {
 // (credsStore, credHelpers, HttpHeaders, psFormat, ...). Missing file is
 // not an error — it just yields an empty map.
 func readDockerConfig(path string) (map[string]json.RawMessage, error) {
+	// #nosec G304 -- path is resolved internally from $DOCKER_CONFIG or
+	// ~/.docker/config.json; not attacker-controlled.
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {

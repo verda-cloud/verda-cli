@@ -145,7 +145,7 @@ func TestRetryingTransport_SucceedsWithoutRetries(t *testing.T) {
 	client := &http.Client{Transport: rt}
 
 	resp := doGet(t, client, cs.URL()+"/")
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
@@ -168,7 +168,7 @@ func TestRetryingTransport_RetriesOn503(t *testing.T) {
 	client := &http.Client{Transport: rt}
 
 	resp := doGet(t, client, cs.URL()+"/")
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
@@ -205,7 +205,7 @@ func TestRetryingTransport_HonorsRetryAfterSeconds(t *testing.T) {
 	client := &http.Client{Transport: rt}
 
 	resp := doGet(t, client, cs.URL()+"/")
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
@@ -251,7 +251,7 @@ func TestRetryingTransport_HonorsRetryAfterHTTPDate(t *testing.T) {
 	client := &http.Client{Transport: rt}
 
 	resp := doGet(t, client, cs.URL()+"/")
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
@@ -279,7 +279,7 @@ func TestRetryingTransport_DoesNotRetryPOST(t *testing.T) {
 	client := &http.Client{Transport: rt}
 
 	resp := doPost(t, client, cs.URL()+"/", "application/json", bytes.NewReader([]byte(`{}`)))
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503", resp.StatusCode)
 	}
@@ -301,7 +301,7 @@ func TestRetryingTransport_RetryBudgetExhausted(t *testing.T) {
 	client := &http.Client{Transport: rt}
 
 	resp := doGet(t, client, cs.URL()+"/")
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503", resp.StatusCode)
 	}
@@ -342,7 +342,7 @@ func TestRetryingTransport_ContextCanceledDuringBackoff(t *testing.T) {
 	go func() {
 		resp, rerr := client.Do(req)
 		if resp != nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 		}
 		errCh <- rerr
 	}()
@@ -414,7 +414,7 @@ func TestRetryingTransport_TimeoutError(t *testing.T) {
 	client := &http.Client{Transport: rt}
 
 	resp := doGet(t, client, cs.URL()+"/")
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
@@ -442,7 +442,7 @@ func TestRetryingTransport_NoRetryOn400(t *testing.T) {
 	client := &http.Client{Transport: rt}
 
 	resp := doGet(t, client, cs.URL()+"/")
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", resp.StatusCode)
 	}
@@ -477,7 +477,7 @@ func TestRetryingTransport_BodyRewoundOnRetry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Do: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
