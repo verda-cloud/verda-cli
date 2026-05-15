@@ -71,6 +71,7 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) (*cobra.Command, *clioptions.Op
 				_, _ = fmt.Fprint(cmd.OutOrStdout(), versionOutput())
 				return ErrVersionRequested
 			}
+			printBanner(cmd.OutOrStdout())
 			return cmd.Help()
 		},
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
@@ -102,19 +103,22 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) (*cobra.Command, *clioptions.Op
 			return nil
 		},
 		PersistentPostRun: func(cmd *cobra.Command, _ []string) {
-			// Version-update hint is best-effort and ONLY runs on commands
-			// where the user is plausibly interested in version info
-			// (doctor, update, help, and bare `verda`). Business commands
-			// like `vm list` or `vccr ls` never do a network fetch for a
-			// cosmetic hint. See shouldCheckVersion below.
+			// Version-update hint is best-effort and reads ONLY from the
+			// on-disk cache — never the network. `verda` and `verda --help`
+			// must feel instant, so we don't pay 1–5s for a GitHub fetch on
+			// the help path. The cache is refreshed by `verda doctor`, which
+			// runs its own check (with a spinner) and does block on the
+			// network because the user invoked it explicitly. `verda update`
+			// fetches the latest tag directly to drive its own flow but does
+			// not write the version cache.
 			if opts.Agent || opts.Output != "table" {
 				return
 			}
 			if !shouldCheckVersion(cmd) {
 				return
 			}
-			latest, current, err := cmdutil.CheckVersion(cmd.Context())
-			if err != nil {
+			latest, current, err := cmdutil.CheckVersionFromCache()
+			if err != nil || latest == "" {
 				return
 			}
 			cmdutil.PrintVersionHint(ioStreams.ErrOut, latest, current)
@@ -136,7 +140,7 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) (*cobra.Command, *clioptions.Op
 		initConfig(viper.GetString(clioptions.FlagConfig))
 	})
 
-	f := cmdutil.NewFactory(opts)
+	f := cmdutil.NewFactory(opts, ioStreams.ErrOut)
 
 	resourceCmds := []*cobra.Command{
 		availability.NewCmdAvailability(f, ioStreams),
@@ -172,7 +176,8 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) (*cobra.Command, *clioptions.Op
 		{
 			Message: "Serverless Commands:",
 			Commands: []*cobra.Command{
-				serverless.NewCmdServerless(f, ioStreams),
+				serverless.NewCmdContainer(f, ioStreams),
+				serverless.NewCmdBatchjob(f, ioStreams),
 			},
 		},
 		{
@@ -256,25 +261,22 @@ func skipCredentialResolution(cmd *cobra.Command) bool {
 	return false
 }
 
-// shouldCheckVersion returns true for commands where the user is plausibly
-// interested in version information, so it's okay to spend up to a couple of
-// seconds on a GitHub fetch after the command runs. Everything else (business
-// commands like `vm list`, `vccr ls`, `volume rm`, etc.) must never pay that
-// cost for a cosmetic hint — they read no cache and perform no network I/O.
+// shouldCheckVersion returns true for commands where it makes sense to print a
+// cached "Update available" hint. The PostRun hook never touches the network —
+// it only reads the on-disk cache populated by `verda doctor`.
 //
 // Included:
-//   - `verda doctor`             (explicit diagnostic; network expected)
-//   - `verda update`             (canonical place for version info)
-//   - `verda help` / help on any
-//     subcommand via `help` verb  (user is reading docs)
-//   - bare `verda`               (no args, prints help — new-user first run)
+//   - `verda help` / help on any subcommand via `help` verb (user is reading docs)
+//   - bare `verda` (no args, prints help — new-user first run)
 //
-// Not included: every subcommand bare-invocation (e.g. `verda vm` with no
-// subcommand). Those also print help, but users running them are browsing
-// a specific feature area, not asking about the CLI itself.
+// Excluded:
+//   - `doctor` / `update` — they print version info themselves (with spinners)
+//     and a trailing duplicate hint just adds noise.
+//   - every business command (`vm list`, `volume rm`, etc.) — they must feel
+//     instant and never pay any cost, even cache I/O, for a cosmetic hint.
 func shouldCheckVersion(cmd *cobra.Command) bool {
 	switch cmd.Name() {
-	case "doctor", "update", "help":
+	case "help":
 		return true
 	case "verda":
 		// Root command, typically invoked as `verda` (no args) — cobra

@@ -15,8 +15,13 @@
 package util
 
 import (
+	"bytes"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
+	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
@@ -26,6 +31,15 @@ import (
 
 	clioptions "github.com/verda-cloud/verda-cli/internal/verda-cli/options"
 )
+
+// sensitiveJSONFieldRe matches "field": "value" JSON entries whose values must
+// not appear in debug output (OAuth credentials, bearer tokens, etc.).
+var sensitiveJSONFieldRe = regexp.MustCompile(
+	`("(?:client_secret|access_token|refresh_token|id_token|password|api_key|bearer|authorization)")(\s*:\s*)"[^"]*"`)
+
+func redactSensitiveJSON(s string) string {
+	return sensitiveJSONFieldRe.ReplaceAllString(s, `$1$2"<redacted>"`)
+}
 
 // Factory provides shared resources that are created once in the root command
 // and passed down to every subcommand. This pattern keeps commands testable
@@ -81,17 +95,80 @@ func (t *userAgentTransport) RoundTrip(req *http.Request) (*http.Response, error
 	return t.base.RoundTrip(req)
 }
 
-// NewFactory creates a Factory from the given Options.
-func NewFactory(opts *clioptions.Options) Factory {
-	f := &factoryImpl{
-		opts: opts,
-		client: &http.Client{
-			Timeout:   opts.Timeout,
-			Transport: &userAgentTransport{base: http.DefaultTransport, userAgent: userAgentString()},
-		},
-		prompter: tui.Default(),
-		status:   tui.DefaultStatus(),
+// debugTransport logs HTTP request and response wire details to out when
+// enabled() returns true. The Authorization header value is redacted.
+type debugTransport struct {
+	base    http.RoundTripper
+	out     io.Writer
+	enabled func() bool
+}
+
+func (t *debugTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if t.enabled == nil || !t.enabled() || t.out == nil {
+		return t.base.RoundTrip(req)
 	}
+
+	var reqBody []byte
+	if req.Body != nil {
+		b, err := io.ReadAll(req.Body)
+		_ = req.Body.Close()
+		if err == nil {
+			reqBody = b
+		}
+		req.Body = io.NopCloser(bytes.NewReader(reqBody))
+	}
+
+	_, _ = fmt.Fprintf(t.out, "DEBUG: HTTP %s %s\n", req.Method, req.URL)
+	keys := make([]string, 0, len(req.Header))
+	for k := range req.Header {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		if strings.EqualFold(k, "Authorization") {
+			_, _ = fmt.Fprintf(t.out, "DEBUG:   %s: <redacted>\n", k)
+			continue
+		}
+		_, _ = fmt.Fprintf(t.out, "DEBUG:   %s: %s\n", k, strings.Join(req.Header[k], ", "))
+	}
+	if len(reqBody) > 0 {
+		_, _ = fmt.Fprintf(t.out, "DEBUG: request body: %s\n", redactSensitiveJSON(string(reqBody)))
+	}
+
+	resp, err := t.base.RoundTrip(req)
+	if err != nil {
+		_, _ = fmt.Fprintf(t.out, "DEBUG: HTTP error: %v\n", err)
+		return resp, err
+	}
+
+	var respBody []byte
+	if resp.Body != nil {
+		b, rerr := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if rerr == nil {
+			respBody = b
+		}
+		resp.Body = io.NopCloser(bytes.NewReader(respBody))
+	}
+	_, _ = fmt.Fprintf(t.out, "DEBUG: HTTP response %s\n", resp.Status)
+	if len(respBody) > 0 {
+		_, _ = fmt.Fprintf(t.out, "DEBUG: response body: %s\n", redactSensitiveJSON(string(respBody)))
+	}
+	return resp, nil
+}
+
+// NewFactory creates a Factory from the given Options. debugOut receives
+// HTTP request/response dumps when --debug is enabled.
+func NewFactory(opts *clioptions.Options, debugOut io.Writer) Factory {
+	f := &factoryImpl{opts: opts}
+	var rt http.RoundTripper = &userAgentTransport{base: http.DefaultTransport, userAgent: userAgentString()}
+	rt = &debugTransport{base: rt, out: debugOut, enabled: f.Debug}
+	f.client = &http.Client{
+		Timeout:   opts.Timeout,
+		Transport: rt,
+	}
+	f.prompter = tui.Default()
+	f.status = tui.DefaultStatus()
 	if opts.Agent {
 		f.prompter = &agentPrompter{}
 		f.status = nil

@@ -17,6 +17,7 @@ package serverless
 import (
 	"context"
 	"fmt"
+	"io"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -91,7 +92,10 @@ func selectContainerDeployment(ctx context.Context, f cmdutil.Factory, ioStreams
 
 	idx, err := f.Prompter().Select(ctx, "Select container deployment", labels)
 	if err != nil {
-		return "", nil // prompter cancel is a clean exit
+		if isPromptCancel(err) {
+			return "", nil
+		}
+		return "", err
 	}
 	if idx == len(deployments) {
 		return "", nil
@@ -124,6 +128,11 @@ func runContainerDescribe(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdut
 
 	cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), "Deployment:", deployment)
 
+	// Embed promotes the SDK's fields plus our outer Status. encoding/json gives
+	// the shallowest field precedence, so if the SDK grows its own json:"status"
+	// the outer Status here still wins — but the embedded value would silently
+	// disappear from output. If the SDK ever exposes a Status on the deployment
+	// itself, drop the embed and enumerate fields explicitly here.
 	if wrote, werr := cmdutil.WriteStructured(ioStreams.Out, f.OutputFormat(), struct {
 		*verda.ContainerDeployment
 		Status string `json:"status,omitempty"`
@@ -135,7 +144,7 @@ func runContainerDescribe(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdut
 	return nil
 }
 
-func renderContainerDeploymentCard(w interface{ Write(p []byte) (int, error) }, d *verda.ContainerDeployment, status string) {
+func renderContainerDeploymentCard(w io.Writer, d *verda.ContainerDeployment, status string) {
 	label := lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Bold(true)
 	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 

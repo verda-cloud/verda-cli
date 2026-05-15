@@ -17,6 +17,7 @@ package serverless
 import (
 	"context"
 	"fmt"
+	"io"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -86,7 +87,10 @@ func selectBatchjobDeployment(ctx context.Context, f cmdutil.Factory, ioStreams 
 
 	idx, err := f.Prompter().Select(ctx, "Select batch-job deployment", labels)
 	if err != nil {
-		return "", nil // prompter cancel is a clean exit
+		if isPromptCancel(err) {
+			return "", nil
+		}
+		return "", err
 	}
 	if idx == len(jobs) {
 		return "", nil
@@ -117,6 +121,8 @@ func runBatchjobDescribe(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmduti
 
 	cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), "Deployment:", job)
 
+	// See container_describe.go for the embed-vs-explicit-fields tradeoff —
+	// same caveat applies if verda.JobDeployment ever grows a Status field.
 	if wrote, werr := cmdutil.WriteStructured(ioStreams.Out, f.OutputFormat(), struct {
 		*verda.JobDeployment
 		Status string `json:"status,omitempty"`
@@ -128,7 +134,7 @@ func runBatchjobDescribe(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmduti
 	return nil
 }
 
-func renderJobDeploymentCard(w interface{ Write(p []byte) (int, error) }, j *verda.JobDeployment, status string) {
+func renderJobDeploymentCard(w io.Writer, j *verda.JobDeployment, status string) {
 	label := lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Bold(true)
 	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 

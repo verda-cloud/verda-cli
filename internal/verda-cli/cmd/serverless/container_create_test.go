@@ -15,6 +15,7 @@
 package serverless
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -24,20 +25,18 @@ import (
 // a baseline each test tweaks a single field on.
 func validOpts() *containerCreateOptions {
 	return &containerCreateOptions{
-		Name:               "my-endpoint",
-		Image:              "ghcr.io/org/app:v1.2",
-		Compute:            "RTX4500Ada",
-		ComputeSize:        1,
-		Port:               80,
-		HealthcheckPath:    defaultHealthcheckPath,
-		MinReplicas:        0,
-		MaxReplicas:        3,
-		Concurrency:        1,
-		QueuePreset:        presetBalanced,
-		ScaleDownDelay:     300 * time.Second,
-		RequestTTL:         300 * time.Second,
-		GeneralStorageSize: defaultGeneralStorageGiB,
-		SHMSize:            defaultSHMMiB,
+		Name:            "my-endpoint",
+		Image:           "ghcr.io/org/app:v1.2",
+		Compute:         "RTX4500Ada",
+		ComputeSize:     1,
+		Port:            80,
+		HealthcheckPath: defaultHealthcheckPath,
+		MinReplicas:     0,
+		MaxReplicas:     3,
+		Concurrency:     1,
+		QueuePreset:     presetBalanced,
+		ScaleDownDelay:  300 * time.Second,
+		RequestTTL:      300 * time.Second,
 	}
 }
 
@@ -81,9 +80,16 @@ func TestContainerRequest_HappyPath(t *testing.T) {
 	if req.Scaling.ScalingTriggers.QueueLoad.Threshold != queueLoadBalanced {
 		t.Errorf("balanced preset should map to %d, got %v", queueLoadBalanced, req.Scaling.ScalingTriggers.QueueLoad.Threshold)
 	}
-	// General storage + SHM mounts should be present by default.
-	if len(c.VolumeMounts) != 2 {
-		t.Errorf("expected 2 default mounts (general + shm), got %d: %+v", len(c.VolumeMounts), c.VolumeMounts)
+	// One scratch mount at /data is always sent — the API allocates and
+	// sizes it server-side. /dev/shm is provided by the runtime.
+	if len(c.VolumeMounts) != 1 {
+		t.Fatalf("expected 1 default mount (scratch /data), got %d: %+v", len(c.VolumeMounts), c.VolumeMounts)
+	}
+	if c.VolumeMounts[0].Type != mountTypeScratch || c.VolumeMounts[0].MountPath != defaultGeneralStoragePath {
+		t.Errorf("default mount: got %+v, want scratch at /data", c.VolumeMounts[0])
+	}
+	if c.VolumeMounts[0].SizeInMB != 0 {
+		t.Errorf("scratch mount must not send size_in_mb: got %d", c.VolumeMounts[0].SizeInMB)
 	}
 }
 
@@ -114,7 +120,7 @@ func TestContainerRequest_PresetMapping(t *testing.T) {
 		{presetCustom, 1001, 0, true},
 	}
 	for _, tc := range cases {
-		t.Run(tc.preset+":"+strconvItoa(tc.custom), func(t *testing.T) {
+		t.Run(tc.preset+":"+strconv.Itoa(tc.custom), func(t *testing.T) {
 			opts := validOpts()
 			opts.QueuePreset = tc.preset
 			opts.QueueLoad = tc.custom
@@ -240,25 +246,4 @@ func TestContainerRequest_ValidationErrors(t *testing.T) {
 			}
 		})
 	}
-}
-
-// strconvItoa is a tiny helper so the test table above can embed ints in
-// subtest names without an import dance.
-func strconvItoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	s := ""
-	neg := n < 0
-	if neg {
-		n = -n
-	}
-	for n > 0 {
-		s = string(rune('0'+n%10)) + s
-		n /= 10
-	}
-	if neg {
-		s = "-" + s
-	}
-	return s
 }

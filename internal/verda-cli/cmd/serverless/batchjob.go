@@ -20,8 +20,8 @@ import (
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
 
-// newCmdBatchjob creates the `verda serverless batchjob` subcommand tree.
-func newCmdBatchjob(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
+// NewCmdBatchjob creates the top-level `verda batchjob` command tree.
+func NewCmdBatchjob(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "batchjob",
 		Short: "Manage serverless batch-job deployments (one-shot runs)",

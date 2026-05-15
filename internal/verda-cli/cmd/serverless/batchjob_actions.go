@@ -26,7 +26,9 @@ import (
 
 type batchjobActionFn func(ctx context.Context, client *verda.Client, name string) error
 
-func newBatchjobActionCmd(f cmdutil.Factory, ioStreams cmdutil.IOStreams, verb, short, spinner, successMsg string, destructive bool, fn batchjobActionFn) *cobra.Command {
+// detailMsg is a Sprintf template with one %q for the deployment name; it is
+// only consulted for destructive verbs (used in the confirm prompt detail).
+func newBatchjobActionCmd(f cmdutil.Factory, ioStreams cmdutil.IOStreams, verb, short, spinner, successMsg, detailMsg string, destructive bool, fn batchjobActionFn) *cobra.Command {
 	var yes bool
 	cmd := &cobra.Command{
 		Use:   verb + " <name>",
@@ -37,7 +39,7 @@ func newBatchjobActionCmd(f cmdutil.Factory, ioStreams cmdutil.IOStreams, verb, 
 			if err != nil || name == "" {
 				return err
 			}
-			return runBatchjobAction(cmd, f, ioStreams, name, verb, spinner, successMsg, destructive, yes, fn)
+			return runBatchjobAction(cmd, f, ioStreams, name, verb, spinner, successMsg, detailMsg, destructive, yes, fn)
 		},
 	}
 	if destructive {
@@ -46,26 +48,27 @@ func newBatchjobActionCmd(f cmdutil.Factory, ioStreams cmdutil.IOStreams, verb, 
 	return cmd
 }
 
-func runBatchjobAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, name, verb, spinner, successMsg string, destructive, yes bool, fn batchjobActionFn) error {
+func runBatchjobAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, name, verb, spinner, successMsg, detailMsg string, destructive, yes bool, fn batchjobActionFn) error {
 	client, err := f.VerdaClient()
 	if err != nil {
 		return err
 	}
 
-	if destructive {
-		if f.AgentMode() && !yes {
-			return cmdutil.NewConfirmationRequiredError(verb)
+	if destructive && f.AgentMode() && !yes {
+		return cmdutil.NewConfirmationRequiredError(verb)
+	}
+	if destructive && !yes {
+		confirmed, err := confirmDestructive(cmd.Context(), ioStreams, f.Prompter(),
+			verb+" batch-job deployment",
+			fmt.Sprintf(detailMsg, name),
+			fmt.Sprintf("%s %s?", verb, name),
+		)
+		if err != nil {
+			return err
 		}
-		if !yes {
-			confirmed, err := confirmDestructive(cmd.Context(), ioStreams, f.Prompter(),
-				verb+" batch-job deployment",
-				fmt.Sprintf("Deployment %q will be %sd.", name, verb),
-				fmt.Sprintf("%s %s?", verb, name),
-			)
-			if err != nil || !confirmed {
-				_, _ = fmt.Fprintln(ioStreams.ErrOut, "Canceled.")
-				return nil
-			}
+		if !confirmed {
+			_, _ = fmt.Fprintln(ioStreams.ErrOut, "Canceled.")
+			return nil
 		}
 	}
 
@@ -91,7 +94,7 @@ func runBatchjobAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.
 
 func newCmdBatchjobPause(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 	return newBatchjobActionCmd(f, ioStreams,
-		"pause", "Pause a batch-job deployment", "Pausing", "Paused deployment %q", false,
+		"pause", "Pause a batch-job deployment", "Pausing", "Paused deployment %q", "", false,
 		func(ctx context.Context, c *verda.Client, name string) error {
 			return c.ServerlessJobs.PauseJobDeployment(ctx, name)
 		},
@@ -100,7 +103,7 @@ func newCmdBatchjobPause(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.
 
 func newCmdBatchjobResume(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 	return newBatchjobActionCmd(f, ioStreams,
-		"resume", "Resume a paused batch-job deployment", "Resuming", "Resumed deployment %q", false,
+		"resume", "Resume a paused batch-job deployment", "Resuming", "Resumed deployment %q", "", false,
 		func(ctx context.Context, c *verda.Client, name string) error {
 			return c.ServerlessJobs.ResumeJobDeployment(ctx, name)
 		},
@@ -109,7 +112,8 @@ func newCmdBatchjobResume(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra
 
 func newCmdBatchjobPurgeQueue(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 	return newBatchjobActionCmd(f, ioStreams,
-		"purge-queue", "Purge the pending-request queue for a batch-job deployment", "Purging queue for", "Purged queue for deployment %q", true,
+		"purge-queue", "Purge the pending-request queue for a batch-job deployment", "Purging queue for", "Purged queue for deployment %q",
+		"Queue for deployment %q will be purged.", true,
 		func(ctx context.Context, c *verda.Client, name string) error {
 			return c.ServerlessJobs.PurgeJobDeploymentQueue(ctx, name)
 		},

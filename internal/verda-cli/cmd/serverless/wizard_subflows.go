@@ -23,11 +23,15 @@ import (
 )
 
 // promptEnvVar collects one environment-variable entry interactively. Returns
-// (nil, nil) on user cancel or empty name so the caller can end the loop.
+// (nil, nil) on user cancel or empty name so the caller can end the loop;
+// real I/O or terminal errors are propagated.
 func promptEnvVar(ctx context.Context, prompter tui.Prompter) (*verda.ContainerEnvVar, error) {
 	name, err := prompter.TextInput(ctx, "Env name (e.g. HF_HOME)")
 	if err != nil {
-		return nil, nil //nolint:nilerr // prompter cancel is a clean exit
+		if isPromptCancel(err) {
+			return nil, nil
+		}
+		return nil, err
 	}
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -40,7 +44,10 @@ func promptEnvVar(ctx context.Context, prompter tui.Prompter) (*verda.ContainerE
 
 	value, err := prompter.TextInput(ctx, "Env value")
 	if err != nil {
-		return nil, nil //nolint:nilerr // prompter cancel is a clean exit
+		if isPromptCancel(err) {
+			return nil, nil
+		}
+		return nil, err
 	}
 	return &verda.ContainerEnvVar{
 		Type:                     envTypePlain,
@@ -65,13 +72,22 @@ func promptSecretMount(ctx context.Context, prompter tui.Prompter, secrets []ver
 	labels = append(labels, "Cancel")
 
 	idx, err := prompter.Select(ctx, "Select secret to mount", labels)
-	if err != nil || idx == len(labels)-1 {
-		return nil, nil //nolint:nilerr // prompter cancel is a clean exit
+	if err != nil {
+		if isPromptCancel(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if idx == len(labels)-1 {
+		return nil, nil
 	}
 
 	mountPath, err := prompter.TextInput(ctx, "Mount path (e.g. /etc/secret/api-key)")
 	if err != nil {
-		return nil, nil //nolint:nilerr // prompter cancel is a clean exit
+		if isPromptCancel(err) {
+			return nil, nil
+		}
+		return nil, err
 	}
 	mountPath = strings.TrimSpace(mountPath)
 	if !strings.HasPrefix(mountPath, "/") {

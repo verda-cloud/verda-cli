@@ -23,8 +23,8 @@ import (
 	"github.com/verda-cloud/verdagostack/pkg/tui/wizard"
 )
 
-// buildBatchjobCreateFlow returns the wizard flow for `verda serverless
-// batchjob create`. It reuses nine of the ten steps from the container
+// buildBatchjobCreateFlow returns the wizard flow for `verda batchjob create`.
+// It reuses nine of the ten steps from the container
 // wizard and adds the single batchjob-specific step (deadline). Jobs never
 // use spot and have no min/max-replica range, no scaling triggers, no
 // concurrency, no healthcheck — so those container-wizard steps are simply

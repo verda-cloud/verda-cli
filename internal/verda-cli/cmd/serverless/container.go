@@ -20,8 +20,8 @@ import (
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
 
-// newCmdContainer creates the `verda serverless container` subcommand tree.
-func newCmdContainer(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
+// NewCmdContainer creates the top-level `verda container` command tree.
+func NewCmdContainer(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "container",
 		Short: "Manage serverless container deployments (always-on endpoints)",

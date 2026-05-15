@@ -55,11 +55,14 @@ func TestShouldCheckVersion(t *testing.T) {
 		cmd  *cobra.Command
 		want bool
 	}{
-		// ---- Yes: CLI-meta commands the user is already asking about. ----
-		{"doctor", newCmd("doctor"), true},
-		{"update", newCmd("update"), true},
+		// ---- Yes: help paths read from the cache to print a hint. ----
 		{"help", newCmd("help"), true},
 		{"verda root (bare)", newCmd("verda"), true},
+
+		// ---- No: doctor / update print their own version info (with
+		// spinners) — a trailing duplicate hint would just be noise.
+		{"doctor", newCmd("doctor"), false},
+		{"update", newCmd("update"), false},
 
 		// ---- No: resource / business commands. They must NEVER do a
 		// network fetch or even read the cache to print a cosmetic hint.

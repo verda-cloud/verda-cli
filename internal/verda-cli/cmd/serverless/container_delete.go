@@ -62,7 +62,10 @@ func runContainerDelete(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil
 			fmt.Sprintf("Deployment %q will stop serving requests immediately.", name),
 			fmt.Sprintf("Delete %s?", name),
 		)
-		if err != nil || !confirmed {
+		if err != nil {
+			return err
+		}
+		if !confirmed {
 			_, _ = fmt.Fprintln(ioStreams.ErrOut, "Canceled.")
 			return nil
 		}

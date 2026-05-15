@@ -22,16 +22,14 @@ import (
 
 func validJobOpts() *batchjobCreateOptions {
 	return &batchjobCreateOptions{
-		Name:               "nightly-embed",
-		Image:              "ghcr.io/org/embedder:v1",
-		Compute:            "RTX4500Ada",
-		ComputeSize:        1,
-		Port:               80,
-		MaxReplicas:        3,
-		Deadline:           30 * time.Minute,
-		RequestTTL:         300 * time.Second,
-		GeneralStorageSize: defaultGeneralStorageGiB,
-		SHMSize:            defaultSHMMiB,
+		Name:        "nightly-embed",
+		Image:       "ghcr.io/org/embedder:v1",
+		Compute:     "RTX4500Ada",
+		ComputeSize: 1,
+		Port:        80,
+		MaxReplicas: 3,
+		Deadline:    30 * time.Minute,
+		RequestTTL:  300 * time.Second,
 	}
 }
 

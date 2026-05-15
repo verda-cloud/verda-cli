@@ -84,8 +84,7 @@ func renderContainerSummary(w io.Writer, opts *containerCreateOptions) {
 	if len(opts.SecretMounts) > 0 {
 		kv("Secret mounts", strconv.Itoa(len(opts.SecretMounts)))
 	}
-	kv("General storage", fmt.Sprintf("%s  %d GiB (fixed)", defaultGeneralStoragePath, opts.GeneralStorageSize))
-	kv("Shared memory", fmt.Sprintf("%s  %d MiB", defaultSHMPath, opts.SHMSize))
+	kv("Storage", defaultGeneralStoragePath+"  (scratch, server-allocated)")
 
 	_, _ = fmt.Fprintln(w)
 }
@@ -123,7 +122,6 @@ func renderBatchjobSummary(w io.Writer, opts *batchjobCreateOptions) {
 	if len(opts.SecretMounts) > 0 {
 		kv("Secret mounts", strconv.Itoa(len(opts.SecretMounts)))
 	}
-	kv("General storage", fmt.Sprintf("%s  %d GiB (fixed)", defaultGeneralStoragePath, opts.GeneralStorageSize))
-	kv("Shared memory", fmt.Sprintf("%s  %d MiB", defaultSHMPath, opts.SHMSize))
+	kv("Storage", defaultGeneralStoragePath+"  (scratch, server-allocated)")
 	_, _ = fmt.Fprintln(w)
 }

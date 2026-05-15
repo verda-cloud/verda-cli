@@ -131,7 +131,16 @@ func runList(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams,
 		volumes := fetchInstanceVolumes(cmd.Context(), client, inst)
 		_, _ = fmt.Fprint(ioStreams.Out, renderInstanceCard(inst, volumes...))
 
-		// After showing details, loop back to the list.
+		// Pause on the instance card until the user picks an explicit next step.
+		// Without this gate the loop re-enters Select immediately and the TUI
+		// redraw wipes the card.
+		nextIdx, nerr := prompter.Select(cmd.Context(), "", []string{"Back to list", "Exit"})
+		if nerr != nil {
+			return nil
+		}
+		if nextIdx == 1 {
+			return nil
+		}
 	}
 }
 

@@ -49,20 +49,16 @@ type batchjobCreateOptions struct {
 	Deadline    time.Duration
 	RequestTTL  time.Duration
 
-	SecretMounts       []string
-	GeneralStorageSize int
-	SHMSize            int
+	SecretMounts []string
 
 	Yes bool
 }
 
 func newCmdBatchjobCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 	opts := &batchjobCreateOptions{
-		Port:               defaultExposedPort,
-		MaxReplicas:        defaultMaxReplicas,
-		RequestTTL:         defaultRequestTTL,
-		GeneralStorageSize: defaultGeneralStorageGiB,
-		SHMSize:            defaultSHMMiB,
+		Port:        defaultExposedPort,
+		MaxReplicas: defaultMaxReplicas,
+		RequestTTL:  defaultRequestTTL,
 	}
 
 	cmd := &cobra.Command{
@@ -74,7 +70,7 @@ func newCmdBatchjobCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra
 			cannot use spot compute; --deadline is required.
 		`),
 		Example: cmdutil.Examples(`
-			verda serverless batchjob create \
+			verda batchjob create \
 			  --name nightly-embed \
 			  --image ghcr.io/me/embedder:v1 \
 			  --compute RTX4500Ada --compute-size 1 \
@@ -104,8 +100,6 @@ func newCmdBatchjobCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra
 	flags.DurationVar(&opts.RequestTTL, "request-ttl", opts.RequestTTL, "How long a pending request may live before deletion")
 
 	flags.StringArrayVar(&opts.SecretMounts, "secret-mount", nil, "Secret mount SECRET:MOUNT_PATH; repeat for multiple")
-	flags.IntVar(&opts.GeneralStorageSize, "general-storage-size", opts.GeneralStorageSize, "Size of the fixed /data mount in GiB")
-	flags.IntVar(&opts.SHMSize, "shm-size", opts.SHMSize, "Size of the /dev/shm mount in MiB")
 
 	flags.BoolVarP(&opts.Yes, "yes", "y", false, "Skip confirmation (required in agent mode)")
 
@@ -138,6 +132,9 @@ func runBatchjobCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.
 	if !f.AgentMode() && !opts.Yes {
 		renderBatchjobSummary(ioStreams.ErrOut, opts)
 		confirmed, err := f.Prompter().Confirm(cmd.Context(), fmt.Sprintf("Deploy %s?", opts.Name))
+		if err != nil && !isPromptCancel(err) {
+			return err
+		}
 		if err != nil || !confirmed {
 			_, _ = fmt.Fprintln(ioStreams.ErrOut, "Canceled.")
 			return nil
@@ -215,7 +212,7 @@ func (o *batchjobCreateOptions) request() (*verda.CreateJobDeploymentRequest, er
 	if err != nil {
 		return nil, err
 	}
-	mounts, err := buildVolumeMounts(o.SecretMounts, o.GeneralStorageSize, o.SHMSize)
+	mounts, err := buildVolumeMounts(o.SecretMounts)
 	if err != nil {
 		return nil, err
 	}
@@ -229,6 +226,9 @@ func (o *batchjobCreateOptions) request() (*verda.CreateJobDeploymentRequest, er
 		}
 	}
 
+	// CreateJobDeploymentRequest.ContainerRegistrySettings is a pointer (unlike
+	// the container variant, which is a value with IsPrivate:false for public).
+	// Pass nil for public images so the field is omitted from the request body.
 	registry := (*verda.ContainerRegistrySettings)(nil)
 	if o.RegistryCreds != "" {
 		registry = &verda.ContainerRegistrySettings{

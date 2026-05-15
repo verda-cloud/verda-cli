@@ -99,11 +99,13 @@ func parseSecretMountFlag(entry string) (verda.ContainerVolumeMount, error) {
 	}, nil
 }
 
-// Mount type constants match the server-side enum.
+// Mount type constants match the server-side enum. "scratch" is the
+// auto-allocated `/data` general-storage volume; the server sizes it.
+// `shared` (named volume) is not exposed by the CLI yet — it requires a
+// volume_id we have no API to pass.
 const (
-	mountTypeSecret = "secret"
-	mountTypeShared = "shared"
-	mountTypeSHM    = "shm"
+	mountTypeSecret  = "secret"
+	mountTypeScratch = "scratch"
 )
 
 // Environment-variable type constants.
@@ -112,9 +114,19 @@ const (
 	envTypeSecret = "secret"
 )
 
+// isPromptCancel reports whether err represents a clean prompter exit rather
+// than a real failure. Ctrl+C surfaces as tui.ErrInterrupted, Esc as
+// context.Canceled. Anything else (I/O errors, terminal disconnects, real
+// context deadlines) should propagate so the failure isn't invisible.
+func isPromptCancel(err error) bool {
+	return errors.Is(err, tui.ErrInterrupted) || errors.Is(err, context.Canceled)
+}
+
 // confirmDestructive renders a red-bold warning line and prompts the user to
-// confirm. Returns (true, nil) to proceed, (false, nil) on cancellation.
-// In agent mode, callers must bypass this helper and enforce --yes themselves.
+// confirm. Returns (true, nil) to proceed, (false, nil) on a clean prompter
+// cancel (Ctrl+C / Esc), or (false, err) on a real prompter failure that
+// callers must surface. In agent mode, callers must bypass this helper and
+// enforce --yes themselves.
 func confirmDestructive(ctx context.Context, ioStreams cmdutil.IOStreams, prompter tui.Prompter, heading, detail, prompt string) (bool, error) {
 	warn := lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Bold(true)
 	_, _ = fmt.Fprintf(ioStreams.ErrOut, "\n  %s %s\n", warn.Render("⚠"), warn.Render(heading))
@@ -122,7 +134,14 @@ func confirmDestructive(ctx context.Context, ioStreams cmdutil.IOStreams, prompt
 		_, _ = fmt.Fprintf(ioStreams.ErrOut, "  %s\n", detail)
 	}
 	_, _ = fmt.Fprintf(ioStreams.ErrOut, "  %s\n\n", warn.Render("This action cannot be undone."))
-	return prompter.Confirm(ctx, prompt)
+	confirmed, err := prompter.Confirm(ctx, prompt)
+	if err != nil {
+		if isPromptCancel(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return confirmed, nil
 }
 
 // statusColor returns a lipgloss style that highlights a deployment status.

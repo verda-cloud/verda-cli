@@ -41,13 +41,10 @@ const (
 	queueLoadBalanced  = 3
 	queueLoadCostSaver = 6
 
-	// Fixed storage values — web UI labels these "fixed for now" and does
-	// not expose editors. Flags default to these and may be overridden
-	// when the API unlocks them.
+	// Auto-allocated general-storage mount. The server sizes it; the CLI
+	// only sends the mount path and "scratch" type. /dev/shm is provided
+	// by the runtime and the CLI does not send a mount for it.
 	defaultGeneralStoragePath = "/data"
-	defaultGeneralStorageGiB  = 500
-	defaultSHMPath            = "/dev/shm"
-	defaultSHMMiB             = 64
 
 	defaultExposedPort     = 80
 	defaultHealthcheckPath = "/health"
@@ -92,26 +89,22 @@ type containerCreateOptions struct {
 	ScaleDownDelay time.Duration
 	RequestTTL     time.Duration
 
-	SecretMounts       []string // SECRET:PATH
-	GeneralStorageSize int      // GiB; 0 = omit the mount
-	SHMSize            int      // MiB; 0 = omit the mount
+	SecretMounts []string // SECRET:PATH
 
 	Yes bool
 }
 
 func newCmdContainerCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 	opts := &containerCreateOptions{
-		Port:               defaultExposedPort,
-		HealthcheckPath:    defaultHealthcheckPath,
-		MinReplicas:        0,
-		MaxReplicas:        defaultMaxReplicas,
-		Concurrency:        defaultConcurrency,
-		QueuePreset:        presetBalanced,
-		ScaleUpDelay:       0,
-		ScaleDownDelay:     defaultScaleDownDelay,
-		RequestTTL:         defaultRequestTTL,
-		GeneralStorageSize: defaultGeneralStorageGiB,
-		SHMSize:            defaultSHMMiB,
+		Port:            defaultExposedPort,
+		HealthcheckPath: defaultHealthcheckPath,
+		MinReplicas:     0,
+		MaxReplicas:     defaultMaxReplicas,
+		Concurrency:     defaultConcurrency,
+		QueuePreset:     presetBalanced,
+		ScaleUpDelay:    0,
+		ScaleDownDelay:  defaultScaleDownDelay,
+		RequestTTL:      defaultRequestTTL,
 	}
 
 	cmd := &cobra.Command{
@@ -126,13 +119,13 @@ func newCmdContainerCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobr
 		`),
 		Example: cmdutil.Examples(`
 			# Minimal flag-driven
-			verda serverless container create \
+			verda container create \
 			  --name my-endpoint \
 			  --image ghcr.io/ai-dock/comfyui:cpu-22.04 \
 			  --compute RTX4500Ada --compute-size 1
 
 			# With env vars and scaling preset
-			verda serverless container create \
+			verda container create \
 			  --name my-api --image ghcr.io/me/llm:v1.2 \
 			  --compute RTX4500Ada --compute-size 1 \
 			  --env HF_HOME=/data/.huggingface \
@@ -177,8 +170,6 @@ func newCmdContainerCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobr
 	flags.DurationVar(&opts.RequestTTL, "request-ttl", opts.RequestTTL, "How long a pending request may live before deletion")
 
 	flags.StringArrayVar(&opts.SecretMounts, "secret-mount", nil, "Secret mount SECRET:MOUNT_PATH; repeat for multiple")
-	flags.IntVar(&opts.GeneralStorageSize, "general-storage-size", opts.GeneralStorageSize, "Size of the fixed /data mount in GiB")
-	flags.IntVar(&opts.SHMSize, "shm-size", opts.SHMSize, "Size of the /dev/shm mount in MiB")
 
 	flags.BoolVarP(&opts.Yes, "yes", "y", false, "Skip confirmation (required in agent mode)")
 
@@ -212,6 +203,9 @@ func runContainerCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil
 	if !f.AgentMode() && !opts.Yes {
 		renderContainerSummary(ioStreams.ErrOut, opts)
 		confirmed, err := f.Prompter().Confirm(cmd.Context(), fmt.Sprintf("Deploy %s?", opts.Name))
+		if err != nil && !isPromptCancel(err) {
+			return err
+		}
 		if err != nil || !confirmed {
 			_, _ = fmt.Fprintln(ioStreams.ErrOut, "Canceled.")
 			return nil
@@ -312,7 +306,7 @@ func (o *containerCreateOptions) request() (*verda.CreateDeploymentRequest, erro
 		return nil, err
 	}
 
-	mounts, err := buildVolumeMounts(o.SecretMounts, o.GeneralStorageSize, o.SHMSize)
+	mounts, err := buildVolumeMounts(o.SecretMounts)
 	if err != nil {
 		return nil, err
 	}
@@ -413,28 +407,20 @@ func buildEnvVars(plain, secret []string) ([]verda.ContainerEnvVar, error) {
 	return out, nil
 }
 
-func buildVolumeMounts(secretMounts []string, generalStorageGiB, shmMiB int) ([]verda.ContainerVolumeMount, error) {
-	var mounts []verda.ContainerVolumeMount
+// buildVolumeMounts assembles the volume_mounts array sent to the API. Every
+// deployment gets an auto-allocated scratch mount at /data — the server sizes
+// it, the CLI just declares the mount. /dev/shm is provided by the runtime
+// and is not sent as an explicit mount. Secret mounts come from --secret-mount.
+func buildVolumeMounts(secretMounts []string) ([]verda.ContainerVolumeMount, error) {
+	mounts := []verda.ContainerVolumeMount{
+		{Type: mountTypeScratch, MountPath: defaultGeneralStoragePath},
+	}
 	for _, entry := range secretMounts {
 		m, err := parseSecretMountFlag(entry)
 		if err != nil {
 			return nil, err
 		}
 		mounts = append(mounts, m)
-	}
-	if generalStorageGiB > 0 {
-		mounts = append(mounts, verda.ContainerVolumeMount{
-			Type:      mountTypeShared,
-			MountPath: defaultGeneralStoragePath,
-			SizeInMB:  generalStorageGiB * 1024,
-		})
-	}
-	if shmMiB > 0 {
-		mounts = append(mounts, verda.ContainerVolumeMount{
-			Type:      mountTypeSHM,
-			MountPath: defaultSHMPath,
-			SizeInMB:  shmMiB,
-		})
 	}
 	return mounts, nil
 }

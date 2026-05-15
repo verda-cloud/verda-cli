@@ -41,8 +41,8 @@ const (
 	registryPublicValue = "__public__"
 )
 
-// buildContainerCreateFlow returns the full wizard flow for `verda serverless
-// container create`. Every step has a matching flag on containerCreateOptions,
+// buildContainerCreateFlow returns the full wizard flow for `verda container
+// create`. Every step has a matching flag on containerCreateOptions,
 // so the same opts struct drives both the wizard and the non-interactive path.
 // The final deploy confirmation is NOT a wizard step — the caller prints the
 // summary and runs a bare Confirm after the flow returns.
@@ -59,7 +59,6 @@ func buildContainerCreateFlow(_ context.Context, getClient clientFunc, opts *con
 			stepRegistryCreds(getClient, cache, &opts.RegistryCreds),
 			stepPort(&opts.Port),
 			stepContainerHealthcheck(&opts.HealthcheckOff),
-			stepContainerHealthcheckPort(&opts.HealthcheckPort),
 			stepContainerHealthcheckPath(&opts.HealthcheckPath),
 			stepEnvVars(&opts.Env),
 			stepContainerMinReplicas(&opts.MinReplicas),
@@ -137,43 +136,13 @@ func stepContainerHealthcheck(off *bool) wizard.Step {
 	}
 }
 
-func stepContainerHealthcheckPort(port *int) wizard.Step {
-	return wizard.Step{
-		Name:        "healthcheck-port",
-		Description: "Healthcheck port (blank = same as exposed)",
-		Prompt:      wizard.TextInputPrompt,
-		Required:    false,
-		DependsOn:   []string{"healthcheck"},
-		ShouldSkip: func(c map[string]any) bool {
-			return c["healthcheck"] == healthcheckOff
-		},
-		Default: func(_ map[string]any) any {
-			if *port > 0 {
-				return strconv.Itoa(*port)
-			}
-			return ""
-		},
-		Validate: func(v any) error {
-			s := strings.TrimSpace(v.(string))
-			if s == "" {
-				return nil
-			}
-			return parsePortValidator("healthcheck port")(v)
-		},
-		Setter: func(v any) {
-			s := strings.TrimSpace(v.(string))
-			if s == "" {
-				*port = 0
-				return
-			}
-			n, _ := strconv.Atoi(s)
-			*port = n
-		},
-		Resetter: func() { *port = 0 },
-		IsSet:    func() bool { return *port > 0 },
-		Value:    func() any { return strconv.Itoa(*port) },
-	}
-}
+// Note: there is no "healthcheck port" wizard step. The wire defaults the
+// healthcheck port to the exposed port (see request() in container_create.go,
+// `hcPort = o.Port` when HealthcheckPort == 0). Power users who need a
+// different probe port can still pass --healthcheck-port. Removing the step
+// from the interactive flow eliminated a confusing prompt where typing the
+// path (e.g. "/health") was silently rejected by the int validator and
+// re-prompted with no error.
 
 func stepContainerHealthcheckPath(path *string) wizard.Step {
 	return wizard.Step{

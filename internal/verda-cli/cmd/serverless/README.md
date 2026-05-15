@@ -1,11 +1,13 @@
-# `verda serverless`
+# `verda container` / `verda batchjob`
 
 Manage serverless container deployments (always-on endpoints) and batch-job deployments (one-shot runs) on Verda Cloud.
 
 ```
-verda serverless container   # → /container-deployments (continuous; supports spot)
-verda serverless batchjob    # → /job-deployments (one-shot; deadline-based; no spot)
+verda container   # → /container-deployments (continuous; supports spot)
+verda batchjob    # → /job-deployments (one-shot; deadline-based; no spot)
 ```
+
+Both command trees live in the `serverless` Go package (they share wizard step factories, validators, and the API cache), but are registered as top-level commands so users type `verda container ...` rather than `verda serverless container ...`.
 
 ## Container deployments
 
@@ -14,13 +16,13 @@ verda serverless batchjob    # → /job-deployments (one-shot; deadline-based; n
 Interactive wizard (launches when any of `--name`/`--image`/`--compute` is missing):
 
 ```bash
-verda serverless container create
+verda container create
 ```
 
 Non-interactive:
 
 ```bash
-verda serverless container create \
+verda container create \
   --name my-endpoint \
   --image ghcr.io/ai-dock/comfyui:cpu-22.04 \
   --compute RTX4500Ada --compute-size 1
@@ -29,7 +31,7 @@ verda serverless container create \
 With private registry + env + custom scaling:
 
 ```bash
-verda serverless container create \
+verda container create \
   --name my-api --image ghcr.io/me/llm:v1.2 \
   --compute RTX4500Ada --compute-size 1 \
   --registry-creds my-ghcr \
@@ -76,18 +78,18 @@ verda serverless container create \
 ### Storage
 
 - `--secret-mount SECRET:/path` (repeatable) — mount a project secret as a file
-- General storage at `/data` (500 GiB) and SHM at `/dev/shm` (64 MiB) are included automatically and cannot be edited today. Flags exist (`--general-storage-size`, `--shm-size`) for forward-compatibility when the API exposes them.
+- Every deployment gets a `scratch` mount at `/data` automatically; the server allocates and sizes it. `/dev/shm` is provided by the runtime. There are no flags to resize either — the API does not yet accept client-provided sizes.
 
 ### Lifecycle
 
 ```bash
-verda serverless container list
-verda serverless container describe my-endpoint
-verda serverless container pause my-endpoint          # stop serving requests
-verda serverless container resume my-endpoint
-verda serverless container restart my-endpoint        # destructive; requires --yes in agent mode
-verda serverless container purge-queue my-endpoint    # destructive; requires --yes in agent mode
-verda serverless container delete my-endpoint         # destructive; requires --yes in agent mode
+verda container list
+verda container describe my-endpoint
+verda container pause my-endpoint          # stop serving requests
+verda container resume my-endpoint
+verda container restart my-endpoint        # destructive; requires --yes in agent mode
+verda container purge-queue my-endpoint    # destructive; requires --yes in agent mode
+verda container delete my-endpoint         # destructive; requires --yes in agent mode
 ```
 
 `list`, `describe`, `delete`, `pause`, `resume`, `restart`, `purge-queue` all support:
@@ -103,13 +105,13 @@ verda serverless container delete my-endpoint         # destructive; requires --
 Interactive wizard (launches when any of `--name`/`--image`/`--compute`/`--deadline` is missing):
 
 ```bash
-verda serverless batchjob create
+verda batchjob create
 ```
 
 Non-interactive:
 
 ```bash
-verda serverless batchjob create \
+verda batchjob create \
   --name nightly-embed \
   --image ghcr.io/me/embedder:v1 \
   --compute RTX4500Ada --compute-size 1 \
@@ -132,12 +134,12 @@ verda serverless batchjob create \
 Identical shape to container, minus `restart` (not supported by the job-deployment API):
 
 ```bash
-verda serverless batchjob list
-verda serverless batchjob describe nightly-embed
-verda serverless batchjob pause nightly-embed
-verda serverless batchjob resume nightly-embed
-verda serverless batchjob purge-queue nightly-embed   # destructive
-verda serverless batchjob delete nightly-embed        # destructive
+verda batchjob list
+verda batchjob describe nightly-embed
+verda batchjob pause nightly-embed
+verda batchjob resume nightly-embed
+verda batchjob purge-queue nightly-embed   # destructive
+verda batchjob delete nightly-embed        # destructive
 ```
 
 ## Agent mode
@@ -145,11 +147,11 @@ verda serverless batchjob delete nightly-embed        # destructive
 Every destructive verb (`delete`, `restart`, `purge-queue`) requires `--yes` in agent mode — otherwise the command returns `CONFIRMATION_REQUIRED` with exit code 2. Structured JSON envelopes on stderr for errors; JSON result documents on stdout for successful operations. No prompts, ever.
 
 ```bash
-verda --agent serverless container create \
+verda --agent container create \
   --name api --image ghcr.io/org/app:v1 \
   --compute RTX4500Ada --compute-size 1 -o json
 
-verda --agent serverless container delete api --yes -o json
+verda --agent container delete api --yes -o json
 ```
 
 ## Environment variables

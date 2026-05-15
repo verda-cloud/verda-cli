@@ -22,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
 	"github.com/verda-cloud/verdagostack/pkg/tui"
 	"github.com/verda-cloud/verdagostack/pkg/tui/wizard"
 )
@@ -81,8 +82,10 @@ func stepCompute(getClient clientFunc, cache *apiCache, target *string) wizard.S
 		Description: "Compute resource",
 		Prompt:      wizard.SelectPrompt,
 		Required:    true,
-		Loader: func(ctx context.Context, _ tui.Prompter, _ tui.Status, _ *wizard.Store) ([]wizard.Choice, error) {
-			res, err := cache.fetchComputeResources(ctx, getClient)
+		Loader: func(ctx context.Context, _ tui.Prompter, status tui.Status, _ *wizard.Store) ([]wizard.Choice, error) {
+			res, err := withFetchSpinner(ctx, status, "Fetching compute resources…", func(ctx context.Context) ([]verda.ComputeResource, error) {
+				return cache.fetchComputeResources(ctx, getClient)
+			})
 			if err != nil {
 				return nil, err
 			}
@@ -145,16 +148,23 @@ func stepRegistryCreds(getClient clientFunc, cache *apiCache, target *string) wi
 		Description: "Registry credentials (for private images)",
 		Prompt:      wizard.SelectPrompt,
 		Required:    false,
-		Loader: func(ctx context.Context, _ tui.Prompter, _ tui.Status, _ *wizard.Store) ([]wizard.Choice, error) {
+		Loader: func(ctx context.Context, _ tui.Prompter, status tui.Status, _ *wizard.Store) ([]wizard.Choice, error) {
 			choices := []wizard.Choice{
 				{Label: "Public (no credentials)", Value: registryPublicValue},
 			}
-			creds, err := cache.fetchRegistryCreds(ctx, getClient)
+			creds, err := withFetchSpinner(ctx, status, "Fetching registry credentials…", func(ctx context.Context) ([]verda.RegistryCredentials, error) {
+				return cache.fetchRegistryCreds(ctx, getClient)
+			})
 			if err != nil {
 				// Non-fatal: offer public-only and let the user continue.
 				return choices, nil //nolint:nilerr // degrade gracefully on missing permissions
 			}
 			for _, c := range creds {
+				// Skip any credential whose name collides with the public sentinel
+				// (registry naming likely forbids underscores, but cheap insurance).
+				if c.Name == registryPublicValue {
+					continue
+				}
 				choices = append(choices, wizard.Choice{Label: c.Name, Value: c.Name})
 			}
 			return choices, nil
@@ -206,6 +216,12 @@ func stepPort(target *int) wizard.Step {
 
 // --- Env vars (loop) ---
 
+// stepEnvVars and stepSecretMounts use a loop-style step: the Loader runs its
+// own inner prompt loop (Confirm + sub-flow) and returns (nil, nil), so the
+// engine has no SelectPrompt choices to render. Setter/Value are no-ops and
+// IsSet reports whether the loop ran at least once. The Prompt type stays
+// SelectPrompt because the wizard engine needs *some* prompt class declared,
+// and this one is the cheapest no-op path.
 func stepEnvVars(target *[]string) wizard.Step {
 	return wizard.Step{
 		Name:        "env-vars",
@@ -215,8 +231,14 @@ func stepEnvVars(target *[]string) wizard.Step {
 		Loader: func(ctx context.Context, prompter tui.Prompter, _ tui.Status, _ *wizard.Store) ([]wizard.Choice, error) {
 			for {
 				add, err := prompter.Confirm(ctx, fmt.Sprintf("Add environment variable? (have %d)", len(*target)), tui.WithConfirmDefault(false))
-				if err != nil || !add {
-					return nil, nil //nolint:nilerr // prompter cancel is a clean exit
+				if err != nil {
+					if isPromptCancel(err) {
+						return nil, nil
+					}
+					return nil, err
+				}
+				if !add {
+					return nil, nil
 				}
 				entry, err := promptEnvVar(ctx, prompter)
 				if err != nil {
@@ -269,14 +291,24 @@ func stepSecretMounts(getClient clientFunc, cache *apiCache, target *[]string) w
 		Description: "Secret mounts (optional)",
 		Prompt:      wizard.SelectPrompt,
 		Required:    false,
-		Loader: func(ctx context.Context, prompter tui.Prompter, _ tui.Status, _ *wizard.Store) ([]wizard.Choice, error) {
+		Loader: func(ctx context.Context, prompter tui.Prompter, status tui.Status, _ *wizard.Store) ([]wizard.Choice, error) {
 			for {
 				add, err := prompter.Confirm(ctx, fmt.Sprintf("Add a secret mount? (have %d)", len(*target)), tui.WithConfirmDefault(false))
-				if err != nil || !add {
-					return nil, nil //nolint:nilerr // prompter cancel is a clean exit
+				if err != nil {
+					if isPromptCancel(err) {
+						return nil, nil
+					}
+					return nil, err
 				}
-				secrets, _ := cache.fetchSecrets(ctx, getClient)
-				fileSecrets, _ := cache.fetchFileSecrets(ctx, getClient)
+				if !add {
+					return nil, nil
+				}
+				secrets, _ := withFetchSpinner(ctx, status, "Fetching secrets…", func(ctx context.Context) ([]verda.Secret, error) {
+					return cache.fetchSecrets(ctx, getClient)
+				})
+				fileSecrets, _ := withFetchSpinner(ctx, status, "Fetching file secrets…", func(ctx context.Context) ([]verda.FileSecret, error) {
+					return cache.fetchFileSecrets(ctx, getClient)
+				})
 				if len(secrets)+len(fileSecrets) == 0 {
 					_, _ = prompter.Confirm(ctx, "No secrets available in this project. Press Enter to continue.", tui.WithConfirmDefault(true))
 					return nil, nil

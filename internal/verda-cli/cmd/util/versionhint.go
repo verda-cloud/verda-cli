@@ -125,6 +125,24 @@ func FetchLatestVersion(ctx context.Context) (string, error) {
 	return release.TagName, nil
 }
 
+// CheckVersionFromCache returns the cached latest version and the current
+// version without ever touching the network. Used by hot paths like `verda`
+// and `verda --help` where blocking on a GitHub fetch would visibly slow the
+// CLI. If the cache is empty or unreadable, latest is "" and the caller will
+// simply print no hint.
+func CheckVersionFromCache() (latest, current string, err error) {
+	cachePath, err := VersionCachePath()
+	if err != nil {
+		return "", "", err
+	}
+	cache, err := LoadVersionCache(cachePath)
+	if err != nil {
+		return "", "", err
+	}
+	current = currentVersion()
+	return cache.LatestVersion, current, nil
+}
+
 // CheckVersion loads the version cache, fetches if stale (24h TTL), saves the
 // cache, and returns the latest and current versions. On fetch error it falls
 // back to the cached value.
@@ -157,12 +175,19 @@ func CheckVersion(ctx context.Context) (latest, current string, err error) {
 		// fetchErr != nil && cache.LatestVersion != "": fall back to cached value
 	}
 
-	current = version.Get().GitVersion
-	if !strings.HasPrefix(current, "v") {
-		current = "v" + current
-	}
+	current = currentVersion()
 
 	return latest, current, nil
+}
+
+// currentVersion returns the running CLI version, ensuring a "v" prefix so it
+// compares cleanly against tag names from the GitHub releases API.
+func currentVersion() string {
+	v := version.Get().GitVersion
+	if !strings.HasPrefix(v, "v") {
+		v = "v" + v
+	}
+	return v
 }
 
 // PrintVersionHint prints an update hint to w if latest > current.
@@ -178,7 +203,7 @@ func CompareVersions(a, b string) int {
 	aParts := parseSemver(a)
 	bParts := parseSemver(b)
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if aParts[i] < bParts[i] {
 			return -1
 		}

@@ -19,7 +19,31 @@ import (
 	"fmt"
 
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
+	"github.com/verda-cloud/verdagostack/pkg/tui"
 )
+
+// withFetchSpinner runs fn while showing a spinner labeled msg. If status is
+// nil (e.g. tests with no TUI) or the spinner can't start, fn still runs.
+// Used by wizard loaders so the API calls hidden inside cache fetchers
+// (compute resources, registry creds, secrets) show progress instead of
+// looking like a hang while the API responds.
+func withFetchSpinner[T any](ctx context.Context, status tui.Status, msg string, fn func(context.Context) (T, error)) (T, error) {
+	var zero T
+	if status == nil {
+		return fn(ctx)
+	}
+	sp, err := status.Spinner(ctx, msg)
+	if err != nil {
+		return fn(ctx)
+	}
+	res, ferr := fn(ctx)
+	if ferr != nil {
+		sp.Stop("")
+		return zero, ferr
+	}
+	sp.Stop("")
+	return res, nil
+}
 
 // clientFunc lazily resolves a Verda API client. Early wizard steps (name,
 // image, port, replicas) run without credentials; the client is dialed only

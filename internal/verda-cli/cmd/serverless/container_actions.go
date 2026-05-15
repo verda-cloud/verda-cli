@@ -27,10 +27,12 @@ import (
 // containerActionFn executes a lifecycle action on a named container deployment.
 type containerActionFn func(ctx context.Context, client *verda.Client, name string) error
 
-// newContainerActionCmd builds a `verda serverless container <verb>` command
+// newContainerActionCmd builds a `verda container <verb>` command
 // whose only behavior is to call the given SDK method with the resolved name.
 // All four lifecycle commands (pause/resume/restart/purge-queue) share this shape.
-func newContainerActionCmd(f cmdutil.Factory, ioStreams cmdutil.IOStreams, verb, short, spinner, successMsg string, destructive bool, fn containerActionFn) *cobra.Command {
+// detailMsg is a Sprintf template with one %q for the deployment name; it is
+// only consulted for destructive verbs (used in the confirm prompt detail).
+func newContainerActionCmd(f cmdutil.Factory, ioStreams cmdutil.IOStreams, verb, short, spinner, successMsg, detailMsg string, destructive bool, fn containerActionFn) *cobra.Command {
 	var yes bool
 	cmd := &cobra.Command{
 		Use:   verb + " <name>",
@@ -41,7 +43,7 @@ func newContainerActionCmd(f cmdutil.Factory, ioStreams cmdutil.IOStreams, verb,
 			if err != nil || name == "" {
 				return err
 			}
-			return runContainerAction(cmd, f, ioStreams, name, verb, spinner, successMsg, destructive, yes, fn)
+			return runContainerAction(cmd, f, ioStreams, name, verb, spinner, successMsg, detailMsg, destructive, yes, fn)
 		},
 	}
 	if destructive {
@@ -50,26 +52,27 @@ func newContainerActionCmd(f cmdutil.Factory, ioStreams cmdutil.IOStreams, verb,
 	return cmd
 }
 
-func runContainerAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, name, verb, spinner, successMsg string, destructive, yes bool, fn containerActionFn) error {
+func runContainerAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, name, verb, spinner, successMsg, detailMsg string, destructive, yes bool, fn containerActionFn) error {
 	client, err := f.VerdaClient()
 	if err != nil {
 		return err
 	}
 
-	if destructive {
-		if f.AgentMode() && !yes {
-			return cmdutil.NewConfirmationRequiredError(verb)
+	if destructive && f.AgentMode() && !yes {
+		return cmdutil.NewConfirmationRequiredError(verb)
+	}
+	if destructive && !yes {
+		confirmed, err := confirmDestructive(cmd.Context(), ioStreams, f.Prompter(),
+			verb+" container deployment",
+			fmt.Sprintf(detailMsg, name),
+			fmt.Sprintf("%s %s?", verb, name),
+		)
+		if err != nil {
+			return err
 		}
-		if !yes {
-			confirmed, err := confirmDestructive(cmd.Context(), ioStreams, f.Prompter(),
-				verb+" container deployment",
-				fmt.Sprintf("Deployment %q will be %sd.", name, verb),
-				fmt.Sprintf("%s %s?", verb, name),
-			)
-			if err != nil || !confirmed {
-				_, _ = fmt.Fprintln(ioStreams.ErrOut, "Canceled.")
-				return nil
-			}
+		if !confirmed {
+			_, _ = fmt.Fprintln(ioStreams.ErrOut, "Canceled.")
+			return nil
 		}
 	}
 
@@ -95,7 +98,7 @@ func runContainerAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil
 
 func newCmdContainerPause(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 	return newContainerActionCmd(f, ioStreams,
-		"pause", "Pause a container deployment", "Pausing", "Paused deployment %q", false,
+		"pause", "Pause a container deployment", "Pausing", "Paused deployment %q", "", false,
 		func(ctx context.Context, c *verda.Client, name string) error {
 			return c.ContainerDeployments.PauseDeployment(ctx, name)
 		},
@@ -104,7 +107,7 @@ func newCmdContainerPause(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra
 
 func newCmdContainerResume(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 	return newContainerActionCmd(f, ioStreams,
-		"resume", "Resume a paused container deployment", "Resuming", "Resumed deployment %q", false,
+		"resume", "Resume a paused container deployment", "Resuming", "Resumed deployment %q", "", false,
 		func(ctx context.Context, c *verda.Client, name string) error {
 			return c.ContainerDeployments.ResumeDeployment(ctx, name)
 		},
@@ -113,7 +116,8 @@ func newCmdContainerResume(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobr
 
 func newCmdContainerRestart(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 	return newContainerActionCmd(f, ioStreams,
-		"restart", "Restart a container deployment", "Restarting", "Restarted deployment %q", true,
+		"restart", "Restart a container deployment", "Restarting", "Restarted deployment %q",
+		"Deployment %q will be restarted.", true,
 		func(ctx context.Context, c *verda.Client, name string) error {
 			return c.ContainerDeployments.RestartDeployment(ctx, name)
 		},
@@ -122,7 +126,8 @@ func newCmdContainerRestart(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cob
 
 func newCmdContainerPurgeQueue(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 	return newContainerActionCmd(f, ioStreams,
-		"purge-queue", "Purge the pending-request queue for a container deployment", "Purging queue for", "Purged queue for deployment %q", true,
+		"purge-queue", "Purge the pending-request queue for a container deployment", "Purging queue for", "Purged queue for deployment %q",
+		"Queue for deployment %q will be purged.", true,
 		func(ctx context.Context, c *verda.Client, name string) error {
 			return c.ContainerDeployments.PurgeDeploymentQueue(ctx, name)
 		},
