@@ -22,6 +22,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
+	"github.com/verda-cloud/verdagostack/pkg/tui"
 
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
@@ -105,7 +106,16 @@ func runList(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams,
 	}
 
 	_, _ = fmt.Fprintf(ioStreams.ErrOut, "  %d instance(s) found\n\n", len(instances))
+	return runListInteractive(cmd, f, ioStreams, client, instances)
+}
 
+func runListInteractive(
+	cmd *cobra.Command,
+	f cmdutil.Factory,
+	ioStreams cmdutil.IOStreams,
+	client *verda.Client,
+	instances []verda.Instance,
+) error {
 	prompter := f.Prompter()
 	labels := make([]string, 0, len(instances)+1)
 	for i := range instances {
@@ -114,15 +124,17 @@ func runList(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams,
 	labels = append(labels, "Exit")
 
 	for {
-		idx, err := prompter.Select(cmd.Context(), "Select instance (type to filter)", labels)
+		idx, err := prompter.Select(cmd.Context(), "Select instance (type to filter)", labels, tui.WithShowHints(true))
 		if err != nil {
-			return nil
+			if cmdutil.IsPromptCancel(err) {
+				return nil // Esc / Ctrl+C at top level = clean exit
+			}
+			return err
 		}
 		if idx == len(instances) { // "Exit"
 			return nil
 		}
 
-		// Fetch fresh details and volumes.
 		inst, err := client.Instances.GetByID(cmd.Context(), instances[idx].ID)
 		if err != nil {
 			_, _ = fmt.Fprintf(ioStreams.ErrOut, "Error: %v\n", err)
@@ -131,17 +143,29 @@ func runList(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams,
 		volumes := fetchInstanceVolumes(cmd.Context(), client, inst)
 		_, _ = fmt.Fprint(ioStreams.Out, renderInstanceCard(inst, volumes...))
 
-		// Pause on the instance card until the user picks an explicit next step.
-		// Without this gate the loop re-enters Select immediately and the TUI
-		// redraw wipes the card.
-		nextIdx, nerr := prompter.Select(cmd.Context(), "", []string{"Back to list", "Exit"})
-		if nerr != nil {
-			return nil
+		exit, perr := promptBackOrExit(cmd.Context(), prompter)
+		if perr != nil {
+			return perr
 		}
-		if nextIdx == 1 {
+		if exit {
 			return nil
 		}
 	}
+}
+
+// promptBackOrExit: Esc returns to the list; Ctrl+C exits without confirmation.
+func promptBackOrExit(ctx context.Context, prompter tui.Prompter) (exit bool, err error) {
+	nextIdx, nerr := prompter.Select(ctx, "", []string{"Back to list", "Exit"}, tui.WithShowHints(true))
+	if nerr != nil {
+		if cmdutil.IsPromptInterrupt(nerr) {
+			return true, nil // Ctrl+C = exit
+		}
+		if cmdutil.IsPromptBack(nerr) {
+			return false, nil // Esc = back to list
+		}
+		return false, nerr
+	}
+	return nextIdx == 1, nil
 }
 
 // fetchInstanceVolumes fetches volume details for an instance's attached volumes.

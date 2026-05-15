@@ -27,9 +27,7 @@ import (
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
 
-// batchjobCreateOptions is the simpler sibling of containerCreateOptions: no
-// spot flag (jobs never run on spot), no continuous-scaling parameters, and a
-// required deadline. Otherwise mirrors the container shape.
+// batchjobCreateOptions: like containerCreateOptions minus spot/scaling knobs; deadline required.
 type batchjobCreateOptions struct {
 	Name  string
 	Image string
@@ -107,11 +105,7 @@ func newCmdBatchjobCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra
 }
 
 func runBatchjobCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *batchjobCreateOptions) error {
-	client, err := f.VerdaClient()
-	if err != nil {
-		return err
-	}
-
+	// Same agent-mode ordering as container create (flags before client).
 	if f.AgentMode() {
 		if missing := missingBatchjobCreateFlags(opts); len(missing) > 0 {
 			return cmdutil.NewMissingFlagsError(missing)
@@ -120,6 +114,11 @@ func runBatchjobCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.
 		if err := runBatchjobWizard(cmd.Context(), f, ioStreams, opts); err != nil {
 			return err
 		}
+	}
+
+	client, err := f.VerdaClient()
+	if err != nil {
+		return err
 	}
 
 	req, err := opts.request()
@@ -160,9 +159,7 @@ func runBatchjobCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.
 	return nil
 }
 
-// runBatchjobWizard drives the batchjob create flow and fills any fields the
-// user hasn't pre-set via flags. Shares nine of its ten steps with the
-// container wizard; the only batchjob-specific step is the deadline.
+// runBatchjobWizard fills gaps; shares most steps with container create (+deadline).
 func runBatchjobWizard(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *batchjobCreateOptions) error {
 	flow := buildBatchjobCreateFlow(ctx, f.VerdaClient, opts)
 	engine := wizard.NewEngine(f.Prompter(), f.Status(),
@@ -226,9 +223,7 @@ func (o *batchjobCreateOptions) request() (*verda.CreateJobDeploymentRequest, er
 		}
 	}
 
-	// CreateJobDeploymentRequest.ContainerRegistrySettings is a pointer (unlike
-	// the container variant, which is a value with IsPrivate:false for public).
-	// Pass nil for public images so the field is omitted from the request body.
+	// Nil omits registry JSON for public pulls (job requests use a pointer field).
 	registry := (*verda.ContainerRegistrySettings)(nil)
 	if o.RegistryCreds != "" {
 		registry = &verda.ContainerRegistrySettings{

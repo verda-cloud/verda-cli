@@ -82,9 +82,7 @@ func runDoctor(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 	// 3. Authentication valid (skip if creds or API failed)
 	authResult := checkAuthentication(f, credResult, apiResult)
 
-	// The CLI-version check is the slowest step (GitHub API round-trip).
-	// Show a spinner so users know the command is working — without it,
-	// doctor sits silent for up to ~2s.
+	// CLI update check hits GitHub; spinner covers ~2s of silence.
 	versionResult, _ := cmdutil.WithSpinner(ctx, f.Status(), "Checking for CLI updates...", func() (checkResult, error) {
 		return checkCLIVersion(ctx), nil
 	})
@@ -93,10 +91,10 @@ func runDoctor(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 		credResult,
 		apiResult,
 		authResult,
-		versionResult,          // 4. CLI up to date
-		checkBinaryInstalled(), // 5. Binary installed
-		checkTemplatesDir(),    // 6. Templates directory
-		checkConfigDir(),       // 7. Config directory
+		versionResult,
+		checkBinaryInstalled(),
+		checkTemplatesDir(),
+		checkConfigDir(),
 	}
 
 	r := report{Checks: checks}

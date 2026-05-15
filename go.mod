@@ -102,3 +102,11 @@ require (
 	golang.org/x/sys v0.43.0 // indirect
 	golang.org/x/text v0.35.0 // indirect
 )
+
+// TEMPORARY local replace — required while verdagostack hosts the new
+// SelectConfig hint-bar fields (WithShowHints) and the LiveList primitive
+// in its working tree but has not yet cut a release. Drop this directive
+// and bump the require line above once verdagostack publishes the version
+// containing both APIs. The branch will not build on a fresh machine
+// without ../verdagostack checked out and up-to-date.
+replace github.com/verda-cloud/verdagostack => ../verdagostack

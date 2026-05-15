@@ -26,12 +26,10 @@ const (
 	containerStatusCacheTTL         = 30 * time.Second
 	containerStatusFetchConcurrency = 5
 	containerStatusUnknown          = "-"
+	containerStatusLoading          = "..." // placeholder until LiveList status RPC completes
 )
 
-// containerStatusCache holds deployment status strings keyed by name with a
-// per-entry TTL. The API list endpoint does not include status, so the CLI
-// fetches it per-deployment in parallel; the cache lets the interactive loop
-// reuse those results across iterations without hammering the API.
+// containerStatusCache: per-name status + TTL because list RPC omits status.
 type containerStatusCache struct {
 	mu      sync.Mutex
 	entries map[string]containerStatusEntry
@@ -84,9 +82,7 @@ func (c *containerStatusCache) anyStale(deployments []verda.ContainerDeployment)
 	return false
 }
 
-// refresh fetches status for any cache entries that are absent or stale,
-// bounded by containerStatusFetchConcurrency. Fetch errors fall back to
-// containerStatusUnknown so the row still renders.
+// refresh fills missing/stale entries concurrently; errors become "-".
 func (c *containerStatusCache) refresh(ctx context.Context, client *verda.Client, deployments []verda.ContainerDeployment) {
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, containerStatusFetchConcurrency)

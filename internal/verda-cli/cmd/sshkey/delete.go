@@ -19,6 +19,7 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
+	"github.com/verda-cloud/verdagostack/pkg/tui"
 
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
@@ -98,7 +99,7 @@ func runDelete(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 		}
 		labels = append(labels, "Cancel")
 
-		idx, err := prompter.Select(ctx, "Select SSH key to delete", labels)
+		idx, err := prompter.Select(ctx, "Select SSH key to delete", labels, tui.WithShowHints(true))
 		if err != nil {
 			return nil
 		}

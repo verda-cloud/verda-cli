@@ -21,6 +21,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/spf13/cobra"
+	"github.com/verda-cloud/verdagostack/pkg/tui"
 
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/options"
@@ -432,7 +433,7 @@ func runDeleteInteractive(ctx context.Context, f cmdutil.Factory, ioStreams cmdu
 		}
 		labels = append(labels, "Exit")
 
-		idx, err := prompter.Select(ctx, "Select repository to manage (type to filter)", labels)
+		idx, err := prompter.Select(ctx, "Select repository to manage (type to filter)", labels, tui.WithShowHints(true))
 		if err != nil {
 			return nil //nolint:nilerr // intentional: prompter cancel is a clean exit
 		}
@@ -481,7 +482,7 @@ func runDeleteRepoMenu(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil
 
 	for {
 		idx, err := prompter.Select(ctx,
-			fmt.Sprintf("What would you like to delete in %s?", repo.Name), choices)
+			fmt.Sprintf("What would you like to delete in %s?", repo.Name), choices, tui.WithShowHints(true))
 		if err != nil {
 			return true, nil //nolint:nilerr // intentional: prompter cancel is a clean exit
 		}

@@ -46,8 +46,7 @@ func TestSkipCredentialResolution_RegistryChildren(t *testing.T) {
 }
 
 func TestShouldCheckVersion(t *testing.T) {
-	// newCmd returns a *cobra.Command whose Name() is `name` (cobra derives
-	// Name from the first token of Use).
+	// cobra.Command.Name comes from the first word of Use.
 	newCmd := func(name string) *cobra.Command { return &cobra.Command{Use: name} }
 
 	for _, tc := range []struct {
@@ -55,19 +54,14 @@ func TestShouldCheckVersion(t *testing.T) {
 		cmd  *cobra.Command
 		want bool
 	}{
-		// ---- Yes: help paths read from the cache to print a hint. ----
 		{"help", newCmd("help"), true},
 		{"verda root (bare)", newCmd("verda"), true},
 
-		// ---- No: doctor / update print their own version info (with
-		// spinners) — a trailing duplicate hint would just be noise.
 		{"doctor", newCmd("doctor"), false},
 		{"update", newCmd("update"), false},
 
-		// ---- No: resource / business commands. They must NEVER do a
-		// network fetch or even read the cache to print a cosmetic hint.
 		{"vm", newCmd("vm"), false},
-		{"vm list", newCmd("list"), false}, // subcommand runs with its own Name
+		{"vm list", newCmd("list"), false}, // leaf Name() is "list", not parent path
 		{"vccr/registry", newCmd("registry"), false},
 		{"s3", newCmd("s3"), false},
 		{"volume", newCmd("volume"), false},
@@ -77,8 +71,6 @@ func TestShouldCheckVersion(t *testing.T) {
 		{"completion", newCmd("completion"), false},
 		{"settings", newCmd("settings"), false},
 
-		// Previously these short-circuited with an early return in PostRun;
-		// with the new gate, shouldCheckVersion just returns false for them.
 		{"mcp", newCmd("mcp"), false},
 		{"skills", newCmd("skills"), false},
 	} {

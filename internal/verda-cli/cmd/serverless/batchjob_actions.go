@@ -26,8 +26,8 @@ import (
 
 type batchjobActionFn func(ctx context.Context, client *verda.Client, name string) error
 
-// detailMsg is a Sprintf template with one %q for the deployment name; it is
-// only consulted for destructive verbs (used in the confirm prompt detail).
+// newBatchjobActionCmd mirrors newContainerActionCmd for batch-job deployments.
+// detailMsg is optional fmt template with one %q for the deployment name (destructive confirms only).
 func newBatchjobActionCmd(f cmdutil.Factory, ioStreams cmdutil.IOStreams, verb, short, spinner, successMsg, detailMsg string, destructive bool, fn batchjobActionFn) *cobra.Command {
 	var yes bool
 	cmd := &cobra.Command{

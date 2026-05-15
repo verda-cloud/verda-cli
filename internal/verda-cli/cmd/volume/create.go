@@ -110,7 +110,7 @@ func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 		if vt, ok := vtMap[verda.VolumeTypeHDD]; ok && vt.Price.PricePerMonthPerGB > 0 {
 			hddLabel = fmt.Sprintf("HDD (large capacity)  $%.2f/GB/mo", vt.Price.PricePerMonthPerGB)
 		}
-		idx, err := prompter.Select(ctx, "Volume type", []string{nvmeLabel, hddLabel})
+		idx, err := prompter.Select(ctx, "Volume type", []string{nvmeLabel, hddLabel}, tui.WithShowHints(true))
 		if err != nil {
 			return nil
 		}
@@ -161,7 +161,7 @@ func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 		for i, loc := range locations {
 			labels[i] = fmt.Sprintf("%s (%s)", loc.Code, loc.Name)
 		}
-		idx, err := prompter.Select(ctx, "Location", labels)
+		idx, err := prompter.Select(ctx, "Location", labels, tui.WithShowHints(true))
 		if err != nil {
 			return nil
 		}

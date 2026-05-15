@@ -85,11 +85,8 @@ func SaveVersionCache(path string, c *VersionCache) error {
 	return os.WriteFile(path, data, 0o644) //nolint:gosec // version cache is not sensitive
 }
 
-// FetchLatestVersion queries the GitHub releases API for the latest release
-// tag of verda-cli. The per-request timeout is intentionally tight (2s): the
-// only callers are `doctor`, `update`, and help/root — if GitHub is slow or
-// unreachable we'd rather skip the hint than make the user wait, and a live
-// CLI on a reachable network comfortably returns in well under 2s.
+// FetchLatestVersion returns the latest verda-cli release tag from GitHub.
+// Uses a 2s timeout so slow/unreachable GitHub fails fast instead of stalling UX.
 func FetchLatestVersion(ctx context.Context) (string, error) {
 	const url = "https://api.github.com/repos/verda-cloud/verda-cli/releases/latest"
 
@@ -125,11 +122,8 @@ func FetchLatestVersion(ctx context.Context) (string, error) {
 	return release.TagName, nil
 }
 
-// CheckVersionFromCache returns the cached latest version and the current
-// version without ever touching the network. Used by hot paths like `verda`
-// and `verda --help` where blocking on a GitHub fetch would visibly slow the
-// CLI. If the cache is empty or unreadable, latest is "" and the caller will
-// simply print no hint.
+// CheckVersionFromCache reads ~/.verda/version-check.json only—no network.
+// Empty cache yields latest "" and callers skip the hint.
 func CheckVersionFromCache() (latest, current string, err error) {
 	cachePath, err := VersionCachePath()
 	if err != nil {
@@ -172,7 +166,7 @@ func CheckVersion(ctx context.Context) (latest, current string, err error) {
 			cache.CheckedAt = time.Now()
 			_ = SaveVersionCache(cachePath, cache) // best-effort
 		}
-		// fetchErr != nil && cache.LatestVersion != "": fall back to cached value
+		// Stale fetch with retained cache: keep serving cached latest.
 	}
 
 	current = currentVersion()

@@ -15,9 +15,16 @@
 package serverless
 
 import (
+	"bytes"
+	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/spf13/cobra"
+
+	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
 
 func validJobOpts() *batchjobCreateOptions {
@@ -82,5 +89,30 @@ func TestBatchjobMissingFlags(t *testing.T) {
 		if missing[i] != w {
 			t.Errorf("missing[%d]: got %q, want %q", i, missing[i], w)
 		}
+	}
+}
+
+// TestBatchjobCreate_AgentMode_NoCredsReturnsMissingFlags ensures agent mode validates flags before auth.
+func TestBatchjobCreate_AgentMode_NoCredsReturnsMissingFlags(t *testing.T) {
+	f := cmdutil.NewTestFactory(nil)
+	f.AgentModeOverride = true
+
+	ioStreams := cmdutil.IOStreams{In: nil, Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}
+	cmd := &cobra.Command{}
+	cmd.SetContext(context.Background())
+
+	err := runBatchjobCreate(cmd, f, ioStreams, &batchjobCreateOptions{})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	var agentErr *cmdutil.AgentError
+	if !errors.As(err, &agentErr) {
+		t.Fatalf("expected *cmdutil.AgentError, got %T: %v", err, err)
+	}
+	if agentErr.Code != "MISSING_REQUIRED_FLAGS" {
+		t.Fatalf("expected MISSING_REQUIRED_FLAGS, got code=%q msg=%q", agentErr.Code, agentErr.Message)
+	}
+	if errors.Is(err, cmdutil.ErrNoClient) {
+		t.Fatalf("auth error leaked through — agent-mode flag check must run before VerdaClient: %v", err)
 	}
 }

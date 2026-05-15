@@ -27,11 +27,9 @@ import (
 //go:embed verda-logo.png
 var verdaLogoPNG []byte
 
-// printBanner renders the embedded Verda logo via the iTerm2 inline image
-// escape sequence when out is a TTY on a known-supporting terminal. Skipped
-// silently in every other case — pipes, narrow terminals, non-supporting
-// terminals like VS Code or stock Terminal.app — because terminals that do
-// not understand OSC 1337 would print the sequence as garbage.
+// printBanner draws the embedded logo via iTerm2 inline-image OSC when stdout
+// is a TTY and the terminal is known to support it; otherwise it no-ops so
+// unsupported terminals never print raw escape garbage.
 func printBanner(out io.Writer) {
 	f, ok := out.(*os.File)
 	if !ok || !term.IsTerminal(f.Fd()) {
@@ -41,16 +39,14 @@ func printBanner(out io.Writer) {
 		return
 	}
 	enc := base64.StdEncoding.EncodeToString(verdaLogoPNG)
-	// height in cells; width auto via preserveAspectRatio.
+	// Height in terminal rows; width follows aspect ratio.
 	_, _ = fmt.Fprintf(f,
 		"\x1b]1337;File=inline=1;height=6;preserveAspectRatio=1:%s\x07\n\n",
 		enc)
 }
 
-// supportsITermImageProtocol reports whether the current terminal accepts
-// iTerm2's inline image escape. Detection is by-name only: spoofable, but
-// the failure mode (escape printed verbatim) is purely visual, and an
-// unrecognized terminal silently shows no banner.
+// supportsITermImageProtocol is best-effort TERM_PROGRAM/LC_TERMINAL sniffing.
+// Wrong guesses omit the banner or print a stray escape; data paths are unaffected.
 func supportsITermImageProtocol() bool {
 	switch os.Getenv("TERM_PROGRAM") {
 	case "iTerm.app", "WezTerm":

@@ -28,10 +28,7 @@ import (
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
 
-// deploymentNameRE matches an RFC-1123 subset suitable for a public URL slug:
-// lowercase alphanumerics and hyphens, must start and end with alphanumeric,
-// max 63 characters. This is the contract the Verda backend enforces for
-// deployment names (they become part of https://containers.datacrunch.io/<name>).
+// deploymentNameRE: lowercase DNS-label subset (max 63) enforced by the API for URL slugs.
 var deploymentNameRE = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
 
 // validateDeploymentName returns an error if the given name is not a valid
@@ -48,9 +45,7 @@ func validateDeploymentName(name string) error {
 	return nil
 }
 
-// rejectLatestTag returns an error if the image reference uses the ':latest'
-// tag (explicit or implicit). The API rejects latest-tagged deployments; we
-// fail fast so users see a friendly error instead of a validation 400.
+// rejectLatestTag fails fast on :latest before the API returns a generic 400.
 func rejectLatestTag(image string) error {
 	if verda.IsLatestTag(image) {
 		return fmt.Errorf("container image %q must use a specific tag, not ':latest'", image)

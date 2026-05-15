@@ -106,7 +106,7 @@ func runVolumeAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IO
 	}
 	labels = append(labels, "Cancel")
 
-	idx, err := prompter.Select(ctx, "Select action", labels)
+	idx, err := prompter.Select(ctx, "Select action", labels, tui.WithShowHints(true))
 	if err != nil {
 		return nil
 	}
@@ -277,7 +277,7 @@ func selectVolume(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOSt
 	}
 	labels = append(labels, "Cancel")
 
-	idx, err := f.Prompter().Select(ctx, "Select volume (type to filter)", labels)
+	idx, err := f.Prompter().Select(ctx, "Select volume (type to filter)", labels, tui.WithShowHints(true))
 	if err != nil {
 		return "", nil //nolint:nilerr // User pressed Esc/Ctrl+C during prompt.
 	}

@@ -27,11 +27,8 @@ import (
 // containerActionFn executes a lifecycle action on a named container deployment.
 type containerActionFn func(ctx context.Context, client *verda.Client, name string) error
 
-// newContainerActionCmd builds a `verda container <verb>` command
-// whose only behavior is to call the given SDK method with the resolved name.
-// All four lifecycle commands (pause/resume/restart/purge-queue) share this shape.
-// detailMsg is a Sprintf template with one %q for the deployment name; it is
-// only consulted for destructive verbs (used in the confirm prompt detail).
+// newContainerActionCmd builds container <verb> commands sharing resolve + confirm plumbing.
+// detailMsg is optional fmt template with one %q for the deployment name (destructive confirms only).
 func newContainerActionCmd(f cmdutil.Factory, ioStreams cmdutil.IOStreams, verb, short, spinner, successMsg, detailMsg string, destructive bool, fn containerActionFn) *cobra.Command {
 	var yes bool
 	cmd := &cobra.Command{

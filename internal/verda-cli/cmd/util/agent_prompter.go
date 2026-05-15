@@ -47,6 +47,20 @@ func (p *agentPrompter) MultiSelect(_ context.Context, prompt string, choices []
 	return nil, NewPromptBlockedError("multi_select", prompt, choices)
 }
 
+func (p *agentPrompter) LiveList(
+	_ context.Context,
+	prompt string,
+	rows []tui.LiveRow,
+	_ <-chan tui.LiveListUpdate,
+	_ ...tui.LiveListOption,
+) (int, error) {
+	labels := make([]string, len(rows))
+	for i, r := range rows {
+		labels[i] = r.Label
+	}
+	return -1, NewPromptBlockedError("live_list", prompt, labels)
+}
+
 func (p *agentPrompter) Editor(_ context.Context, prompt string, _ ...tui.EditorOption) (string, error) {
 	return "", NewPromptBlockedError("editor", prompt, nil)
 }

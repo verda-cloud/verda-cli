@@ -23,6 +23,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/spf13/cobra"
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
+	"github.com/verda-cloud/verdagostack/pkg/tui"
 
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
@@ -44,9 +45,7 @@ func newCmdContainerDescribe(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *co
 	return cmd
 }
 
-// resolveContainerName returns the first positional arg when present; otherwise
-// prompts interactively. Agent mode returns a MISSING_REQUIRED_FLAGS error when
-// no name is supplied because prompts are blocked.
+// resolveContainerName: args[0], else picker; agent requires <name>.
 func resolveContainerName(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, args []string) (string, error) {
 	if len(args) > 0 {
 		return args[0], nil
@@ -57,8 +56,7 @@ func resolveContainerName(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdut
 	return selectContainerDeployment(cmd.Context(), f, ioStreams)
 }
 
-// selectContainerDeployment loads all container deployments and runs a single-select
-// picker. Returns "" (no error) when the user cancels or there are no deployments.
+// selectContainerDeployment prompts for a deployment; cancel/empty list → "", nil.
 func selectContainerDeployment(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams) (string, error) {
 	client, err := f.VerdaClient()
 	if err != nil {
@@ -90,7 +88,7 @@ func selectContainerDeployment(ctx context.Context, f cmdutil.Factory, ioStreams
 	}
 	labels = append(labels, "Cancel")
 
-	idx, err := f.Prompter().Select(ctx, "Select container deployment", labels)
+	idx, err := f.Prompter().Select(ctx, "Select container deployment", labels, tui.WithShowHints(true))
 	if err != nil {
 		if isPromptCancel(err) {
 			return "", nil
@@ -119,7 +117,7 @@ func runContainerDescribe(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdut
 		return fmt.Errorf("fetching deployment: %w", err)
 	}
 
-	// Best-effort status fetch — don't fail the describe if status errors.
+	// Describe still succeeds if status RPC fails.
 	var status string
 	s, statusErr := client.ContainerDeployments.GetDeploymentStatus(ctx, name)
 	if statusErr == nil && s != nil {
@@ -128,11 +126,7 @@ func runContainerDescribe(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdut
 
 	cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), "Deployment:", deployment)
 
-	// Embed promotes the SDK's fields plus our outer Status. encoding/json gives
-	// the shallowest field precedence, so if the SDK grows its own json:"status"
-	// the outer Status here still wins — but the embedded value would silently
-	// disappear from output. If the SDK ever exposes a Status on the deployment
-	// itself, drop the embed and enumerate fields explicitly here.
+	// Embed adds Status alongside SDK fields; if SDK gains json:"status", switch to explicit fields.
 	if wrote, werr := cmdutil.WriteStructured(ioStreams.Out, f.OutputFormat(), struct {
 		*verda.ContainerDeployment
 		Status string `json:"status,omitempty"`

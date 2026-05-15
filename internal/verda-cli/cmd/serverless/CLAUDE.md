@@ -2,16 +2,32 @@
 
 > Go house style lives in the root `CLAUDE.md` § "Go House Style". This file carries serverless-specific idioms only — see below for the two-SDK-service split, scaling-preset math, the "spot = container-only" invariant, and the fixed-storage contract that do not apply elsewhere.
 
+## ⚠️ Wire-Format Tests Must Stay in Sync (HARD RULE)
+
+**Any change to the create-request payload must come with a matching update to `wire_format_test.go`.** That file is the only test layer that catches bugs the SDK's `ValidateCreate*DeploymentRequest` does not (e.g. the `type:"shared"` → `volume_id` 400 we hit in production). `opts.request()` unit tests check field assembly in Go; the wire-format tests check the JSON the API actually receives.
+
+What "change to the create-request payload" covers:
+- Adding/removing/renaming any field on `containerCreateOptions` or `batchjobCreateOptions` that flows into `request()`.
+- Changing `buildVolumeMounts`, `buildEnvVars`, `buildContainerScaling`, or any helper that contributes to the request body.
+- Changing mount-type constants in `shared.go`, the SDK type tags, or the API path.
+- Adding new flags whose values appear in the request.
+
+What to do when you change the flow:
+1. Update `wire_format_test.go` so the assertions describe the *new* expected JSON, not the old one. Don't relax an assertion just to make it pass — that defeats the test.
+2. If you added a flag, add a focused wire-format case for the non-default value (like `TestContainerCreate_SecretMountWireFormat` does for `--secret-mount`).
+3. Run `make test`. If wire-format tests fail and you can't explain *why* the new JSON is correct, the production API will reject the request — go back and fix the flow before touching the test.
+
+This rule applies equally to Claude, Codex, Cursor, or a human editing the package. Reviewers should reject any PR that changes the create flow without also changing the wire-format tests.
+
 ## Quick Reference
 
-- Parent: `verda serverless` (no aliases)
-- Subcommands:
-  - `verda serverless container` → `/container-deployments` (continuous endpoints, supports spot)
-  - `verda serverless batchjob` → `/job-deployments` (one-shot jobs, deadline-based, **no spot**)
+- **Two top-level commands**, both registered in `cmd/cmd.go` under the "Serverless Commands" group:
+  - `verda container` → `/container-deployments` (continuous endpoints, supports spot)
+  - `verda batchjob` → `/job-deployments` (one-shot jobs, deadline-based, **no spot**)
+- There is **no** `verda serverless` parent command — the two trees were promoted to root for shorter invocations. They still share this Go package because they share wizard step factories, validators, and the API cache.
 - Verbs (both trees): `create`, `list` (alias `ls`), `describe` (aliases `get`, `show`), `delete` (aliases `rm`, `del`), `pause`, `resume`, `purge-queue`. Container also has `restart`.
 - Files:
-  - `serverless.go` — Parent command. Registered in `cmd/cmd.go` under the "Serverless Commands" group. **No feature gate, no `Hidden: true`** — this is a GA feature, unlike s3/registry.
-  - `container.go`, `batchjob.go` — Subcommand parents.
+  - `container.go`, `batchjob.go` — Top-level command builders. `NewCmdContainer` and `NewCmdBatchjob` are exported and called directly from `cmd/cmd.go`. **No feature gate, no `Hidden: true`** — this is a GA feature, unlike s3/registry.
   - `container_create.go` — `containerCreateOptions`, flags, `request()`, validate(), wizard entry point.
   - `container_list.go` — `GetDeployments` + tabwriter + structured output.
   - `container_describe.go` — `GetDeploymentByName` + `GetDeploymentStatus` (best-effort) + `selectContainerDeployment` picker.
@@ -21,7 +37,7 @@
   - `batchjob_list.go`, `batchjob_describe.go`, `batchjob_delete.go`, `batchjob_actions.go` — Same shape as container, trimmed.
   - `shared.go` — `validateDeploymentName` (RFC-1123 subset), `rejectLatestTag`, `parseEnvFlag`, `parseSecretMountFlag`, `confirmDestructive`, `statusColor`, `mountType*` + `envType*` constants.
   - `wizard_shared.go` — Step builders shared by both create wizards: `stepName`, `stepImage`, `stepCompute`, `stepComputeSize`, `stepRegistryCreds`, `stepPort`, `stepEnvVars`, `stepMaxReplicas`, `stepRequestTTL`, `stepSecretMounts`. Plus the generic `durationStep` helper and three int validators. Each takes a `*T` pointer to the field it mutates, so the same step definition drives both `containerCreateOptions` and `batchjobCreateOptions`.
-  - `wizard.go` — `buildContainerCreateFlow` + container-only steps: spot/compute-type, healthcheck on/off/port/path (3 sub-steps with `ShouldSkip` on the parent), min-replicas, concurrency, queue-load preset + custom override, CPU/GPU util triggers, scale-up/down delays. 22 total steps in the container flow.
+  - `wizard.go` — `buildContainerCreateFlow` + container-only steps: spot/compute-type, healthcheck on/off + path (port is NOT prompted; it always defaults to the exposed port in `request()`), min-replicas, concurrency, queue-load preset + custom override, CPU/GPU util triggers, scale-up/down delays. 21 total steps in the container flow.
   - `wizard_batchjob.go` — `buildBatchjobCreateFlow` + `stepBatchjobDeadline`. 11 total steps: 10 reused from `wizard_shared.go` + the batchjob-only deadline. Jobs have no spot, no min replicas, no scaling triggers, no healthcheck, no concurrency — all of those steps are simply absent from the flow.
   - `wizard_cache.go` — `apiCache` with lazy loaders for compute resources, registry creds, secrets, file secrets. Shared across wizard passes so back-navigation doesn't re-hit the API. Used by both container and batchjob wizards.
   - `wizard_subflows.go` — `promptEnvVar`, `promptSecretMount` for the two loop-add steps.
@@ -62,17 +78,18 @@ Both `container create` and `batchjob create` call `verda.IsLatestTag(image)` vi
 
 `[a-z0-9]([-a-z0-9]*[a-z0-9])?`, max 63 chars (RFC-1123 subset, URL-safe). Becomes part of `https://containers.datacrunch.io/<name>`. Immutable after create — the server refuses updates. `validateDeploymentName` enforces; tests cover edge cases (uppercase, underscore, leading/trailing hyphen, too long, empty).
 
-### Storage defaults are fixed today
+### Storage is server-allocated scratch
 
-General storage (`/data`, 500 GiB) and SHM (`/dev/shm`, 64 MiB) are labeled "fixed for now" in the web UI. The wizard does NOT prompt for them — `renderContainerSummary` shows them as "(fixed)" in the review card, and the create request always includes both mounts with the default sizes. Flags `--general-storage-size` and `--shm-size` exist for the future when the API unlocks them; today they default to the fixed values.
+Every create request includes exactly one `scratch` volume mount at `/data`. The CLI sends `{type: "scratch", mount_path: "/data"}` with no `size_in_mb` — the server allocates and sizes the scratch volume. `/dev/shm` is provided by the runtime; the CLI does not send a mount for it.
 
-Mount types in `ContainerVolumeMount.Type`:
+There is **no** `--general-storage-size` or `--shm-size` flag. They were removed after the API rejected sized mounts with `volume_mounts.0.volume_id should not be null or undefined`: a sized mount must be `type: "shared"`, which references a named persistent volume by `volume_id` — a feature the CLI does not yet expose.
 
-- `"secret"` — from `--secret-mount NAME:PATH`; `SecretName` set
-- `"shared"` — general `/data` storage; `SizeInMB` set
-- `"shm"` — `/dev/shm`; `SizeInMB` set
+Mount types in `ContainerVolumeMount.Type` that the CLI currently sends:
 
-See `buildVolumeMounts` in `container_create.go`.
+- `"scratch"` — auto-allocated `/data`; no `SizeInMB`, no `VolumeID`. See `buildVolumeMounts` in `container_create.go`.
+- `"secret"` — from `--secret-mount NAME:PATH`; `SecretName` set.
+
+`"shared"` (named persistent volume) is intentionally unused — it requires `volume_id`, which has no flag yet. If the CLI gains a `verda volume` integration for serverless deployments, this is the wiring point.
 
 ### Batchjob cannot use spot
 
@@ -98,12 +115,12 @@ Describe cards (`renderContainerDeploymentCard`, `renderJobDeploymentCard`) prin
 
 ## Gotchas & Edge Cases
 
-- **Wizard omits healthcheck sub-prompts when Off.** Steps `healthcheck-port` and `healthcheck-path` have `ShouldSkip: c["healthcheck"] == "off"`. Don't call them unconditionally; the engine wires the skip gate via `DependsOn`.
+- **Wizard omits the healthcheck-path step when healthcheck is Off.** The `healthcheck-path` step has `ShouldSkip: c["healthcheck"] == "off"`; the engine wires the skip gate via `DependsOn`. There is intentionally no `healthcheck-port` wizard step — `request()` always defaults the probe port to the exposed port (`hcPort = o.Port` when `HealthcheckPort == 0`). The `--healthcheck-port` flag still works for the rare case where the probe must hit a different port than the public listener.
 - **`registryPublicValue = "__public__"` sentinel.** The registry-creds step's loader prepends a "Public (no credentials)" choice with this sentinel as its Value. The Setter maps the sentinel back to `opts.RegistryCreds = ""`. If you rename the sentinel, grep both sides — the Setter reads the string literal.
 - **`compute-size` is a separate step from `compute`.** VM's wizard combines resource + count in a single step via in-Loader prompting; serverless keeps them separate so users can go back and change the size without re-picking the resource. Lower engineering cost, same UX.
 - **Util triggers off by default, but wizard asks anyway.** The CPU/GPU util steps accept empty ("off"), "off", or `1..100`. Setter maps empty/"off" to 0 (trigger disabled). Users should be able to Enter-through both without setting them.
 - **Custom queue-load is a separate step.** `queue-load-custom` has `ShouldSkip: c["queue-preset"] != "custom"`. If the user goes back and changes preset to a named one, the engine's reset logic clears the custom value via `Resetter`.
-- **No `+ Create new` for registry creds in the wizard.** v1 intentionally omits the inline create-new sub-flow for registry credentials — users pick existing or Public. Adding new creds requires `verda registry configure` out-of-band, or a future top-level `verda serverless registry-creds` command. The design doc notes this as future work.
+- **No `+ Create new` for registry creds in the wizard.** v1 intentionally omits the inline create-new sub-flow for registry credentials — users pick existing or Public. Adding new creds requires `verda registry configure` out-of-band, or a future top-level `verda registry-creds` command. The design doc notes this as future work.
 - **Confirm is NOT a wizard step.** `runContainerCreate` prints the summary + runs `prompter.Confirm` after `engine.Run` returns. Keeps the review card at full terminal width and lets us pipe through `--yes` cleanly. If you move it into the wizard, you lose layout control.
 - **Agent mode + create = flag-only.** In `--agent`, if any of `--name/--image/--compute` is missing we return `MISSING_REQUIRED_FLAGS` immediately. The wizard is never launched under `--agent`, even without credentials — that would be an interactive prompt, which is blocked.
 - **Batchjob wizard shares 10 steps with container.** The split lives in `wizard_shared.go` (shared factories taking `*T` pointers) vs `wizard.go` (container-only) vs `wizard_batchjob.go` (batchjob-only). Adding a new shared field: put the step factory in `wizard_shared.go` and wire it into both flows. Adding a field that only one subcommand needs: put it directly in `wizard.go` or `wizard_batchjob.go`.

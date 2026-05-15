@@ -28,9 +28,7 @@ import (
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
 
-// Queue-load preset constants. The CLI exposes four named profiles (Instant,
-// Balanced, Cost saver, Custom); all four map to an integer threshold written
-// into ScalingTriggers.QueueLoad.
+// Queue-load presets map CLI names to ScalingTriggers.QueueLoad thresholds.
 const (
 	presetInstant   = "instant"
 	presetBalanced  = "balanced"
@@ -41,9 +39,7 @@ const (
 	queueLoadBalanced  = 3
 	queueLoadCostSaver = 6
 
-	// Auto-allocated general-storage mount. The server sizes it; the CLI
-	// only sends the mount path and "scratch" type. /dev/shm is provided
-	// by the runtime and the CLI does not send a mount for it.
+	// Server-provisioned scratch at /data (size omitted). Runtime supplies /dev/shm.
 	defaultGeneralStoragePath = "/data"
 
 	defaultExposedPort     = 80
@@ -54,9 +50,7 @@ const (
 	defaultRequestTTL      = 300 * time.Second
 )
 
-// containerCreateOptions collects every field the CreateDeploymentRequest needs.
-// Flag parsing populates these; later (follow-up task) the wizard will fill
-// remaining gaps. request() turns these into the SDK payload.
+// containerCreateOptions holds flags/wizard state; request() builds the SDK payload.
 type containerCreateOptions struct {
 	Name  string
 	Image string
@@ -177,11 +171,7 @@ func newCmdContainerCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobr
 }
 
 func runContainerCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *containerCreateOptions) error {
-	client, err := f.VerdaClient()
-	if err != nil {
-		return err
-	}
-
+	// In --agent, validate required flags before VerdaClient() so MISSING_REQUIRED_FLAGS beats auth errors.
 	if f.AgentMode() {
 		if missing := missingContainerCreateFlags(opts); len(missing) > 0 {
 			return cmdutil.NewMissingFlagsError(missing)
@@ -192,6 +182,11 @@ func runContainerCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil
 		}
 	}
 
+	client, err := f.VerdaClient()
+	if err != nil {
+		return err
+	}
+
 	req, err := opts.request()
 	if err != nil {
 		return cmdutil.UsageErrorf(cmd, "%v", err)
@@ -199,7 +194,7 @@ func runContainerCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil
 
 	cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), "Request payload:", req)
 
-	// Interactive confirmation with summary. Agent mode relies on --yes.
+	// Human confirm after summary; agent requires --yes.
 	if !f.AgentMode() && !opts.Yes {
 		renderContainerSummary(ioStreams.ErrOut, opts)
 		confirmed, err := f.Prompter().Confirm(cmd.Context(), fmt.Sprintf("Deploy %s?", opts.Name))
@@ -231,8 +226,7 @@ func runContainerCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil
 	return nil
 }
 
-// runContainerWizard drives the interactive 22-step create flow. Writes into
-// opts in place; the caller then turns opts into a request via opts.request().
+// runContainerWizard runs the interactive create flow into opts.
 func runContainerWizard(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *containerCreateOptions) error {
 	flow := buildContainerCreateFlow(ctx, f.VerdaClient, opts)
 	engine := wizard.NewEngine(f.Prompter(), f.Status(),
@@ -255,9 +249,7 @@ func missingContainerCreateFlags(opts *containerCreateOptions) []string {
 	return missing
 }
 
-// validate checks every option for well-formed values before the request is
-// assembled. Split out from request() to keep cyclomatic complexity low — the
-// cluster of range checks lives here, the assembly lives there.
+// validate checks opts; request() performs assembly and SDK validation.
 func (o *containerCreateOptions) validate() error {
 	if err := validateDeploymentName(o.Name); err != nil {
 		return err
@@ -289,8 +281,7 @@ func (o *containerCreateOptions) validate() error {
 	return nil
 }
 
-// request assembles a CreateDeploymentRequest from the options. Validation
-// happens in validate(); assembly + the SDK's server-side-parity check live here.
+// request builds CreateDeploymentRequest after validate(); runs ValidateCreateDeploymentRequest.
 func (o *containerCreateOptions) request() (*verda.CreateDeploymentRequest, error) {
 	if err := o.validate(); err != nil {
 		return nil, err
@@ -407,10 +398,7 @@ func buildEnvVars(plain, secret []string) ([]verda.ContainerEnvVar, error) {
 	return out, nil
 }
 
-// buildVolumeMounts assembles the volume_mounts array sent to the API. Every
-// deployment gets an auto-allocated scratch mount at /data — the server sizes
-// it, the CLI just declares the mount. /dev/shm is provided by the runtime
-// and is not sent as an explicit mount. Secret mounts come from --secret-mount.
+// buildVolumeMounts: always scratch /data plus optional --secret-mount entries (/dev/shm implicit).
 func buildVolumeMounts(secretMounts []string) ([]verda.ContainerVolumeMount, error) {
 	mounts := []verda.ContainerVolumeMount{
 		{Type: mountTypeScratch, MountPath: defaultGeneralStoragePath},

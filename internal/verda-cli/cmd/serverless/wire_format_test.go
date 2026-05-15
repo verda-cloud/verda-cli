@@ -12,19 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Wire-format tests for `verda container create` and `verda batchjob create`.
-//
-// HARD RULE: when you change the create flow — options struct, request()
-// assembly, buildVolumeMounts/buildEnvVars/buildContainerScaling, mount-type
-// constants, new flags that land in the payload — you MUST update the
-// assertions in this file. These tests are the only layer that catches
-// payload bugs the SDK's client-side validators miss (the production
-// `volume_id`/mount-type 400 is the canonical example).
-//
-// Do NOT relax an assertion to make a failing test pass. If you cannot
-// explain why the new payload is correct, the real API will reject it.
-// See `CLAUDE.md` in this directory ("Wire-Format Tests Must Stay in Sync")
-// for the full rule.
+// Wire-format regression tests for create payloads; change assertions whenever
+// request assembly changes (see cmd/serverless/CLAUDE.md).
 
 package serverless
 
@@ -43,12 +32,7 @@ import (
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
 
-// recordingServer captures the JSON body posted to deployment-create endpoints
-// so tests can assert on the exact wire format the CLI sends to the API. This
-// is the layer where the volume_id / mount-type bug lived — opts.request() and
-// the SDK's client-side validators both accepted the bad payload; only the
-// real server rejected it. A wire-format test catches it without spending
-// money on a live deployment.
+// recordingServer stores POST bodies from create endpoints for JSON assertions.
 type recordingServer struct {
 	mu          sync.Mutex
 	containerOK []byte

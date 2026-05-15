@@ -23,6 +23,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
 	"github.com/verda-cloud/verdagostack/pkg/tui"
@@ -30,6 +31,16 @@ import (
 	"github.com/verda-cloud/verdagostack/pkg/version"
 
 	clioptions "github.com/verda-cloud/verda-cli/internal/verda-cli/options"
+)
+
+const (
+	// retryMaxAttempts is the number of retries (additional attempts after the
+	// initial request) for transient API failures: 429, 408, 5xx. The SDK
+	// applies exponential backoff with jitter between attempts.
+	retryMaxAttempts = 3
+	// retryInitialDelay is the base delay before the first retry. Doubles
+	// each attempt, capped at 30s by the SDK middleware.
+	retryInitialDelay = 200 * time.Millisecond
 )
 
 // sensitiveJSONFieldRe matches "field": "value" JSON entries whose values must
@@ -216,6 +227,15 @@ func (f *factoryImpl) VerdaClient() (*verda.Client, error) {
 	}
 
 	client, err := verda.NewClient(options...)
+	if err == nil {
+		// SDK doesn't enable retry by default. Add the exponential-backoff
+		// middleware so transient failures (429 rate limit, 5xx, 408, 504)
+		// retry transparently across all CLI commands. Auth/client errors
+		// (4xx except 408/429) never retry — see shouldRetry in the SDK.
+		client.AddRequestMiddleware(verda.ExponentialBackoffRetryMiddleware(
+			retryMaxAttempts, retryInitialDelay, client.Logger,
+		))
+	}
 	if err != nil {
 		return nil, err
 	}

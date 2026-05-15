@@ -23,6 +23,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/spf13/cobra"
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
+	"github.com/verda-cloud/verdagostack/pkg/tui"
 
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
@@ -85,7 +86,7 @@ func selectBatchjobDeployment(ctx context.Context, f cmdutil.Factory, ioStreams 
 	}
 	labels = append(labels, "Cancel")
 
-	idx, err := f.Prompter().Select(ctx, "Select batch-job deployment", labels)
+	idx, err := f.Prompter().Select(ctx, "Select batch-job deployment", labels, tui.WithShowHints(true))
 	if err != nil {
 		if isPromptCancel(err) {
 			return "", nil
@@ -121,8 +122,7 @@ func runBatchjobDescribe(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmduti
 
 	cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), "Deployment:", job)
 
-	// See container_describe.go for the embed-vs-explicit-fields tradeoff —
-	// same caveat applies if verda.JobDeployment ever grows a Status field.
+	// Same embedded Status caveat as container describe (see container_describe.go).
 	if wrote, werr := cmdutil.WriteStructured(ioStreams.Out, f.OutputFormat(), struct {
 		*verda.JobDeployment
 		Status string `json:"status,omitempty"`

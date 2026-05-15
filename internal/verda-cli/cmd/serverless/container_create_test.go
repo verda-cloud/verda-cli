@@ -15,14 +15,20 @@
 package serverless
 
 import (
+	"bytes"
+	"context"
+	"errors"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/spf13/cobra"
+
+	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
 
-// validOpts returns a containerCreateOptions that passes validate() — used as
-// a baseline each test tweaks a single field on.
+// validOpts returns defaults that satisfy validate(); tests tweak one field each.
 func validOpts() *containerCreateOptions {
 	return &containerCreateOptions{
 		Name:            "my-endpoint",
@@ -80,8 +86,7 @@ func TestContainerRequest_HappyPath(t *testing.T) {
 	if req.Scaling.ScalingTriggers.QueueLoad.Threshold != queueLoadBalanced {
 		t.Errorf("balanced preset should map to %d, got %v", queueLoadBalanced, req.Scaling.ScalingTriggers.QueueLoad.Threshold)
 	}
-	// One scratch mount at /data is always sent — the API allocates and
-	// sizes it server-side. /dev/shm is provided by the runtime.
+	// Scratch /data mount is always sent; server sizes it. No explicit /dev/shm mount.
 	if len(c.VolumeMounts) != 1 {
 		t.Fatalf("expected 1 default mount (scratch /data), got %d: %+v", len(c.VolumeMounts), c.VolumeMounts)
 	}
@@ -245,5 +250,31 @@ func TestContainerRequest_ValidationErrors(t *testing.T) {
 				t.Fatalf("expected error containing %q, got %v", tc.wantErr, err)
 			}
 		})
+	}
+}
+
+// TestContainerCreate_AgentMode_NoCredsReturnsMissingFlags ensures agent mode validates flags before auth.
+func TestContainerCreate_AgentMode_NoCredsReturnsMissingFlags(t *testing.T) {
+	f := cmdutil.NewTestFactory(nil)
+	f.AgentModeOverride = true
+	// Nil Verda factory: VerdaClient would error if invoked before flag checks.
+
+	ioStreams := cmdutil.IOStreams{In: nil, Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}
+	cmd := &cobra.Command{}
+	cmd.SetContext(context.Background())
+
+	err := runContainerCreate(cmd, f, ioStreams, &containerCreateOptions{})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	var agentErr *cmdutil.AgentError
+	if !errors.As(err, &agentErr) {
+		t.Fatalf("expected *cmdutil.AgentError, got %T: %v", err, err)
+	}
+	if agentErr.Code != "MISSING_REQUIRED_FLAGS" {
+		t.Fatalf("expected MISSING_REQUIRED_FLAGS, got code=%q msg=%q", agentErr.Code, agentErr.Message)
+	}
+	if errors.Is(err, cmdutil.ErrNoClient) {
+		t.Fatalf("auth error leaked through — agent-mode flag check must run before VerdaClient: %v", err)
 	}
 }

@@ -19,13 +19,18 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
+	"github.com/verda-cloud/verdagostack/pkg/tui"
 
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
+
+// containerListExitKey is the synthetic LiveRow key for the trailing Exit row (_ cannot appear in deployment names).
+const containerListExitKey = "__exit__"
 
 type containerListOptions struct {
 	Status string
@@ -66,12 +71,7 @@ func runContainerList(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.I
 
 	statuses := newContainerStatusCache(containerStatusCacheTTL)
 	deployments, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading container deployments...", func() ([]verda.ContainerDeployment, error) {
-		deps, derr := client.ContainerDeployments.GetDeployments(ctx)
-		if derr != nil {
-			return nil, derr
-		}
-		statuses.refresh(ctx, client, deps)
-		return deps, nil
+		return client.ContainerDeployments.GetDeployments(ctx)
 	})
 	if err != nil {
 		return fmt.Errorf("fetching deployments: %w", err)
@@ -79,7 +79,17 @@ func runContainerList(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.I
 
 	cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), "Deployments:", deployments)
 
-	// Client-side status filter (API does not support it on the list endpoint).
+	interactive := cmdutil.IsStdoutTerminal() && !f.AgentMode() && f.OutputFormat() == "table"
+
+	// List response omits status; prefetch when filtering/structured/non-interactive,
+	// otherwise LiveList fills rows lazily.
+	if opts.Status != "" || !interactive {
+		_ = cmdutil.RunWithSpinner(ctx, f.Status(), "Loading statuses...", func() error {
+			statuses.refresh(ctx, client, deployments)
+			return nil
+		})
+	}
+
 	if opts.Status != "" {
 		needle := strings.ToLower(opts.Status)
 		filtered := deployments[:0]
@@ -91,7 +101,6 @@ func runContainerList(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.I
 		deployments = filtered
 	}
 
-	// Structured output (JSON/YAML): emit and return.
 	if f.OutputFormat() != "table" {
 		type row struct {
 			*verda.ContainerDeployment
@@ -111,8 +120,7 @@ func runContainerList(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.I
 		return nil
 	}
 
-	// Non-interactive table when piped, redirected, or in agent mode.
-	if !cmdutil.IsStdoutTerminal() || f.AgentMode() {
+	if !interactive {
 		return printContainerTable(ioStreams.Out, deployments, statuses)
 	}
 
@@ -129,9 +137,71 @@ func runContainerListInteractive(
 	statuses *containerStatusCache,
 ) error {
 	prompter := f.Prompter()
+	// LiveLister is optional on Prompter; fall back to eager status fetch + Select.
+	if liveLister, ok := prompter.(tui.LiveLister); ok {
+		return runContainerListLive(cmd, f, ioStreams, client, deployments, statuses, prompter, liveLister)
+	}
+	return runContainerListEager(cmd, f, ioStreams, client, deployments, statuses, prompter)
+}
+
+// runContainerListLive: LiveList paints rows immediately; status RPCs refine labels asynchronously.
+func runContainerListLive(
+	cmd *cobra.Command,
+	f cmdutil.Factory,
+	ioStreams cmdutil.IOStreams,
+	client *verda.Client,
+	deployments []verda.ContainerDeployment,
+	statuses *containerStatusCache,
+	prompter tui.Prompter,
+	liveLister tui.LiveLister,
+) error {
+	for {
+		rows := buildContainerLiveRows(deployments, statuses)
+		updates := make(chan tui.LiveListUpdate, len(deployments))
+		go pushContainerStatusUpdates(cmd.Context(), client, deployments, statuses, updates)
+
+		idx, err := liveLister.LiveList(cmd.Context(),
+			"Select deployment (type to filter)",
+			rows, updates,
+			tui.WithLiveListShowHints(true),
+		)
+		if err != nil {
+			if cmdutil.IsPromptCancel(err) {
+				return nil
+			}
+			return err
+		}
+		if idx == len(deployments) {
+			return nil
+		}
+
+		if derr := runContainerDescribe(cmd, f, ioStreams, deployments[idx].Name); derr != nil {
+			_, _ = fmt.Fprintf(ioStreams.ErrOut, "Error: %v\n", derr)
+		}
+
+		exit, perr := promptBackOrExit(cmd.Context(), prompter)
+		if perr != nil {
+			return perr
+		}
+		if exit {
+			return nil
+		}
+	}
+}
+
+// runContainerListEager: no LiveLister—prefetch statuses so Select sees full labels.
+func runContainerListEager(
+	cmd *cobra.Command,
+	f cmdutil.Factory,
+	ioStreams cmdutil.IOStreams,
+	client *verda.Client,
+	deployments []verda.ContainerDeployment,
+	statuses *containerStatusCache,
+	prompter tui.Prompter,
+) error {
 	for {
 		if statuses.anyStale(deployments) {
-			_ = cmdutil.RunWithSpinner(cmd.Context(), f.Status(), "Refreshing statuses...", func() error {
+			_ = cmdutil.RunWithSpinner(cmd.Context(), f.Status(), "Loading statuses...", func() error {
 				refreshCtx, cancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
 				defer cancel()
 				statuses.refresh(refreshCtx, client, deployments)
@@ -145,9 +215,9 @@ func runContainerListInteractive(
 		}
 		labels = append(labels, "Exit")
 
-		idx, err := prompter.Select(cmd.Context(), "Select deployment (type to filter)", labels)
+		idx, err := prompter.Select(cmd.Context(), "Select deployment (type to filter)", labels, tui.WithShowHints(true))
 		if err != nil {
-			if isPromptCancel(err) {
+			if cmdutil.IsPromptCancel(err) {
 				return nil
 			}
 			return err
@@ -160,20 +230,96 @@ func runContainerListInteractive(
 			_, _ = fmt.Fprintf(ioStreams.ErrOut, "Error: %v\n", derr)
 		}
 
-		// Pause on the describe card until the user picks an explicit next step.
-		// Without this gate the loop re-enters Select immediately and the TUI
-		// redraw wipes the card.
-		nextIdx, nerr := prompter.Select(cmd.Context(), "", []string{"Back to list", "Exit"})
-		if nerr != nil {
-			if isPromptCancel(nerr) {
-				return nil
-			}
-			return nerr
+		exit, perr := promptBackOrExit(cmd.Context(), prompter)
+		if perr != nil {
+			return perr
 		}
-		if nextIdx == 1 {
+		if exit {
 			return nil
 		}
 	}
+}
+
+// buildContainerLiveRows builds deployment rows plus Exit; stale/missing status shows "..." until pushed.
+func buildContainerLiveRows(deployments []verda.ContainerDeployment, statuses *containerStatusCache) []tui.LiveRow {
+	rows := make([]tui.LiveRow, 0, len(deployments)+1)
+	for i := range deployments {
+		d := &deployments[i]
+		label := statuses.get(d.Name)
+		if label == "" || statuses.stale(d.Name) {
+			label = containerStatusLoading
+		}
+		rows = append(rows, tui.LiveRow{
+			Key:   d.Name,
+			Label: formatContainerRow(d, label),
+		})
+	}
+	rows = append(rows, tui.LiveRow{Key: containerListExitKey, Label: "Exit"})
+	return rows
+}
+
+// pushContainerStatusUpdates refreshes stale cache entries with bounded concurrency,
+// pushes LiveListUpdate per deployment, closes updates when done.
+func pushContainerStatusUpdates(
+	ctx context.Context,
+	client *verda.Client,
+	deployments []verda.ContainerDeployment,
+	statuses *containerStatusCache,
+	updates chan<- tui.LiveListUpdate,
+) {
+	defer close(updates)
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, containerStatusFetchConcurrency)
+	for i := range deployments {
+		d := &deployments[i]
+		if !statuses.stale(d.Name) {
+			continue
+		}
+		wg.Add(1)
+		go func(d *verda.ContainerDeployment) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			s, fetchErr := client.ContainerDeployments.GetDeploymentStatus(ctx, d.Name)
+			var status string
+			var liveErr error
+			switch {
+			case fetchErr != nil:
+				status = containerStatusUnknown
+				liveErr = fetchErr
+			case s == nil:
+				status = containerStatusUnknown
+			default:
+				status = s.Status
+			}
+			statuses.set(d.Name, status)
+			select {
+			case updates <- tui.LiveListUpdate{
+				Key:   d.Name,
+				Label: formatContainerRow(d, status),
+				Err:   liveErr,
+			}:
+			case <-ctx.Done():
+			}
+		}(d)
+	}
+	wg.Wait()
+}
+
+// promptBackOrExit: Esc → list; Ctrl+C exit (no confirm).
+func promptBackOrExit(ctx context.Context, prompter tui.Prompter) (exit bool, err error) {
+	nextIdx, nerr := prompter.Select(ctx, "", []string{"Back to list", "Exit"}, tui.WithShowHints(true))
+	if nerr != nil {
+		if cmdutil.IsPromptInterrupt(nerr) {
+			return true, nil // Ctrl+C = exit
+		}
+		if cmdutil.IsPromptBack(nerr) {
+			return false, nil // Esc = back to list
+		}
+		return false, nerr
+	}
+	return nextIdx == 1, nil
 }
 
 func printContainerTable(out io.Writer, deployments []verda.ContainerDeployment, statuses *containerStatusCache) error {

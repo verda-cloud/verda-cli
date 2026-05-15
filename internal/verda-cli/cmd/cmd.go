@@ -75,18 +75,13 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) (*cobra.Command, *clioptions.Op
 			return cmd.Help()
 		},
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-			// Agent mode always implies JSON output and no TUI. Apply
-			// this before the credential-skip check so commands that
-			// bypass Complete() (skills, mcp serve, auth show/use) still
-			// get the right output mode and suppress spinners.
+			// --agent forces JSON before credential skip paths run Complete().
 			if opts.Agent {
 				opts.Output = "json"
 			}
 
-			// Skip heavy credential resolution for commands that don't need it:
-			// - mcp serve: defers auth to the first tool call
-			// - auth show: diagnostic command that should work even without valid credentials
-			// - auth use: switches profiles, doesn't need current credentials
+			// Commands that legitimately run without resolved credentials (mcp serve,
+			// auth show/use, registry/s3/skills trees, doctor).
 			if skipCredentialResolution(cmd) {
 				log.Init(opts.Log)
 				return nil
@@ -96,21 +91,14 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) (*cobra.Command, *clioptions.Op
 				return err
 			}
 			log.Init(opts.Log)
-			// Apply saved theme (best effort).
+			// Best-effort theme from ~/.verda config.
 			if theme := viper.GetString("settings.theme"); theme != "" {
 				bubbletea.SetThemeByName(theme)
 			}
 			return nil
 		},
 		PersistentPostRun: func(cmd *cobra.Command, _ []string) {
-			// Version-update hint is best-effort and reads ONLY from the
-			// on-disk cache — never the network. `verda` and `verda --help`
-			// must feel instant, so we don't pay 1–5s for a GitHub fetch on
-			// the help path. The cache is refreshed by `verda doctor`, which
-			// runs its own check (with a spinner) and does block on the
-			// network because the user invoked it explicitly. `verda update`
-			// fetches the latest tag directly to drive its own flow but does
-			// not write the version cache.
+			// Update hint: read disk cache only (doctor refreshes it over the network).
 			if opts.Agent || opts.Output != "table" {
 				return
 			}
@@ -215,20 +203,13 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) (*cobra.Command, *clioptions.Op
 	return cmd, opts
 }
 
-// s3Enabled gates the pre-release S3 object-storage commands. The whole
-// command tree is omitted from registration unless VERDA_S3_ENABLED is "1"
-// or "true". When the feature ships GA, delete this function, drop the
-// gate in NewRootCommand, and remove `Hidden: true` from cmd/s3/s3.go.
+// s3Enabled hides the S3 subtree unless VERDA_S3_ENABLED is 1/true (pre-GA).
 func s3Enabled() bool {
 	v := os.Getenv("VERDA_S3_ENABLED")
 	return v == "1" || v == "true"
 }
 
-// registryEnabled gates the pre-release Verda Container Registry commands.
-// The whole command tree is omitted from registration unless
-// VERDA_REGISTRY_ENABLED is "1" or "true". When the feature ships GA,
-// delete this function, drop the gate in NewRootCommand, and remove
-// `Hidden: true` from cmd/registry/registry.go.
+// registryEnabled hides the registry subtree unless VERDA_REGISTRY_ENABLED is 1/true (pre-GA).
 func registryEnabled() bool {
 	v := os.Getenv("VERDA_REGISTRY_ENABLED")
 	return v == "1" || v == "true"
@@ -261,26 +242,14 @@ func skipCredentialResolution(cmd *cobra.Command) bool {
 	return false
 }
 
-// shouldCheckVersion returns true for commands where it makes sense to print a
-// cached "Update available" hint. The PostRun hook never touches the network —
-// it only reads the on-disk cache populated by `verda doctor`.
-//
-// Included:
-//   - `verda help` / help on any subcommand via `help` verb (user is reading docs)
-//   - bare `verda` (no args, prints help — new-user first run)
-//
-// Excluded:
-//   - `doctor` / `update` — they print version info themselves (with spinners)
-//     and a trailing duplicate hint just adds noise.
-//   - every business command (`vm list`, `volume rm`, etc.) — they must feel
-//     instant and never pay any cost, even cache I/O, for a cosmetic hint.
+// shouldCheckVersion limits PostRun update hints to bare root/help only.
+// PostRun never hits the network; doctor/update already surface version noise.
 func shouldCheckVersion(cmd *cobra.Command) bool {
 	switch cmd.Name() {
 	case "help":
 		return true
 	case "verda":
-		// Root command, typically invoked as `verda` (no args) — cobra
-		// runs RunE which calls cmd.Help(), then PersistentPostRun.
+		// Root with no subcommand (prints help then PostRun).
 		return true
 	}
 	return false

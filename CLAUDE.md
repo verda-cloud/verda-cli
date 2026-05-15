@@ -84,6 +84,15 @@ The repo lints with `golangci-lint` via `make lint` (included in `make test`). T
 
 `.golangci.yaml` is the authoritative list — all of the above come from linters enabled there.
 
+### Comment style — write like a senior
+
+- **Default to no comment.** Well-named identifiers carry the meaning. Add a comment only when the *why* is non-obvious: an invariant, a workaround, a gotcha a future reader would miss, an evolution point.
+- **One line, identifier-first.** `// resolveContainerName: args[0], else picker; agent requires <name>.` beats a three-line paragraph.
+- **Never narrate WHAT.** `// Loop over deployments and build labels` is noise — delete it.
+- **Capture invariants, not history.** `// Describe still succeeds if status RPC fails.` is durable. `// Added for ticket VC-1234` rots — put it in the commit message.
+- **Flag known evolution points.** `// if SDK gains json:"status", switch to explicit fields.` documents a future-failure mode so the next reader doesn't have to rediscover it.
+- **Delete when the reason expires.** Workaround landed, gotcha fixed, SDK gap closed → remove the comment in the same commit.
+
 ### Every API-calling command MUST:
 
 1. **Timeout context**: `ctx, cancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)`
@@ -97,6 +106,12 @@ The repo lints with `golangci-lint` via `make lint` (included in `make test`). T
 - Show warning styling (red bold) before confirmation
 - Require `prompter.Confirm()` — return nil on cancel or Esc
 - In agent mode (`f.AgentMode()`): require `--yes` flag, never auto-confirm
+
+### Interactive commands MUST:
+
+- **Show the hint bar at the bottom of every direct `Prompter.Select`** — pass `tui.WithShowHints(true)` to render `↑/↓ navigate · type to filter · enter select · esc back · ctrl+c exit` below the choices. Same for `MultiSelect` via the equivalent option. Wizard step Loaders are exempt — the wizard composite already renders its own hint bar; double-rendering is a bug.
+- **Treat Ctrl+C as a hard exit, Esc as a soft back** — never show a confirmation dialog on either. Unix users expect Ctrl+C to be terminal; an "Exit?" prompt is friction, and confirmation dialogs themselves can be cancelled which makes the design contradictory. Use `cmdutil.IsPromptInterrupt(err)` for Ctrl+C and `cmdutil.IsPromptBack(err)` for Esc when the two need different handling (e.g. in a "Back to list / Exit" gate, Esc returns to the list while Ctrl+C exits the whole loop). Both are cleanly distinguishable via `cmdutil.IsPromptCancel(err)` if a flow doesn't care which key triggered it.
+- **Use `cmdutil.IsPromptCancel(err)`** — never bare-`return nil` on prompter errors; distinguish clean Ctrl+C / Esc from real I/O failures and propagate the latter.
 
 ### Pricing — get this wrong and users get billed wrong:
 
@@ -154,3 +169,47 @@ If you modified a command, also verify:
 ## Other Agents
 
 This repo targets Claude Code and OpenAI Codex. Claude auto-loads this file; Codex auto-loads `AGENTS.md` (execution contract). A `.cursor/rules/main.mdc` pointer exists for Cursor users but is not a primary target — if Cursor drops out of the stack, delete it rather than letting it drift.
+
+<!-- gitnexus:start -->
+# GitNexus — Code Intelligence
+
+This project is indexed by GitNexus as **verda-cli** (7546 symbols, 19146 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+
+> If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
+
+## Always Do
+
+- **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run `gitnexus_impact({target: "symbolName", direction: "upstream"})` and report the blast radius (direct callers, affected processes, risk level) to the user.
+- **MUST run `gitnexus_detect_changes()` before committing** to verify your changes only affect expected symbols and execution flows.
+- **MUST warn the user** if impact analysis returns HIGH or CRITICAL risk before proceeding with edits.
+- When exploring unfamiliar code, use `gitnexus_query({query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
+- When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `gitnexus_context({name: "symbolName"})`.
+
+## Never Do
+
+- NEVER edit a function, class, or method without first running `gitnexus_impact` on it.
+- NEVER ignore HIGH or CRITICAL risk warnings from impact analysis.
+- NEVER rename symbols with find-and-replace — use `gitnexus_rename` which understands the call graph.
+- NEVER commit changes without running `gitnexus_detect_changes()` to check affected scope.
+
+## Resources
+
+| Resource | Use for |
+|----------|---------|
+| `gitnexus://repo/verda-cli/context` | Codebase overview, check index freshness |
+| `gitnexus://repo/verda-cli/clusters` | All functional areas |
+| `gitnexus://repo/verda-cli/processes` | All execution flows |
+| `gitnexus://repo/verda-cli/process/{name}` | Step-by-step execution trace |
+
+## CLI
+
+| Task | Read this skill file |
+|------|---------------------|
+| Understand architecture / "How does X work?" | `.claude/skills/gitnexus/gitnexus-exploring/SKILL.md` |
+| Blast radius / "What breaks if I change X?" | `.claude/skills/gitnexus/gitnexus-impact-analysis/SKILL.md` |
+| Trace bugs / "Why is X failing?" | `.claude/skills/gitnexus/gitnexus-debugging/SKILL.md` |
+| Rename / extract / split / refactor | `.claude/skills/gitnexus/gitnexus-refactoring/SKILL.md` |
+| Tools, resources, schema reference | `.claude/skills/gitnexus/gitnexus-guide/SKILL.md` |
+| Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
+
+<!-- gitnexus:end -->
