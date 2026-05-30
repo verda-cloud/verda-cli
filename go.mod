@@ -1,6 +1,6 @@
 module github.com/verda-cloud/verda-cli
 
-go 1.25.9
+go 1.25.10
 
 require (
 	charm.land/lipgloss/v2 v2.0.2
@@ -9,7 +9,7 @@ require (
 	github.com/spf13/pflag v1.0.10
 	github.com/spf13/viper v1.21.0
 	github.com/verda-cloud/verdacloud-sdk-go v1.4.2
-	github.com/verda-cloud/verdagostack v1.3.3
+	github.com/verda-cloud/verdagostack v1.4.1
 	go.yaml.in/yaml/v3 v3.0.4
 )
 
@@ -100,13 +100,5 @@ require (
 	go.uber.org/zap v1.27.1 // indirect
 	golang.org/x/sync v0.20.0 // indirect
 	golang.org/x/sys v0.43.0 // indirect
-	golang.org/x/text v0.35.0 // indirect
+	golang.org/x/text v0.36.0 // indirect
 )
-
-// TEMPORARY local replace — required while verdagostack hosts the new
-// SelectConfig hint-bar fields (WithShowHints) and the LiveList primitive
-// in its working tree but has not yet cut a release. Drop this directive
-// and bump the require line above once verdagostack publishes the version
-// containing both APIs. The branch will not build on a fresh machine
-// without ../verdagostack checked out and up-to-date.
-replace github.com/verda-cloud/verdagostack => ../verdagostack
