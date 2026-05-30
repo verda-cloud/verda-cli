@@ -116,6 +116,11 @@ func runLs(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, o
 	}
 
 	if len(args) == 0 {
+		// No bucket on an interactive terminal -> the TUI explorer; otherwise
+		// (pipes, --agent, -o json) the static, scriptable bucket list.
+		if cmdutil.IsStdoutTerminal() && !f.AgentMode() && f.OutputFormat() == "table" {
+			return runLsBrowser(ctx, f, ioStreams, client)
+		}
 		return runLsBuckets(ctx, f, ioStreams, client)
 	}
 
