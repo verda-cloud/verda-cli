@@ -537,7 +537,7 @@ func stepStorage(getClient clientFunc, cache *apiCache, opts *createOptions) wiz
 					return nil, nil
 
 				case addNewVolumeValue:
-					vol, err := promptAddVolume(ctx, prompter, store, cache)
+					vol, err := promptAddVolume(ctx, prompter, store)
 					if err != nil {
 						return nil, err
 					}
