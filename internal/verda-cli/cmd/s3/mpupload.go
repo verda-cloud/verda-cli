@@ -50,6 +50,10 @@ type resumableOptions struct {
 	PartSize    int64
 	Concurrency int
 	NoResume    bool
+	// OnProgress, if set, is called with (completedParts, totalParts) after the
+	// initial server reconcile and after each part finishes. Calls are
+	// serialized (safe to drive a progress bar). nil disables reporting.
+	OnProgress func(done, total int32)
 }
 
 // computePartSize returns a part size >= minPartSize, scaled up so the file
@@ -118,6 +122,17 @@ func resumableUpload(ctx context.Context, client API, opts *resumableOptions) er
 	partSize := computePartSize(opts.FileSize, opts.PartSize)
 	identity := uploadIdentity(opts.AbsPath, opts.Bucket, opts.Key)
 
+	// Same-host guard: refuse a second concurrent upload of this object so two
+	// processes can't race on the checkpoint and double-upload parts.
+	release, acquired, err := acquireUploadLock(identity)
+	if err != nil {
+		return err
+	}
+	if !acquired {
+		return fmt.Errorf("an upload of s3://%s/%s is already in progress on this machine", opts.Bucket, opts.Key)
+	}
+	defer release()
+
 	cp, uploadID, err := resolveUpload(ctx, client, opts, identity, partSize)
 	if err != nil {
 		return err
@@ -129,6 +144,9 @@ func resumableUpload(ctx context.Context, client API, opts *resumableOptions) er
 	}
 
 	total := numParts(opts.FileSize, partSize)
+	if opts.OnProgress != nil {
+		opts.OnProgress(int32(len(done)), total) // reflect parts already on the server
+	}
 	if err := uploadMissingParts(ctx, client, opts, identity, cp, partSize, total, done); err != nil {
 		return err
 	}
@@ -326,6 +344,7 @@ func uploadMissingParts(ctx context.Context, client API, opts *resumableOptions,
 
 	var mu sync.Mutex
 	var firstErr error
+	completed := int32(len(done)) // parts already on the server count toward progress
 	for res := range results {
 		if res.err != nil {
 			if firstErr == nil {
@@ -340,6 +359,11 @@ func uploadMissingParts(ctx context.Context, client API, opts *resumableOptions,
 		if err != nil && firstErr == nil {
 			firstErr = err
 			cancel()
+			continue
+		}
+		completed++
+		if opts.OnProgress != nil {
+			opts.OnProgress(completed, total)
 		}
 	}
 	return firstErr

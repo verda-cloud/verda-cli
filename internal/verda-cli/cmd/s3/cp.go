@@ -131,9 +131,19 @@ func NewCmdCp(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 			# Preview a recursive download
 			verda s3 cp s3://my-bucket/logs/ ./logs --recursive --dryrun
 		`),
-		Args: cobra.ExactArgs(2),
+		// 2 args = direct cp. Fewer args on a TTY guides an upload interactively
+		// (source -> bucket -> location); pipes/--agent still require both args.
+		Args: cobra.MaximumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runCp(cmd, f, ioStreams, opts, args[0], args[1])
+			if len(args) == 2 {
+				return runCp(cmd, f, ioStreams, opts, args[0], args[1])
+			}
+			interactive := cmdutil.IsStdoutTerminal() && !f.AgentMode() && f.OutputFormat() == "table"
+			loneS3 := len(args) == 1 && IsS3URI(args[0]) // a bare s3:// is a download w/o dest, not an upload
+			if interactive && !loneS3 {
+				return runUploadWizard(cmd, f, ioStreams, opts, args)
+			}
+			return cmdutil.UsageErrorf(cmd, "cp requires a source and destination: verda s3 cp <src> <dst>")
 		},
 	}
 
@@ -156,8 +166,11 @@ func runCp(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, o
 		return cmdutil.UsageErrorf(cmd, "cp requires at least one s3:// URI")
 	}
 
-	ctx, cancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
-	defer cancel()
+	// Bulk transfers are NOT bounded by the short per-request --timeout: a large
+	// object legitimately takes minutes, and bounding the whole operation made
+	// big uploads fail with "context deadline exceeded". cmd.Context() (Ctrl+C)
+	// is the stop signal; the resumable uploader continues an interrupted upload.
+	ctx := cmd.Context()
 
 	switch dir {
 	case dirUpload:
@@ -245,18 +258,14 @@ func runResumableUpload(ctx context.Context, f cmdutil.Factory, ioStreams cmduti
 	if err != nil {
 		return err
 	}
-	key := singleTargetKey(dst.Key, filepath.Base(src))
-	rel := filepath.Base(src)
-
 	client, err := buildClient(ctx, f, ClientOverrides{})
 	if err != nil {
 		return err
 	}
-
 	ropts := resumableOptions{
 		AbsPath:     absPath,
 		Bucket:      dst.Bucket,
-		Key:         key,
+		Key:         singleTargetKey(dst.Key, filepath.Base(src)),
 		ContentType: inferContentType(absPath, opts.ContentType),
 		FileSize:    info.Size(),
 		MTime:       info.ModTime(),
@@ -264,17 +273,35 @@ func runResumableUpload(ctx context.Context, f cmdutil.Factory, ioStreams cmduti
 		Concurrency: opts.Concurrency,
 		NoResume:    opts.NoResume,
 	}
+	return runResumable(ctx, f, ioStreams, client, &ropts, filepath.Base(src))
+}
 
-	announceResume(ctx, f, ioStreams, client, &ropts)
+// runResumable wraps resumableUpload with the resume announcement, a part-level
+// progress bar, and the finalize footer. ropts must be fully populated; shared
+// by the cp upload path and the ls-uploads resume path.
+func runResumable(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client API, ropts *resumableOptions, displayName string) error {
+	announceResume(ctx, f, ioStreams, client, ropts)
 
-	var sp interface{ Stop(string) }
+	// A part-level progress bar (table output only); SetPercent is driven from
+	// the uploader's serialized result loop, so it's race-free.
+	var prog interface {
+		SetPercent(float64)
+		Stop(string)
+	}
 	if status := f.Status(); status != nil {
-		sp, _ = status.Spinner(ctx, fmt.Sprintf("Uploading %s...", rel))
+		if ph, perr := status.Progress(ctx, fmt.Sprintf("Uploading %s", displayName)); perr == nil {
+			prog = ph
+			ropts.OnProgress = func(done, total int32) {
+				if total > 0 {
+					ph.SetPercent(float64(done) / float64(total))
+				}
+			}
+		}
 	}
 	started := time.Now()
-	err = resumableUpload(ctx, client, &ropts)
-	if sp != nil {
-		sp.Stop("")
+	err := resumableUpload(ctx, client, ropts)
+	if prog != nil {
+		prog.Stop("")
 	}
 	if err != nil {
 		return err
@@ -283,14 +310,14 @@ func runResumableUpload(ctx context.Context, f cmdutil.Factory, ioStreams cmduti
 
 	payload := newCpPayload(false)
 	payload.Transfers = append(payload.Transfers, transferEntry{
-		Source:      absPath,
-		Destination: URI{Bucket: dst.Bucket, Key: key}.String(),
-		Bytes:       info.Size(),
+		Source:      ropts.AbsPath,
+		Destination: URI{Bucket: ropts.Bucket, Key: ropts.Key}.String(),
+		Bytes:       ropts.FileSize,
 		DurationMs:  elapsed.Milliseconds(),
 		Status:      "ok",
 	})
 	if !isStructured(f.OutputFormat()) {
-		_, _ = fmt.Fprintf(ioStreams.Out, "✓ uploaded %s (%s)\n", rel, humanBytes(info.Size()))
+		_, _ = fmt.Fprintf(ioStreams.Out, "✓ uploaded %s (%s)\n", displayName, humanBytes(ropts.FileSize))
 	}
 	return finalizeCp(ioStreams, f, &payload, started, false)
 }
