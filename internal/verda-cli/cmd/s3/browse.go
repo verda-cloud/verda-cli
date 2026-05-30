@@ -17,7 +17,6 @@ package s3
 import (
 	"context"
 	"fmt"
-	"os"
 	"path"
 	"path/filepath"
 	"strings"
@@ -146,7 +145,7 @@ func browseLevel(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStr
 	case rowFolder:
 		cur.Key = row.value
 	case rowDownloadMulti:
-		if err := browseDownloadMulti(ctx, f, ioStreams, *cur, payload); err != nil {
+		if err := browseDownloadMulti(ctx, f, ioStreams, client, *cur, payload); err != nil {
 			return false, err
 		}
 	case rowObject:
@@ -235,7 +234,7 @@ func objectActionMenu(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.
 	}
 	switch idx {
 	case actDownload:
-		return browseDownload(ctx, f, ioStreams, obj)
+		return browseDownload(ctx, f, ioStreams, client, obj)
 	case actInfo:
 		return browseInfo(ctx, f, ioStreams, client, obj)
 	case actDelete:
@@ -245,41 +244,23 @@ func objectActionMenu(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.
 	}
 }
 
-// browseDownload streams one object to ./<basename> via the transfer manager.
-func browseDownload(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, obj URI) error {
-	tr, err := transporterBuilder(ctx, f, ClientOverrides{})
-	if err != nil {
-		return err
-	}
-	local, n, err := downloadObjectTo(ctx, tr, obj)
-	if err != nil {
-		return err
-	}
-	_, _ = fmt.Fprintf(ioStreams.Out, "✓ downloaded %s -> %s (%s)\n", obj.String(), local, humanBytes(n))
-	return nil
-}
-
-// downloadObjectTo streams obj to ./<basename> and returns the local path + byte
-// count. Shared by the single- and multi-file browser download paths.
-func downloadObjectTo(ctx context.Context, tr Transporter, obj URI) (string, int64, error) {
+// browseDownload downloads one object to ./<basename> via the resumable
+// downloader, so re-selecting Download on an interrupted object resumes from
+// its .part file.
+func browseDownload(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client API, obj URI) error {
 	local := filepath.Base(obj.Key)
-	out, err := os.Create(local) // #nosec G304 -- destination is the object basename in the cwd
+	n, rate, err := downloadToLocal(ctx, f, ioStreams, client, obj, local, 0, defaultConcurrency, false, false)
 	if err != nil {
-		return "", 0, fmt.Errorf("create local file: %w", err)
+		return err
 	}
-	defer func() { _ = out.Close() }()
-
-	n, err := tr.Download(ctx, out, &s3.GetObjectInput{Bucket: aws.String(obj.Bucket), Key: aws.String(obj.Key)})
-	if err != nil {
-		return "", 0, translateError(err)
-	}
-	return local, n, nil
+	_, _ = fmt.Fprintf(ioStreams.Out, "✓ downloaded %s -> %s (%s)%s\n", obj.String(), local, humanBytes(n), rate)
+	return nil
 }
 
 // browseDownloadMulti multi-selects objects at the current level and downloads
 // the ticked set to the cwd. Objects only (folders are not selectable in v1);
 // non-destructive, so no confirmation.
-func browseDownloadMulti(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, cur URI, payload objectsPayload) error {
+func browseDownloadMulti(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client API, cur URI, payload objectsPayload) error {
 	var objs []objectEntry
 	var labels []string
 	for i := range payload.Objects {
@@ -307,19 +288,15 @@ func browseDownloadMulti(ctx context.Context, f cmdutil.Factory, ioStreams cmdut
 		return nil
 	}
 
-	tr, err := transporterBuilder(ctx, f, ClientOverrides{})
-	if err != nil {
-		return err
-	}
 	var total int64
 	for _, ix := range idxs {
 		obj := URI{Bucket: cur.Bucket, Key: objs[ix].Key}
-		local, n, derr := downloadObjectTo(ctx, tr, obj)
+		n, rate, derr := downloadToLocal(ctx, f, ioStreams, client, obj, filepath.Base(obj.Key), 0, defaultConcurrency, false, false)
 		if derr != nil {
 			return fmt.Errorf("downloading %s: %w", obj.String(), derr)
 		}
 		total += n
-		_, _ = fmt.Fprintf(ioStreams.Out, "✓ downloaded %s -> %s (%s)\n", obj.String(), local, humanBytes(n))
+		_, _ = fmt.Fprintf(ioStreams.Out, "✓ downloaded %s -> %s (%s)%s\n", obj.String(), filepath.Base(obj.Key), humanBytes(n), rate)
 	}
 	_, _ = fmt.Fprintf(ioStreams.Out, "Downloaded %d file(s), %s total\n", len(idxs), humanBytes(total))
 	return nil

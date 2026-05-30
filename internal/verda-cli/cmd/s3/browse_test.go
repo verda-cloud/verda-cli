@@ -17,6 +17,9 @@ package s3
 import (
 	"bytes"
 	"context"
+	"fmt"
+	"io"
+	"os"
 	"strings"
 	"testing"
 
@@ -33,6 +36,7 @@ import (
 type browseFakeAPI struct {
 	API
 	deleteInputs []*s3.DeleteObjectInput
+	dlBody       []byte // served by Head/GetObject for resumable browser downloads
 }
 
 func (b *browseFakeAPI) ListBuckets(ctx context.Context, in *s3.ListBucketsInput, opts ...func(*s3.Options)) (*s3.ListBucketsOutput, error) {
@@ -53,6 +57,21 @@ func (b *browseFakeAPI) ListObjectsV2(ctx context.Context, in *s3.ListObjectsV2I
 func (b *browseFakeAPI) DeleteObject(ctx context.Context, in *s3.DeleteObjectInput, opts ...func(*s3.Options)) (*s3.DeleteObjectOutput, error) {
 	b.deleteInputs = append(b.deleteInputs, in)
 	return &s3.DeleteObjectOutput{}, nil
+}
+
+func (b *browseFakeAPI) HeadObject(ctx context.Context, in *s3.HeadObjectInput, opts ...func(*s3.Options)) (*s3.HeadObjectOutput, error) {
+	return &s3.HeadObjectOutput{ContentLength: aws.Int64(int64(len(b.dlBody))), ETag: aws.String("\"e\"")}, nil
+}
+
+func (b *browseFakeAPI) GetObject(ctx context.Context, in *s3.GetObjectInput, opts ...func(*s3.Options)) (*s3.GetObjectOutput, error) {
+	body := b.dlBody
+	if rng := aws.ToString(in.Range); rng != "" {
+		var start, end int64
+		if _, err := fmt.Sscanf(rng, "bytes=%d-%d", &start, &end); err == nil && start <= end && end < int64(len(body)) {
+			body = body[start : end+1]
+		}
+	}
+	return &s3.GetObjectOutput{Body: io.NopCloser(bytes.NewReader(body))}, nil
 }
 
 // TestBrowse_DrillDownDeleteAndExit walks bucket -> data/ folder -> file.txt,
@@ -97,13 +116,11 @@ func TestBrowse_DrillDownDeleteAndExit(t *testing.T) {
 // TestBrowse_MultiDownload drills into data/, opens the multi-download entry,
 // ticks the one object, downloads it, then exits.
 func TestBrowse_MultiDownload(t *testing.T) {
-	// no t.Parallel — prompter/transporter/cwd state
+	// no t.Parallel — prompter/cwd/~/.verda state
+	withTempVerdaHome(t)  // resumable downloader writes checkpoint/lock here
 	t.Chdir(t.TempDir()) // isolate the cwd that downloads write into
 
-	fake := &browseFakeAPI{}
-	fakeT := &cpFakeTransporter{downloadWrite: []byte("XYZ")}
-	restoreT := withFakeTransporter(fakeT)
-	defer restoreT()
+	fake := &browseFakeAPI{dlBody: []byte("hello-world")}
 
 	// Selects: bucket(0) -> folder data/(1) -> Download-files-here(1) -> Exit(3)
 	// MultiSelect: tick the single object [0].
@@ -118,11 +135,10 @@ func TestBrowse_MultiDownload(t *testing.T) {
 		t.Fatalf("runLsBrowser: %v", err)
 	}
 
-	if len(fakeT.downloads) != 1 {
-		t.Fatalf("Download calls = %d, want 1", len(fakeT.downloads))
-	}
-	if k := aws.ToString(fakeT.downloads[0].Key); k != "data/file.txt" {
-		t.Errorf("downloaded key = %q, want data/file.txt", k)
+	// The resumable downloader wrote file.txt (basename of data/file.txt) to cwd.
+	got, err := os.ReadFile("file.txt")
+	if err != nil || !bytes.Equal(got, fake.dlBody) {
+		t.Errorf("downloaded file.txt mismatch (err=%v, got=%q)", err, got)
 	}
 	if !strings.Contains(out.String(), "Downloaded 1 file(s)") {
 		t.Errorf("stdout missing multi-download summary:\n%s", out.String())

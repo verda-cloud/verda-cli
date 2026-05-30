@@ -71,7 +71,46 @@ verda s3 cp ./file s3://my-bucket/key --content-type 'application/json'
 
 # preview what would happen
 verda s3 cp ./dir s3://my-bucket/prefix/ --recursive --dryrun
+
+# tune throughput for large transfers (uploads and single-object downloads)
+verda s3 cp ./big.bin s3://my-bucket/big.bin --concurrency 16 --part-size 32MiB
 ```
+
+### Resumable large transfers
+
+Single-file uploads and single-object downloads larger than the part size are
+multipart, parallel (5 concurrent parts by default), and **resumable**. If a
+transfer is interrupted (network drop, Ctrl+C, crash), **re-run the exact same
+command** and it continues — only the missing parts are sent/fetched:
+
+```bash
+# upload; if it breaks, run the SAME command again to resume
+verda s3 cp ./model.safetensors s3://my-bucket/models/model.safetensors
+
+# download; re-run to resume (a partial <dest>.part is kept until it completes)
+verda s3 cp s3://my-bucket/models/model.safetensors ./model.safetensors
+
+# force a fresh transfer, ignoring any saved progress
+verda s3 cp s3://my-bucket/models/model.safetensors ./model.safetensors --no-resume
+```
+
+How it works:
+
+- Resume state lives locally: uploads under `~/.verda/s3-uploads/` (+ the
+  server-side multipart parts); downloads under `~/.verda/s3-downloads/` (+ a
+  `<dest>.part` file). The key is a hash of the **source path + destination**, so
+  resume requires re-running with the same source and destination.
+- Uploads reconcile against the server (`ListParts`); downloads guard against the
+  object changing with an `If-Match` ETag check (a changed object restarts cleanly).
+- A same-host lock prevents two transfers of the same object running at once.
+- For incomplete **uploads** specifically, `verda s3 ls-uploads` lists them and
+  lets you pick one to resume; the staged parts cost storage until completed or
+  aborted (`verda s3 abort-uploads`).
+- Interactive downloads from the `verda s3 ls` browser (per-object **Download**
+  or the **Download files here…** multi-select) use the same resumable path —
+  re-selecting Download on an interrupted object resumes from its `.part`.
+- Recursive (`--recursive`), `sync`, and `mv` transfers are not yet resumable
+  per-file.
 
 ## Moving
 

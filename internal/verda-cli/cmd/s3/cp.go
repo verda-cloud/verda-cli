@@ -117,7 +117,13 @@ func NewCmdCp(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 			the set (matched against the relative path; '*' does not
 			cross '/').
 
-			With --dryrun, the planned transfers are listed but no SDK
+			Large single-file uploads and single-object downloads are multipart
+				and parallel, and they RESUME: re-run the EXACT same command to
+				continue an interrupted transfer (only the missing parts move).
+				--no-resume starts over; --concurrency / --part-size tune throughput.
+				Interactive downloads from the "verda s3 ls" browser resume the same way.
+
+				With --dryrun, the planned transfers are listed but no SDK
 			calls are made.
 		`),
 		Example: cmdutil.Examples(`
@@ -127,7 +133,14 @@ func NewCmdCp(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 			# Download a single object
 			verda s3 cp s3://my-bucket/report.csv ./report.csv
 
-			# Copy between buckets
+			# Resume an interrupted upload or download — re-run the same command
+				verda s3 cp ./model.bin s3://my-bucket/model.bin
+				verda s3 cp s3://my-bucket/model.bin ./model.bin
+
+				# Faster large transfer
+				verda s3 cp s3://my-bucket/model.bin ./model.bin --concurrency 16 --part-size 32MiB
+
+				# Copy between buckets
 			verda s3 cp s3://src/a.txt s3://dst/b.txt
 
 			# Recursive upload with filter
@@ -158,9 +171,9 @@ func NewCmdCp(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 	flags.StringArrayVar(&opts.Exclude, "exclude", nil, "Skip entries matching this glob (repeatable, overrides --include)")
 	flags.BoolVar(&opts.Dryrun, "dryrun", false, "Preview transfers without performing them")
 	flags.StringVar(&opts.ContentType, "content-type", "", "Override Content-Type on uploads")
-	flags.StringVar(&opts.PartSize, "part-size", "", "Multipart part size for large uploads, e.g. 32MiB (default auto)")
-	flags.IntVar(&opts.Concurrency, "concurrency", defaultConcurrency, "Parallel part uploads for large files")
-	flags.BoolVar(&opts.NoResume, "no-resume", false, "Ignore any checkpoint and restart the upload from scratch")
+	flags.StringVar(&opts.PartSize, "part-size", "", "Part size for large uploads/downloads, e.g. 32MiB (default auto)")
+	flags.IntVar(&opts.Concurrency, "concurrency", defaultConcurrency, "Parallel parts for large uploads/downloads")
+	flags.BoolVar(&opts.NoResume, "no-resume", false, "Ignore saved progress and restart the transfer (upload or download)")
 
 	return cmd
 }
@@ -509,58 +522,64 @@ func runResumableDownload(ctx context.Context, f cmdutil.Factory, ioStreams cmdu
 		return err
 	}
 
-	dlOpts := &resumableDownloadOptions{
-		Bucket:      src.Bucket,
-		Key:         src.Key,
-		DestPath:    localPath,
-		PartSize:    partSize,
-		Concurrency: opts.Concurrency,
-		NoResume:    opts.NoResume,
-	}
-
-	// Track session bytes for the final rate; render the live bar lazily once
-	// the total is known (it comes from HeadObject inside the downloader).
-	enabled := f.Status() != nil && cmdutil.IsStderrTerminal() && !opts.quietProgress
-	var prog *transferProgress
-	var firstBytes, lastBytes int64
-	firstSet := false
-	dlOpts.OnProgress = func(done, total int64) {
-		if !firstSet {
-			firstBytes, firstSet = done, true
-		}
-		lastBytes = done
-		if enabled {
-			if prog == nil {
-				prog = newTransferProgress(ioStreams.ErrOut, "Downloading", rel, total, started)
-			}
-			prog.update(done)
-		}
-	}
-
-	n, err := resumableDownload(ctx, client, dlOpts)
-	if prog != nil {
-		prog.finish()
-	}
+	n, rateSuffix, err := downloadToLocal(ctx, f, ioStreams, client, src, localPath, partSize, opts.Concurrency, opts.NoResume, opts.quietProgress)
 	if err != nil {
 		return err
-	}
-	elapsed := time.Since(started)
-
-	rateSuffix := ""
-	if moved := lastBytes - firstBytes; moved > 0 && elapsed.Seconds() > 0 {
-		rateSuffix = fmt.Sprintf(" @ %s/s", humanBytes(int64(float64(moved)/elapsed.Seconds())))
 	}
 	payload.Transfers = append(payload.Transfers, transferEntry{
 		Source:      srcStr,
 		Destination: localPath,
 		Bytes:       n,
-		DurationMs:  elapsed.Milliseconds(),
+		DurationMs:  time.Since(started).Milliseconds(),
 		Status:      "ok",
 	})
 	if !isStructured(f.OutputFormat()) {
 		_, _ = fmt.Fprintf(ioStreams.Out, "✓ downloaded %s (%s)%s\n", rel, humanBytes(n), rateSuffix)
 	}
 	return finalizeCp(ioStreams, f, &payload, started, false)
+}
+
+// downloadToLocal runs a resumable download of src to localPath with a live
+// progress bar (when interactive) and returns the object size plus a " @ rate"
+// suffix for the result line. Shared by `cp` and the ls browser, so both get
+// resumable downloads + progress. quiet suppresses the live bar.
+func downloadToLocal(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client API, src URI, localPath string, partSize int64, concurrency int, noResume, quiet bool) (int64, string, error) {
+	rel := filepath.Base(localPath)
+	enabled := !quiet && f.Status() != nil && cmdutil.IsStderrTerminal()
+	var prog *transferProgress
+	var firstBytes, lastBytes int64
+	firstSet := false
+	started := time.Now()
+
+	n, err := resumableDownload(ctx, client, &resumableDownloadOptions{
+		Bucket: src.Bucket, Key: src.Key, DestPath: localPath,
+		PartSize: partSize, Concurrency: concurrency, NoResume: noResume,
+		OnProgress: func(done, total int64) {
+			if !firstSet {
+				firstBytes, firstSet = done, true
+			}
+			lastBytes = done
+			if enabled {
+				if prog == nil {
+					prog = newTransferProgress(ioStreams.ErrOut, "Downloading", rel, total, started)
+				}
+				prog.update(done)
+			}
+		},
+	})
+	if prog != nil {
+		prog.finish()
+	}
+	if err != nil {
+		return 0, "", err
+	}
+	rate := ""
+	if moved := lastBytes - firstBytes; moved > 0 {
+		if secs := time.Since(started).Seconds(); secs > 0 {
+			rate = fmt.Sprintf(" @ %s/s", humanBytes(int64(float64(moved)/secs)))
+		}
+	}
+	return n, rate, nil
 }
 
 // downloadTree lists src.Key and downloads each matching object into dstDir
