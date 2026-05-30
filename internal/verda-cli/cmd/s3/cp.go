@@ -501,7 +501,6 @@ func runDownload(ctx context.Context, cmd *cobra.Command, f cmdutil.Factory, ioS
 func runResumableDownload(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, src URI, dst string, opts *cpOptions) error {
 	localPath := resolveDownloadPath(dst, src.Key)
 	srcStr := src.String()
-	rel := filepath.Base(localPath)
 	payload := newCpPayload(opts.Dryrun)
 	started := time.Now()
 
@@ -534,9 +533,18 @@ func runResumableDownload(ctx context.Context, f cmdutil.Factory, ioStreams cmdu
 		Status:      "ok",
 	})
 	if !isStructured(f.OutputFormat()) {
-		_, _ = fmt.Fprintf(ioStreams.Out, "✓ downloaded %s (%s)%s\n", rel, humanBytes(n), rateSuffix)
+		_, _ = fmt.Fprintf(ioStreams.Out, "✓ downloaded %s -> %s (%s)%s\n", srcStr, absOrSelf(localPath), humanBytes(n), rateSuffix)
 	}
 	return finalizeCp(ioStreams, f, &payload, started, false)
+}
+
+// absOrSelf returns the absolute form of p for display, falling back to p if it
+// can't be resolved. Used so download result lines show the full local path.
+func absOrSelf(p string) string {
+	if abs, err := filepath.Abs(p); err == nil {
+		return abs
+	}
+	return p
 }
 
 // downloadToLocal runs a resumable download of src to localPath with a live

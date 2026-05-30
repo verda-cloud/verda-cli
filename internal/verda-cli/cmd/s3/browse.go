@@ -253,7 +253,7 @@ func browseDownload(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IO
 	if err != nil {
 		return err
 	}
-	_, _ = fmt.Fprintf(ioStreams.Out, "✓ downloaded %s -> %s (%s)%s\n", obj.String(), local, humanBytes(n), rate)
+	_, _ = fmt.Fprintf(ioStreams.Out, "✓ downloaded %s -> %s (%s)%s\n", obj.String(), absOrSelf(local), humanBytes(n), rate)
 	return nil
 }
 
@@ -296,7 +296,7 @@ func browseDownloadMulti(ctx context.Context, f cmdutil.Factory, ioStreams cmdut
 			return fmt.Errorf("downloading %s: %w", obj.String(), derr)
 		}
 		total += n
-		_, _ = fmt.Fprintf(ioStreams.Out, "✓ downloaded %s -> %s (%s)%s\n", obj.String(), filepath.Base(obj.Key), humanBytes(n), rate)
+		_, _ = fmt.Fprintf(ioStreams.Out, "✓ downloaded %s -> %s (%s)%s\n", obj.String(), absOrSelf(filepath.Base(obj.Key)), humanBytes(n), rate)
 	}
 	_, _ = fmt.Fprintf(ioStreams.Out, "Downloaded %d file(s), %s total\n", len(idxs), humanBytes(total))
 	return nil
