@@ -17,6 +17,7 @@ package s3
 import (
 	"context"
 	"fmt"
+	"io"
 	"io/fs"
 	"net/url"
 	"os"
@@ -69,6 +70,10 @@ type cpOptions struct {
 	PartSize    string
 	Concurrency int
 	NoResume    bool
+
+	// quietProgress suppresses the per-file live progress line. Set by sync
+	// (many files) and other batch callers that render their own output.
+	quietProgress bool
 }
 
 // transferEntry is the structured shape for a single completed (or previewed)
@@ -289,19 +294,19 @@ func runResumable(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOSt
 	// on an interactive terminal with table output. The OnProgress callback is
 	// always installed (to measure throughput) and runs on the uploader's
 	// serialized result loop, so it's race-free.
-	var prog *uploadProgress
+	var prog *transferProgress
 	if f.Status() != nil && cmdutil.IsStderrTerminal() {
-		prog = newUploadProgress(ioStreams.ErrOut, displayName, ropts.FileSize, partSize, started)
+		prog = newTransferProgress(ioStreams.ErrOut, "Uploading", displayName, ropts.FileSize, started)
 	}
 	var firstDone, lastDone int32
 	firstSet := false
-	ropts.OnProgress = func(done, total int32) {
+	ropts.OnProgress = func(done, _ int32) {
 		if !firstSet {
 			firstDone, firstSet = done, true
 		}
 		lastDone = done
 		if prog != nil {
-			prog.update(done, total)
+			prog.update(min(int64(done)*partSize, ropts.FileSize))
 		}
 	}
 
@@ -473,7 +478,7 @@ func runDownload(ctx context.Context, cmd *cobra.Command, f cmdutil.Factory, ioS
 		}
 	} else {
 		localPath := resolveDownloadPath(dst, src.Key)
-		if err := downloadOne(ctx, f, ioStreams, transporter, src, localPath, src.Key, opts, &payload); err != nil {
+		if err := downloadOne(ctx, f, ioStreams, transporter, apiClient, src, localPath, src.Key, opts, &payload); err != nil {
 			return err
 		}
 	}
@@ -499,7 +504,7 @@ func downloadTree(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOSt
 		if err != nil {
 			return err
 		}
-		if err := downloadOne(ctx, f, ioStreams, tr, URI{Bucket: src.Bucket, Key: k}, localPath, rel, opts, payload); err != nil {
+		if err := downloadOne(ctx, f, ioStreams, tr, client, URI{Bucket: src.Bucket, Key: k}, localPath, rel, opts, payload); err != nil {
 			return err
 		}
 	}
@@ -507,7 +512,7 @@ func downloadTree(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOSt
 }
 
 // downloadOne performs a single GetObject download (or records a dryrun entry).
-func downloadOne(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, tr Transporter, src URI, localPath, rel string, opts *cpOptions, payload *cpPayload) error {
+func downloadOne(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, tr Transporter, client API, src URI, localPath, rel string, opts *cpOptions, payload *cpPayload) error {
 	srcStr := src.String()
 	structured := isStructured(f.OutputFormat())
 	if opts.Dryrun {
@@ -532,9 +537,27 @@ func downloadOne(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStr
 	}
 
 	in := &s3.GetObjectInput{Bucket: aws.String(src.Bucket), Key: aws.String(src.Key)}
+
+	// Live progress (bar + % + rate) on an interactive terminal. HeadObject is
+	// only issued when we're actually rendering, so non-interactive/batch
+	// (sync, --agent, pipes) pay no extra request.
+	var prog *transferProgress
+	var w io.WriterAt = file
+	if !opts.quietProgress && f.Status() != nil && cmdutil.IsStderrTerminal() {
+		var total int64
+		if head, herr := client.HeadObject(ctx, &s3.HeadObjectInput{Bucket: aws.String(src.Bucket), Key: aws.String(src.Key)}); herr == nil {
+			total = aws.ToInt64(head.ContentLength)
+		}
+		prog = newTransferProgress(ioStreams.ErrOut, "Downloading", rel, total, time.Now())
+		w = &countingWriterAt{w: file, onWrite: prog.update}
+	}
+
 	started := time.Now()
-	n, err := tr.Download(ctx, file, in)
+	n, err := tr.Download(ctx, w, in)
 	elapsed := time.Since(started)
+	if prog != nil {
+		prog.finish()
+	}
 	if closeErr := file.Close(); err == nil {
 		err = closeErr
 	}
@@ -556,8 +579,12 @@ func downloadOne(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStr
 		DurationMs:  elapsed.Milliseconds(),
 		Status:      "ok",
 	})
+	rateSuffix := ""
+	if secs := elapsed.Seconds(); n > 0 && secs > 0 {
+		rateSuffix = fmt.Sprintf(" @ %s/s", humanBytes(int64(float64(n)/secs)))
+	}
 	if !structured {
-		_, _ = fmt.Fprintf(ioStreams.Out, "\u2713 downloaded %s (%s)\n", rel, humanBytes(n))
+		_, _ = fmt.Fprintf(ioStreams.Out, "\u2713 downloaded %s (%s)%s\n", rel, humanBytes(n), rateSuffix)
 	}
 	return nil
 }

@@ -296,7 +296,7 @@ func downloadMoveOne(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.I
 
 	sub := newCpPayload(false)
 	quietStreams := cmdutil.IOStreams{In: ioStreams.In, Out: discardWriter{}, ErrOut: ioStreams.ErrOut}
-	if err := downloadOne(ctx, f, quietStreams, tr, src, localPath, rel, opts, &sub); err != nil {
+	if err := downloadOne(ctx, f, quietStreams, tr, client, src, localPath, rel, opts, &sub); err != nil {
 		return err
 	}
 

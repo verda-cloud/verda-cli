@@ -187,7 +187,7 @@ func runSyncUpload(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOS
 	payload := newSyncPayload(opts.Dryrun)
 	payload.Skipped = plan.skipped
 	started := time.Now()
-	cpOpts := &cpOptions{Dryrun: opts.Dryrun}
+	cpOpts := &cpOptions{Dryrun: opts.Dryrun, quietProgress: true}
 
 	// Copies: upload each planned entry.
 	for _, rel := range plan.toCopy {
@@ -262,7 +262,7 @@ func runSyncDownload(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.I
 		}
 		sub := newCpPayload(opts.Dryrun)
 		quiet := quietStreams(ioStreams)
-		if err := downloadOne(ctx, f, quiet, transporter, URI{Bucket: src.Bucket, Key: key}, localPath, rel, cpOpts, &sub); err != nil {
+		if err := downloadOne(ctx, f, quiet, transporter, apiClient, URI{Bucket: src.Bucket, Key: key}, localPath, rel, cpOpts, &sub); err != nil {
 			return err
 		}
 		appendCopied(ioStreams, f, payload, sub, rel, opts.Dryrun, "downloaded")
