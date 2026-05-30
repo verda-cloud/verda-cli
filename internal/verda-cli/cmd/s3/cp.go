@@ -282,8 +282,11 @@ func runResumableUpload(ctx context.Context, f cmdutil.Factory, ioStreams cmduti
 func runResumable(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client API, ropts *resumableOptions, displayName string) error {
 	announceResume(ctx, f, ioStreams, client, ropts)
 
-	// A part-level progress bar (table output only); SetPercent is driven from
-	// the uploader's serialized result loop, so it's race-free.
+	partSize := computePartSize(ropts.FileSize, ropts.PartSize)
+
+	// A part-level progress bar (table output only). The OnProgress callback is
+	// always installed (to measure throughput), and drives the bar when present;
+	// it runs on the uploader's serialized result loop, so it's race-free.
 	var prog interface {
 		SetPercent(float64)
 		Stop(string)
@@ -291,13 +294,20 @@ func runResumable(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOSt
 	if status := f.Status(); status != nil {
 		if ph, perr := status.Progress(ctx, fmt.Sprintf("Uploading %s", displayName)); perr == nil {
 			prog = ph
-			ropts.OnProgress = func(done, total int32) {
-				if total > 0 {
-					ph.SetPercent(float64(done) / float64(total))
-				}
-			}
 		}
 	}
+	var firstDone, lastDone int32
+	firstSet := false
+	ropts.OnProgress = func(done, total int32) {
+		if !firstSet {
+			firstDone, firstSet = done, true
+		}
+		lastDone = done
+		if prog != nil && total > 0 {
+			prog.SetPercent(float64(done) / float64(total))
+		}
+	}
+
 	started := time.Now()
 	err := resumableUpload(ctx, client, ropts)
 	if prog != nil {
@@ -308,6 +318,16 @@ func runResumable(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOSt
 	}
 	elapsed := time.Since(started)
 
+	// Rate over the bytes actually moved this run (a resume only sends the
+	// missing parts, so this reports the true session throughput, not inflated).
+	rateSuffix := ""
+	if newParts := lastDone - firstDone; newParts > 0 {
+		transferred := min(int64(newParts)*partSize, ropts.FileSize)
+		if secs := elapsed.Seconds(); secs > 0 {
+			rateSuffix = fmt.Sprintf(" @ %s/s", humanBytes(int64(float64(transferred)/secs)))
+		}
+	}
+
 	payload := newCpPayload(false)
 	payload.Transfers = append(payload.Transfers, transferEntry{
 		Source:      ropts.AbsPath,
@@ -317,7 +337,7 @@ func runResumable(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOSt
 		Status:      "ok",
 	})
 	if !isStructured(f.OutputFormat()) {
-		_, _ = fmt.Fprintf(ioStreams.Out, "✓ uploaded %s (%s)\n", displayName, humanBytes(ropts.FileSize))
+		_, _ = fmt.Fprintf(ioStreams.Out, "✓ uploaded %s (%s)%s\n", displayName, humanBytes(ropts.FileSize), rateSuffix)
 	}
 	return finalizeCp(ioStreams, f, &payload, started, false)
 }
