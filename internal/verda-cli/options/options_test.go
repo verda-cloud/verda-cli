@@ -409,3 +409,42 @@ func TestCredentialPriority(t *testing.T) {
 		})
 	}
 }
+
+func TestActiveProfile(t *testing.T) {
+	// no t.Parallel — mutates global viper + env
+
+	t.Run("flag wins", func(t *testing.T) {
+		t.Setenv("VERDA_PROFILE", "envprof")
+		viper.Set("auth.profile", "cfgprof")
+		defer viper.Set("auth.profile", "")
+		if got := ActiveProfile("flagprof"); got != "flagprof" {
+			t.Errorf("ActiveProfile = %q, want flagprof (explicit flag wins)", got)
+		}
+	})
+
+	t.Run("env over config", func(t *testing.T) {
+		t.Setenv("VERDA_PROFILE", "envprof")
+		viper.Set("auth.profile", "cfgprof")
+		defer viper.Set("auth.profile", "")
+		if got := ActiveProfile(""); got != "envprof" {
+			t.Errorf("ActiveProfile = %q, want envprof (env over config)", got)
+		}
+	})
+
+	t.Run("config when no flag/env (the auth-use path)", func(t *testing.T) {
+		t.Setenv("VERDA_PROFILE", "")
+		viper.Set("auth.profile", "production")
+		defer viper.Set("auth.profile", "")
+		if got := ActiveProfile(""); got != "production" {
+			t.Errorf("ActiveProfile = %q, want production (config-file active profile)", got)
+		}
+	})
+
+	t.Run("empty when nothing set", func(t *testing.T) {
+		t.Setenv("VERDA_PROFILE", "")
+		viper.Set("auth.profile", "")
+		if got := ActiveProfile(""); got != "" {
+			t.Errorf("ActiveProfile = %q, want empty (caller applies default)", got)
+		}
+	})
+}

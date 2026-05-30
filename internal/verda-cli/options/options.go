@@ -238,6 +238,22 @@ func (o *Options) Validate() error {
 	return nil
 }
 
+// ActiveProfile resolves the auth profile name for commands that skip
+// Options.Complete() (s3, registry — see skipCredentialResolution in cmd.go),
+// honoring the same precedence as full resolution: explicit flag > VERDA_PROFILE
+// env > config file (auth.profile, set by `verda auth use`). Returns "" when
+// none is set so the caller can apply its own default. Without this, those
+// commands ignore `verda auth use` and always read the "default" profile.
+func ActiveProfile(flagProfile string) string {
+	if flagProfile != "" {
+		return flagProfile
+	}
+	if p := os.Getenv("VERDA_PROFILE"); p != "" {
+		return p
+	}
+	return viper.GetString("auth.profile")
+}
+
 // resolveDefaultProfile picks the best profile when none is explicitly set.
 // It prefers "default" if it exists, otherwise uses the sole profile if there
 // is exactly one, and falls back to "default" as a last resort.

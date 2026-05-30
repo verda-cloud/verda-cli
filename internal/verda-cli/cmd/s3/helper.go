@@ -52,10 +52,12 @@ func buildClientDefault(ctx context.Context, f cmdutil.Factory, ov ClientOverrid
 // the "no S3 credentials configured" friendly error.
 //
 // S3 commands are exempt from Options.Complete() (see cmd.go skipCredentialResolution),
-// so AuthOptions.Profile is never auto-resolved here. Fall back to defaultProfileName
-// to match the "[default]" section that `verda s3 configure` writes.
+// so AuthOptions.Profile is not auto-resolved. options.ActiveProfile honors the
+// --auth.profile flag, VERDA_PROFILE, and the `verda auth use` config setting;
+// only when none is set do we fall back to defaultProfileName ("[default]", the
+// section `verda s3 configure` writes).
 func loadCredsFromFactory(f cmdutil.Factory) (*options.S3Credentials, error) {
-	profile := f.Options().AuthOptions.Profile
+	profile := options.ActiveProfile(f.Options().AuthOptions.Profile)
 	if profile == "" {
 		profile = defaultProfileName
 	}
@@ -108,4 +110,22 @@ func (c *sdkS3Client) DeleteBucket(ctx context.Context, in *s3.DeleteBucketInput
 }
 func (c *sdkS3Client) CopyObject(ctx context.Context, in *s3.CopyObjectInput, opts ...func(*s3.Options)) (*s3.CopyObjectOutput, error) {
 	return (*s3.Client)(c).CopyObject(ctx, in, opts...)
+}
+func (c *sdkS3Client) CreateMultipartUpload(ctx context.Context, in *s3.CreateMultipartUploadInput, opts ...func(*s3.Options)) (*s3.CreateMultipartUploadOutput, error) {
+	return (*s3.Client)(c).CreateMultipartUpload(ctx, in, opts...)
+}
+func (c *sdkS3Client) UploadPart(ctx context.Context, in *s3.UploadPartInput, opts ...func(*s3.Options)) (*s3.UploadPartOutput, error) {
+	return (*s3.Client)(c).UploadPart(ctx, in, opts...)
+}
+func (c *sdkS3Client) CompleteMultipartUpload(ctx context.Context, in *s3.CompleteMultipartUploadInput, opts ...func(*s3.Options)) (*s3.CompleteMultipartUploadOutput, error) {
+	return (*s3.Client)(c).CompleteMultipartUpload(ctx, in, opts...)
+}
+func (c *sdkS3Client) AbortMultipartUpload(ctx context.Context, in *s3.AbortMultipartUploadInput, opts ...func(*s3.Options)) (*s3.AbortMultipartUploadOutput, error) {
+	return (*s3.Client)(c).AbortMultipartUpload(ctx, in, opts...)
+}
+func (c *sdkS3Client) ListParts(ctx context.Context, in *s3.ListPartsInput, opts ...func(*s3.Options)) (*s3.ListPartsOutput, error) {
+	return (*s3.Client)(c).ListParts(ctx, in, opts...)
+}
+func (c *sdkS3Client) ListMultipartUploads(ctx context.Context, in *s3.ListMultipartUploadsInput, opts ...func(*s3.Options)) (*s3.ListMultipartUploadsOutput, error) {
+	return (*s3.Client)(c).ListMultipartUploads(ctx, in, opts...)
 }

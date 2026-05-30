@@ -2,8 +2,6 @@
 
 AWS-CLI-style object storage commands for Verda's S3-compatible endpoint. Uses a separate credential set (keys prefixed `verda_s3_`) so object-storage access is independent of the main API credentials while still sharing the profile system.
 
-> **Pre-release.** The `s3` command tree is gated behind `VERDA_S3_ENABLED=1` and hidden from `verda --help`. Without the env var, `verda s3 ...` returns "unknown command". When the feature ships GA, drop the gate in `internal/verda-cli/cmd/cmd.go` (`s3Enabled` + the `if`) and remove `Hidden: true` from `internal/verda-cli/cmd/s3/s3.go`.
-
 ## Quick reference
 
 | Command | Description |

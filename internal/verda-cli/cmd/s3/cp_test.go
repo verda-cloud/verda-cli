@@ -443,6 +443,58 @@ func TestCp_RecursiveDownload_EscapeAttempt(t *testing.T) {
 	}
 }
 
+// TestCp_RecursiveS3ToS3 exercises copyTree: every listed key under the source
+// prefix is copied to the destination prefix with its relative path preserved,
+// and --exclude is honored against the relative key.
+func TestCp_RecursiveS3ToS3(t *testing.T) {
+	// no t.Parallel
+	fake := &cpFakeAPI{
+		listObjectsPages: []*s3.ListObjectsV2Output{
+			{
+				Contents: []s3types.Object{
+					{Key: aws.String("data/a.txt"), Size: aws.Int64(1)},
+					{Key: aws.String("data/sub/b.txt"), Size: aws.Int64(1)},
+					{Key: aws.String("data/skip.log"), Size: aws.Int64(1)},
+				},
+				IsTruncated: aws.Bool(false),
+			},
+		},
+	}
+	restore := withFakeClient(fake)
+	defer restore()
+	restoreT := withFakeTransporter(&cpFakeTransporter{})
+	defer restoreT()
+
+	out := &bytes.Buffer{}
+	f := cmdutil.NewTestFactory(nil)
+	cmd := NewCmdCp(f, cmdutil.IOStreams{Out: out, ErrOut: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"s3://src-bucket/data/", "s3://dst-bucket/dest/", "--recursive", "--exclude", "*.log"})
+	cmd.SetContext(context.Background())
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	// "*.log" excludes data/skip.log (rel "skip.log"); the two .txt keys copy
+	// with their relative paths preserved under the dest prefix.
+	gotKeys := make([]string, 0, len(fake.copyInputs))
+	for _, in := range fake.copyInputs {
+		if b := aws.ToString(in.Bucket); b != "dst-bucket" {
+			t.Errorf("copy dst Bucket = %q, want dst-bucket", b)
+		}
+		gotKeys = append(gotKeys, aws.ToString(in.Key))
+	}
+	sort.Strings(gotKeys)
+	want := []string{"dest/a.txt", "dest/sub/b.txt"}
+	if len(gotKeys) != len(want) {
+		t.Fatalf("copied keys = %v, want %v", gotKeys, want)
+	}
+	for i := range want {
+		if gotKeys[i] != want[i] {
+			t.Errorf("copied keys[%d] = %q, want %q (all=%v)", i, gotKeys[i], want[i], gotKeys)
+		}
+	}
+}
+
 func TestCp_InvalidURI(t *testing.T) {
 	// no t.Parallel
 	restore := withFakeClient(&cpFakeAPI{})

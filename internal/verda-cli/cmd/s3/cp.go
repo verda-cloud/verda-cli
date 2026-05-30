@@ -66,6 +66,9 @@ type cpOptions struct {
 	Exclude     []string
 	Dryrun      bool
 	ContentType string
+	PartSize    string
+	Concurrency int
+	NoResume    bool
 }
 
 // transferEntry is the structured shape for a single completed (or previewed)
@@ -140,6 +143,9 @@ func NewCmdCp(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 	flags.StringArrayVar(&opts.Exclude, "exclude", nil, "Skip entries matching this glob (repeatable, overrides --include)")
 	flags.BoolVar(&opts.Dryrun, "dryrun", false, "Preview transfers without performing them")
 	flags.StringVar(&opts.ContentType, "content-type", "", "Override Content-Type on uploads")
+	flags.StringVar(&opts.PartSize, "part-size", "", "Multipart part size for large uploads, e.g. 32MiB (default auto)")
+	flags.IntVar(&opts.Concurrency, "concurrency", defaultConcurrency, "Parallel part uploads for large files")
+	flags.BoolVar(&opts.NoResume, "no-resume", false, "Ignore any checkpoint and restart the upload from scratch")
 
 	return cmd
 }
@@ -194,6 +200,20 @@ func runUpload(ctx context.Context, cmd *cobra.Command, f cmdutil.Factory, ioStr
 		return cmdutil.UsageErrorf(cmd, "--recursive requires the source to be a directory")
 	}
 
+	flagPartSize, err := parseByteSize(opts.PartSize)
+	if err != nil {
+		return cmdutil.UsageErrorf(cmd, "%v", err)
+	}
+
+	// Prune stale local checkpoints from prior aborted uploads (best-effort).
+	_ = gcCheckpoints(0)
+
+	// Single large file → custom resumable multipart uploader; everything else
+	// (recursive trees, small files) stays on the transfer-manager path.
+	if !opts.Recursive && !opts.Dryrun && info.Size() > computePartSize(info.Size(), flagPartSize) {
+		return runResumableUpload(ctx, f, ioStreams, src, info, dst, opts, flagPartSize)
+	}
+
 	transporter, err := transporterBuilder(ctx, f, ClientOverrides{})
 	if err != nil {
 		return err
@@ -214,6 +234,92 @@ func runUpload(ctx context.Context, cmd *cobra.Command, f cmdutil.Factory, ioStr
 	}
 
 	return finalizeCp(ioStreams, f, &payload, started, opts.Dryrun)
+}
+
+// runResumableUpload drives the custom multipart uploader for a single large
+// local file. It resolves an absolute source path (the checkpoint identity and
+// every part read depend on it), prints a resume line when the server already
+// holds parts, and emits the same finalize footer as the transfer-manager path.
+func runResumableUpload(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, src string, info os.FileInfo, dst URI, opts *cpOptions, flagPartSize int64) error {
+	absPath, err := filepath.Abs(src)
+	if err != nil {
+		return err
+	}
+	key := singleTargetKey(dst.Key, filepath.Base(src))
+	rel := filepath.Base(src)
+
+	client, err := buildClient(ctx, f, ClientOverrides{})
+	if err != nil {
+		return err
+	}
+
+	ropts := resumableOptions{
+		AbsPath:     absPath,
+		Bucket:      dst.Bucket,
+		Key:         key,
+		ContentType: inferContentType(absPath, opts.ContentType),
+		FileSize:    info.Size(),
+		MTime:       info.ModTime(),
+		PartSize:    flagPartSize,
+		Concurrency: opts.Concurrency,
+		NoResume:    opts.NoResume,
+	}
+
+	announceResume(ctx, f, ioStreams, client, &ropts)
+
+	var sp interface{ Stop(string) }
+	if status := f.Status(); status != nil {
+		sp, _ = status.Spinner(ctx, fmt.Sprintf("Uploading %s...", rel))
+	}
+	started := time.Now()
+	err = resumableUpload(ctx, client, &ropts)
+	if sp != nil {
+		sp.Stop("")
+	}
+	if err != nil {
+		return err
+	}
+	elapsed := time.Since(started)
+
+	payload := newCpPayload(false)
+	payload.Transfers = append(payload.Transfers, transferEntry{
+		Source:      absPath,
+		Destination: URI{Bucket: dst.Bucket, Key: key}.String(),
+		Bytes:       info.Size(),
+		DurationMs:  elapsed.Milliseconds(),
+		Status:      "ok",
+	})
+	if !isStructured(f.OutputFormat()) {
+		_, _ = fmt.Fprintf(ioStreams.Out, "✓ uploaded %s (%s)\n", rel, humanBytes(info.Size()))
+	}
+	return finalizeCp(ioStreams, f, &payload, started, false)
+}
+
+// announceResume prints a concise human resume line to ErrOut when a valid
+// checkpoint and live server-side upload still hold k of N parts. Best-effort:
+// any error (no checkpoint, expired upload, --no-resume) leaves it silent and
+// resumableUpload handles the real decision tree authoritatively.
+func announceResume(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client API, ropts *resumableOptions) {
+	if ropts.NoResume || isStructured(f.OutputFormat()) {
+		return
+	}
+	identity := uploadIdentity(ropts.AbsPath, ropts.Bucket, ropts.Key)
+	cp, err := loadCheckpoint(identity)
+	if err != nil || cp == nil {
+		return
+	}
+	if cp.FileSize != ropts.FileSize || !cp.MTime.Equal(ropts.MTime) || cp.UploadID == "" {
+		return
+	}
+	// Paginated: a single ListParts caps at 1000, which would understate the
+	// resumed count for files with >1000 parts.
+	listed, err := listAllParts(ctx, client, ropts.Bucket, ropts.Key, cp.UploadID)
+	if err != nil {
+		return
+	}
+	partSize := computePartSize(ropts.FileSize, ropts.PartSize)
+	total := numParts(ropts.FileSize, partSize)
+	_, _ = fmt.Fprintf(ioStreams.ErrOut, "Resuming upload (%d/%d parts already on server)\n", len(listed), total)
 }
 
 // uploadTree walks srcDir and uploads every regular file matching the filters.

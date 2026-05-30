@@ -66,9 +66,15 @@ func NewCmdRb(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 			# Skip confirmation prompt
 			verda s3 rb s3://my-bucket --yes
 		`),
-		Args: cobra.ExactArgs(1),
+		// 0 args on a TTY launches the bucket picker; an explicit s3://bucket
+		// runs directly. --agent/non-TTY with no arg errors or shows help.
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runRb(cmd, f, ioStreams, opts, args[0])
+			arg, err := resolveBucketArg(cmd, f, ioStreams, args)
+			if err != nil || arg == "" {
+				return err
+			}
+			return runRb(cmd, f, ioStreams, opts, arg)
 		},
 	}
 
