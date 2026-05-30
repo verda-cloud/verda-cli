@@ -25,6 +25,11 @@ func NewCmdContainer(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Comm
 	cmd := &cobra.Command{
 		Use:   "container",
 		Short: "Manage serverless container deployments (always-on endpoints)",
+		// Pre-release: hidden from `verda --help`. The env-var gate in
+		// cmd/cmd.go (serverlessEnabled) decides whether the command is even
+		// registered; this covers testers who flip VERDA_SERVERLESS_ENABLED on.
+		// Drop both when serverless ships GA.
+		Hidden: true,
 		Long: cmdutil.LongDesc(`
 			Create and manage always-on serverless container deployments. Each
 			deployment exposes an HTTPS endpoint that auto-scales based on queue

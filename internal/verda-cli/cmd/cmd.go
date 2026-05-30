@@ -135,13 +135,11 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) (*cobra.Command, *clioptions.Op
 		images.NewCmdImages(f, ioStreams),
 		instancetypes.NewCmdInstanceTypes(f, ioStreams),
 		locations.NewCmdLocations(f, ioStreams),
+		s3.NewCmdS3(f, ioStreams),
 		sshkey.NewCmdSSHKey(f, ioStreams),
 		startupscript.NewCmdStartupScript(f, ioStreams),
 		template.NewCmdTemplate(f, ioStreams),
 		volume.NewCmdVolume(f, ioStreams),
-	}
-	if s3Enabled() {
-		resourceCmds = append(resourceCmds, s3.NewCmdS3(f, ioStreams))
 	}
 	if registryEnabled() {
 		resourceCmds = append(resourceCmds, registry.NewCmdRegistry(f, ioStreams))
@@ -161,32 +159,36 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) (*cobra.Command, *clioptions.Op
 				ssh.NewCmdSSH(f, ioStreams),
 			},
 		},
-		{
+	}
+	if serverlessEnabled() {
+		groups = append(groups, cmdutil.CommandGroup{
 			Message: "Serverless Commands:",
 			Commands: []*cobra.Command{
 				serverless.NewCmdContainer(f, ioStreams),
 				serverless.NewCmdBatchjob(f, ioStreams),
 			},
-		},
-		{
+		})
+	}
+	groups = append(groups,
+		cmdutil.CommandGroup{
 			Message:  "Resource Commands:",
 			Commands: resourceCmds,
 		},
-		{
+		cmdutil.CommandGroup{
 			Message: "Info Commands:",
 			Commands: []*cobra.Command{
 				status.NewCmdStatus(f, ioStreams),
 				cost.NewCmdCost(f, ioStreams),
 			},
 		},
-		{
+		cmdutil.CommandGroup{
 			Message: "AI Agent Commands:",
 			Commands: []*cobra.Command{
 				mcpcmd.NewCmdMCP(f, ioStreams),
 				skills.NewCmdSkills(f, ioStreams),
 			},
 		},
-		{
+		cmdutil.CommandGroup{
 			Message: "Other Commands:",
 			Commands: []*cobra.Command{
 				completion.NewCmdCompletion(ioStreams),
@@ -195,7 +197,7 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) (*cobra.Command, *clioptions.Op
 				update.NewCmdUpdate(f, ioStreams),
 			},
 		},
-	}
+	)
 
 	groups.Add(cmd)
 	cmdutil.SetUsageTemplate(cmd, groups)
@@ -203,15 +205,19 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) (*cobra.Command, *clioptions.Op
 	return cmd, opts
 }
 
-// s3Enabled hides the S3 subtree unless VERDA_S3_ENABLED is 1/true (pre-GA).
-func s3Enabled() bool {
-	v := os.Getenv("VERDA_S3_ENABLED")
-	return v == "1" || v == "true"
-}
-
 // registryEnabled hides the registry subtree unless VERDA_REGISTRY_ENABLED is 1/true (pre-GA).
 func registryEnabled() bool {
 	v := os.Getenv("VERDA_REGISTRY_ENABLED")
+	return v == "1" || v == "true"
+}
+
+// serverlessEnabled gates the container + batchjob subtrees behind
+// VERDA_SERVERLESS_ENABLED=1/true (pre-GA). Without it the Serverless group is
+// not registered; `verda container`/`verda batchjob` return "unknown command".
+// The parent commands also set Hidden so they stay out of `verda --help` even
+// when a tester flips the env var on.
+func serverlessEnabled() bool {
+	v := os.Getenv("VERDA_SERVERLESS_ENABLED")
 	return v == "1" || v == "true"
 }
 
