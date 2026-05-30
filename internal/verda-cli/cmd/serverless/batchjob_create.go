@@ -88,8 +88,8 @@ func newCmdBatchjobCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra
 	flags.StringVar(&opts.RegistryCreds, "registry-creds", "", "Registry credentials name (empty = public)")
 
 	flags.IntVar(&opts.Port, "port", opts.Port, "Exposed HTTP port")
-	flags.StringArrayVar(&opts.Env, "env", nil, "Environment variable KEY=VALUE; repeat for multiple")
-	flags.StringArrayVar(&opts.EnvSecret, "env-secret", nil, "Secret-backed env KEY=SECRET_NAME; repeat for multiple")
+	flags.StringArrayVar(&opts.Env, "env", nil, "Environment variable KEY=VALUE (KEY uppercase); repeat for multiple")
+	flags.StringArrayVar(&opts.EnvSecret, "env-secret", nil, "Secret-backed env KEY=SECRET_NAME (KEY uppercase); repeat for multiple")
 	flags.StringArrayVar(&opts.Entrypoint, "entrypoint", nil, "Override image ENTRYPOINT; repeat for multiple args")
 	flags.StringArrayVar(&opts.Cmd, "cmd", nil, "Override image CMD; repeat for multiple args")
 

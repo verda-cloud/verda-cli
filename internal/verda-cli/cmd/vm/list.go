@@ -143,7 +143,7 @@ func runListInteractive(
 		volumes := fetchInstanceVolumes(cmd.Context(), client, inst)
 		_, _ = fmt.Fprint(ioStreams.Out, renderInstanceCard(inst, volumes...))
 
-		exit, perr := promptBackOrExit(cmd.Context(), prompter)
+		exit, perr := cmdutil.PromptBackOrExit(cmd.Context(), prompter)
 		if perr != nil {
 			return perr
 		}
@@ -151,21 +151,6 @@ func runListInteractive(
 			return nil
 		}
 	}
-}
-
-// promptBackOrExit: Esc returns to the list; Ctrl+C exits without confirmation.
-func promptBackOrExit(ctx context.Context, prompter tui.Prompter) (exit bool, err error) {
-	nextIdx, nerr := prompter.Select(ctx, "", []string{"Back to list", "Exit"}, tui.WithShowHints(true))
-	if nerr != nil {
-		if cmdutil.IsPromptInterrupt(nerr) {
-			return true, nil // Ctrl+C = exit
-		}
-		if cmdutil.IsPromptBack(nerr) {
-			return false, nil // Esc = back to list
-		}
-		return false, nerr
-	}
-	return nextIdx == 1, nil
 }
 
 // fetchInstanceVolumes fetches volume details for an instance's attached volumes.

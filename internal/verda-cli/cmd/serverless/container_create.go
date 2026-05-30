@@ -147,8 +147,8 @@ func newCmdContainerCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobr
 	flags.BoolVar(&opts.HealthcheckOff, "healthcheck-off", false, "Disable healthcheck (default: on at /health)")
 	flags.IntVar(&opts.HealthcheckPort, "healthcheck-port", 0, "Healthcheck HTTP port (defaults to --port)")
 	flags.StringVar(&opts.HealthcheckPath, "healthcheck-path", opts.HealthcheckPath, "Healthcheck HTTP path")
-	flags.StringArrayVar(&opts.Env, "env", nil, "Environment variable KEY=VALUE; repeat for multiple")
-	flags.StringArrayVar(&opts.EnvSecret, "env-secret", nil, "Secret-backed env KEY=SECRET_NAME; repeat for multiple")
+	flags.StringArrayVar(&opts.Env, "env", nil, "Environment variable KEY=VALUE (KEY uppercase); repeat for multiple")
+	flags.StringArrayVar(&opts.EnvSecret, "env-secret", nil, "Secret-backed env KEY=SECRET_NAME (KEY uppercase); repeat for multiple")
 	flags.StringArrayVar(&opts.Entrypoint, "entrypoint", nil, "Override image ENTRYPOINT; repeat for multiple args")
 	flags.StringArrayVar(&opts.Cmd, "cmd", nil, "Override image CMD; repeat for multiple args")
 

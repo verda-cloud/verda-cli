@@ -109,12 +109,11 @@ const (
 	envTypeSecret = "secret"
 )
 
-// isPromptCancel reports whether err represents a clean prompter exit rather
-// than a real failure. Ctrl+C surfaces as tui.ErrInterrupted, Esc as
-// context.Canceled. Anything else (I/O errors, terminal disconnects, real
-// context deadlines) should propagate so the failure isn't invisible.
+// isPromptCancel is a terse package-local alias for cmdutil.IsPromptCancel,
+// kept because the wizard/subflow call sites read better short. The sentinel
+// logic lives in cmdutil — do not reimplement it here.
 func isPromptCancel(err error) bool {
-	return errors.Is(err, tui.ErrInterrupted) || errors.Is(err, context.Canceled)
+	return cmdutil.IsPromptCancel(err)
 }
 
 // confirmDestructive renders a red-bold warning line and prompts the user to

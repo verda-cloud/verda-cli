@@ -158,13 +158,15 @@ func runContainerListLive(
 	for {
 		rows := buildContainerLiveRows(deployments, statuses)
 		updates := make(chan tui.LiveListUpdate, len(deployments))
-		go pushContainerStatusUpdates(cmd.Context(), client, deployments, statuses, updates)
+		updateCtx, updateCancel := context.WithCancel(cmd.Context())
+		go pushContainerStatusUpdates(updateCtx, client, deployments, statuses, updates)
 
 		idx, err := liveLister.LiveList(cmd.Context(),
 			"Select deployment (type to filter)",
 			rows, updates,
 			tui.WithLiveListShowHints(true),
 		)
+		updateCancel() // abort in-flight status fetches once the user picks/exits
 		if err != nil {
 			if cmdutil.IsPromptCancel(err) {
 				return nil
@@ -179,7 +181,7 @@ func runContainerListLive(
 			_, _ = fmt.Fprintf(ioStreams.ErrOut, "Error: %v\n", derr)
 		}
 
-		exit, perr := promptBackOrExit(cmd.Context(), prompter)
+		exit, perr := cmdutil.PromptBackOrExit(cmd.Context(), prompter)
 		if perr != nil {
 			return perr
 		}
@@ -230,7 +232,7 @@ func runContainerListEager(
 			_, _ = fmt.Fprintf(ioStreams.ErrOut, "Error: %v\n", derr)
 		}
 
-		exit, perr := promptBackOrExit(cmd.Context(), prompter)
+		exit, perr := cmdutil.PromptBackOrExit(cmd.Context(), prompter)
 		if perr != nil {
 			return perr
 		}
@@ -305,21 +307,6 @@ func pushContainerStatusUpdates(
 		}(d)
 	}
 	wg.Wait()
-}
-
-// promptBackOrExit: Esc → list; Ctrl+C exit (no confirm).
-func promptBackOrExit(ctx context.Context, prompter tui.Prompter) (exit bool, err error) {
-	nextIdx, nerr := prompter.Select(ctx, "", []string{"Back to list", "Exit"}, tui.WithShowHints(true))
-	if nerr != nil {
-		if cmdutil.IsPromptInterrupt(nerr) {
-			return true, nil // Ctrl+C = exit
-		}
-		if cmdutil.IsPromptBack(nerr) {
-			return false, nil // Esc = back to list
-		}
-		return false, nerr
-	}
-	return nextIdx == 1, nil
 }
 
 func printContainerTable(out io.Writer, deployments []verda.ContainerDeployment, statuses *containerStatusCache) error {

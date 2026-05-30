@@ -27,6 +27,10 @@ const (
 	containerStatusFetchConcurrency = 5
 	containerStatusUnknown          = "-"
 	containerStatusLoading          = "..." // placeholder until LiveList status RPC completes
+
+	// statusRPCTimeout bounds the best-effort describe status call so a slow
+	// status endpoint can't consume the parent describe deadline.
+	statusRPCTimeout = 5 * time.Second
 )
 
 // containerStatusCache: per-name status + TTL because list RPC omits status.

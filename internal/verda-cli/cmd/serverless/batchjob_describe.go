@@ -108,16 +108,24 @@ func runBatchjobDescribe(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmduti
 	ctx, cancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
 	defer cancel()
 
+	// Status fetched under the same spinner; best-effort with a short
+	// subordinate timeout so a slow status RPC can't blank it (see
+	// container_describe.go).
+	var status string
 	job, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading deployment...", func() (*verda.JobDeployment, error) {
-		return client.ServerlessJobs.GetJobDeploymentByName(ctx, name)
+		d, derr := client.ServerlessJobs.GetJobDeploymentByName(ctx, name)
+		if derr != nil {
+			return nil, derr
+		}
+		statusCtx, statusCancel := context.WithTimeout(ctx, statusRPCTimeout)
+		defer statusCancel()
+		if s, statusErr := client.ServerlessJobs.GetJobDeploymentStatus(statusCtx, name); statusErr == nil && s != nil {
+			status = s.Status
+		}
+		return d, nil
 	})
 	if err != nil {
 		return fmt.Errorf("fetching deployment: %w", err)
-	}
-
-	var status string
-	if s, statusErr := client.ServerlessJobs.GetJobDeploymentStatus(ctx, name); statusErr == nil && s != nil {
-		status = s.Status
 	}
 
 	cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), "Deployment:", job)

@@ -110,18 +110,24 @@ func runContainerDescribe(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdut
 	ctx, cancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
 	defer cancel()
 
+	// Status fetched under the same spinner; best-effort with a short
+	// subordinate timeout so a slow status RPC can't blank it. Describe still
+	// succeeds if the status RPC fails.
+	var status string
 	deployment, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading deployment...", func() (*verda.ContainerDeployment, error) {
-		return client.ContainerDeployments.GetDeploymentByName(ctx, name)
+		d, derr := client.ContainerDeployments.GetDeploymentByName(ctx, name)
+		if derr != nil {
+			return nil, derr
+		}
+		statusCtx, statusCancel := context.WithTimeout(ctx, statusRPCTimeout)
+		defer statusCancel()
+		if s, statusErr := client.ContainerDeployments.GetDeploymentStatus(statusCtx, name); statusErr == nil && s != nil {
+			status = s.Status
+		}
+		return d, nil
 	})
 	if err != nil {
 		return fmt.Errorf("fetching deployment: %w", err)
-	}
-
-	// Describe still succeeds if status RPC fails.
-	var status string
-	s, statusErr := client.ContainerDeployments.GetDeploymentStatus(ctx, name)
-	if statusErr == nil && s != nil {
-		status = s.Status
 	}
 
 	cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), "Deployment:", deployment)

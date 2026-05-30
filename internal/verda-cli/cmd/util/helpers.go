@@ -55,6 +55,24 @@ func IsPromptBack(err error) bool {
 	return errors.Is(err, context.Canceled)
 }
 
+// PromptBackOrExit renders the two-choice "Back to list / Exit" gate shown
+// after a detail view in interactive list loops. Esc returns to the list
+// (exit=false), Ctrl+C exits the loop (exit=true, no confirmation), and an
+// explicit "Exit" selection exits. Real prompter failures propagate.
+func PromptBackOrExit(ctx context.Context, prompter tui.Prompter) (exit bool, err error) {
+	nextIdx, nerr := prompter.Select(ctx, "", []string{"Back to list", "Exit"}, tui.WithShowHints(true))
+	if nerr != nil {
+		if IsPromptInterrupt(nerr) {
+			return true, nil // Ctrl+C = exit
+		}
+		if IsPromptBack(nerr) {
+			return false, nil // Esc = back to list
+		}
+		return false, nerr
+	}
+	return nextIdx == 1, nil
+}
+
 // CheckErr prints a user-friendly error to stderr and exits with code 1.
 func CheckErr(err error) {
 	if err == nil {

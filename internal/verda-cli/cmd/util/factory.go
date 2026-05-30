@@ -45,8 +45,11 @@ const (
 
 // sensitiveJSONFieldRe matches "field": "value" JSON entries whose values must
 // not appear in debug output (OAuth credentials, bearer tokens, etc.).
+// Value pattern allows escaped quotes (\") so values containing them are
+// redacted whole — a bare [^"]* would stop at the first escaped quote and
+// leak the remainder while emitting malformed JSON.
 var sensitiveJSONFieldRe = regexp.MustCompile(
-	`("(?:client_secret|access_token|refresh_token|id_token|password|api_key|bearer|authorization)")(\s*:\s*)"[^"]*"`)
+	`("(?:client_secret|access_token|refresh_token|id_token|password|api_key|bearer|authorization)")(\s*:\s*)"(?:[^"\\]|\\.)*"`)
 
 func redactSensitiveJSON(s string) string {
 	return sensitiveJSONFieldRe.ReplaceAllString(s, `$1$2"<redacted>"`)
@@ -121,11 +124,15 @@ func (t *debugTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 
 	var reqBody []byte
 	if req.Body != nil {
-		b, err := io.ReadAll(req.Body)
+		b, rerr := io.ReadAll(req.Body)
 		_ = req.Body.Close()
-		if err == nil {
-			reqBody = b
+		if rerr != nil {
+			// Body already drained; sending a silently-truncated request would
+			// be worse than failing. Surface the read error instead.
+			_, _ = fmt.Fprintf(t.out, "DEBUG: error reading request body: %v\n", rerr)
+			return nil, rerr
 		}
+		reqBody = b
 		req.Body = io.NopCloser(bytes.NewReader(reqBody))
 	}
 
@@ -156,9 +163,14 @@ func (t *debugTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if resp.Body != nil {
 		b, rerr := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
-		if rerr == nil {
-			respBody = b
+		if rerr != nil {
+			// Body already drained; handing the SDK an empty body would decode
+			// to a misleading "unexpected end of JSON". Surface the real error.
+			_, _ = fmt.Fprintf(t.out, "DEBUG: error reading response body: %v\n", rerr)
+			resp.Body = http.NoBody
+			return resp, rerr
 		}
+		respBody = b
 		resp.Body = io.NopCloser(bytes.NewReader(respBody))
 	}
 	_, _ = fmt.Fprintf(t.out, "DEBUG: HTTP response %s\n", resp.Status)
@@ -227,18 +239,23 @@ func (f *factoryImpl) VerdaClient() (*verda.Client, error) {
 	}
 
 	client, err := verda.NewClient(options...)
-	if err == nil {
-		// SDK doesn't enable retry by default. Add the exponential-backoff
-		// middleware so transient failures (429 rate limit, 5xx, 408, 504)
-		// retry transparently across all CLI commands. Auth/client errors
-		// (4xx except 408/429) never retry — see shouldRetry in the SDK.
-		client.AddRequestMiddleware(verda.ExponentialBackoffRetryMiddleware(
-			retryMaxAttempts, retryInitialDelay, client.Logger,
-		))
-	}
 	if err != nil {
 		return nil, err
 	}
+
+	// SDK doesn't enable retry by default. Add the exponential-backoff
+	// middleware so transient failures (429 rate limit, 5xx, 408, 504)
+	// retry transparently across all CLI commands. Auth/client errors
+	// (4xx except 408/429) never retry — see shouldRetry in the SDK.
+	//
+	// shouldRetry is method-agnostic, so POST creates also retry on 5xx. That's
+	// safe here: deployment names are unique slugs, so a retry after a partial
+	// commit gets 409 (4xx, non-retryable) rather than creating a duplicate. If
+	// a non-idempotent endpoint without a natural unique key is ever added, make
+	// shouldRetry method-aware in the SDK before relying on this.
+	client.AddRequestMiddleware(verda.ExponentialBackoffRetryMiddleware(
+		retryMaxAttempts, retryInitialDelay, client.Logger,
+	))
 
 	f.verda = client
 	return client, nil
