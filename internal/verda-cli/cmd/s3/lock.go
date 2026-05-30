@@ -24,13 +24,13 @@ import (
 	"syscall"
 )
 
-// acquireUploadLock takes a non-blocking advisory exclusive lock keyed by the
+// acquireTransferLock takes a non-blocking advisory exclusive lock keyed by the
 // upload identity, so two processes can't push the same object concurrently
 // (which would race on the checkpoint and double-upload parts). Returns
 // acquired=false when another process already holds it. The lock is released by
 // the returned func, and the OS frees it automatically when the process exits —
 // so a crash leaves no stale lock.
-func acquireUploadLock(identity string) (release func(), acquired bool, err error) {
+func acquireTransferLock(identity string) (release func(), acquired bool, err error) {
 	dir, err := checkpointDir()
 	if err != nil {
 		return nil, false, err

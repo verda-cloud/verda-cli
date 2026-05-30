@@ -17,6 +17,7 @@ package s3
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -84,6 +85,22 @@ type cpFakeAPI struct {
 	listObjectsPages []*s3.ListObjectsV2Output
 	listObjectsCalls int
 	listErr          error
+	downloadBody     []byte // served by Head/GetObject for the resumable downloader
+}
+
+func (c *cpFakeAPI) HeadObject(ctx context.Context, in *s3.HeadObjectInput, opts ...func(*s3.Options)) (*s3.HeadObjectOutput, error) {
+	return &s3.HeadObjectOutput{ContentLength: aws.Int64(int64(len(c.downloadBody))), ETag: aws.String("\"e\"")}, nil
+}
+
+func (c *cpFakeAPI) GetObject(ctx context.Context, in *s3.GetObjectInput, opts ...func(*s3.Options)) (*s3.GetObjectOutput, error) {
+	body := c.downloadBody
+	if rng := aws.ToString(in.Range); rng != "" {
+		var start, end int64
+		if _, err := fmt.Sscanf(rng, "bytes=%d-%d", &start, &end); err == nil && start <= end && end < int64(len(body)) {
+			body = body[start : end+1]
+		}
+	}
+	return &s3.GetObjectOutput{Body: io.NopCloser(bytes.NewReader(body))}, nil
 }
 
 func (c *cpFakeAPI) CopyObject(ctx context.Context, in *s3.CopyObjectInput, opts ...func(*s3.Options)) (*s3.CopyObjectOutput, error) {
@@ -180,14 +197,12 @@ func TestCp_Upload_SingleFile(t *testing.T) {
 }
 
 func TestCp_Download_SingleFile(t *testing.T) {
-	// no t.Parallel
+	// no t.Parallel. Single-file download goes through the resumable downloader,
+	// which fetches via the API (Head + ranged Get), not the transfer manager.
 	tmp := t.TempDir()
 	dst := filepath.Join(tmp, "out.txt")
 
-	fake := &cpFakeTransporter{downloadWrite: []byte("hello")}
-	restoreT := withFakeTransporter(fake)
-	defer restoreT()
-	restore := withFakeClient(&cpFakeAPI{})
+	restore := withFakeClient(&cpFakeAPI{downloadBody: []byte("hello")})
 	defer restore()
 
 	out := &bytes.Buffer{}
@@ -198,9 +213,6 @@ func TestCp_Download_SingleFile(t *testing.T) {
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute: %v", err)
-	}
-	if len(fake.downloads) != 1 {
-		t.Fatalf("Download calls = %d, want 1", len(fake.downloads))
 	}
 	body, err := os.ReadFile(dst) // #nosec G304 -- dst is under t.TempDir()
 	if err != nil {

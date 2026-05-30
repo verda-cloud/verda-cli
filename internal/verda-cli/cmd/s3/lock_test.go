@@ -24,18 +24,18 @@ func TestAcquireUploadLock_ExclusiveThenReleasable(t *testing.T) {
 	withTempVerdaHome(t)
 	const id = "deadbeef"
 
-	release, acquired, err := acquireUploadLock(id)
+	release, acquired, err := acquireTransferLock(id)
 	if err != nil || !acquired {
 		t.Fatalf("first acquire: acquired=%v err=%v", acquired, err)
 	}
 
-	if _, ok, err2 := acquireUploadLock(id); err2 != nil || ok {
+	if _, ok, err2 := acquireTransferLock(id); err2 != nil || ok {
 		t.Errorf("second acquire while held: ok=%v err=%v, want ok=false", ok, err2)
 	}
 
 	release()
 
-	release2, ok3, err3 := acquireUploadLock(id)
+	release2, ok3, err3 := acquireTransferLock(id)
 	if err3 != nil || !ok3 {
 		t.Fatalf("re-acquire after release: ok=%v err=%v", ok3, err3)
 	}

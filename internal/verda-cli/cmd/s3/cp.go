@@ -460,6 +460,12 @@ func runDownload(ctx context.Context, cmd *cobra.Command, f cmdutil.Factory, ioS
 		return cmdutil.UsageErrorf(cmd, "source is a bucket/prefix; pass --recursive to download its contents")
 	}
 
+	// Single object -> resumable, parallel downloader (progress + rate + resume).
+	if !opts.Recursive {
+		return runResumableDownload(ctx, f, ioStreams, src, dst, opts)
+	}
+
+	// Recursive -> the transfer-manager path (per-file resume is a follow-up).
 	transporter, err := transporterBuilder(ctx, f, ClientOverrides{})
 	if err != nil {
 		return err
@@ -468,22 +474,93 @@ func runDownload(ctx context.Context, cmd *cobra.Command, f cmdutil.Factory, ioS
 	if err != nil {
 		return err
 	}
+	payload := newCpPayload(opts.Dryrun)
+	started := time.Now()
+	if err := downloadTree(ctx, f, ioStreams, apiClient, transporter, src, dst, opts, &payload); err != nil {
+		return err
+	}
+	return finalizeCp(ioStreams, f, &payload, started, opts.Dryrun)
+}
 
+// runResumableDownload downloads a single object with the resumable parallel
+// downloader, a live progress bar, and a final rate. Re-running the same command
+// resumes from "<dest>.part" if the object is unchanged.
+func runResumableDownload(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, src URI, dst string, opts *cpOptions) error {
+	localPath := resolveDownloadPath(dst, src.Key)
+	srcStr := src.String()
+	rel := filepath.Base(localPath)
 	payload := newCpPayload(opts.Dryrun)
 	started := time.Now()
 
-	if opts.Recursive {
-		if err := downloadTree(ctx, f, ioStreams, apiClient, transporter, src, dst, opts, &payload); err != nil {
-			return err
+	if opts.Dryrun {
+		if !isStructured(f.OutputFormat()) {
+			_, _ = fmt.Fprintf(ioStreams.Out, "(dry run) would download %s -> %s\n", srcStr, localPath)
 		}
-	} else {
-		localPath := resolveDownloadPath(dst, src.Key)
-		if err := downloadOne(ctx, f, ioStreams, transporter, apiClient, src, localPath, src.Key, opts, &payload); err != nil {
-			return err
+		payload.Transfers = append(payload.Transfers, transferEntry{Source: srcStr, Destination: localPath, Status: "dryrun"})
+		return finalizeCp(ioStreams, f, &payload, started, true)
+	}
+
+	client, err := buildClient(ctx, f, ClientOverrides{})
+	if err != nil {
+		return err
+	}
+	partSize, err := parseByteSize(opts.PartSize)
+	if err != nil {
+		return err
+	}
+
+	dlOpts := &resumableDownloadOptions{
+		Bucket:      src.Bucket,
+		Key:         src.Key,
+		DestPath:    localPath,
+		PartSize:    partSize,
+		Concurrency: opts.Concurrency,
+		NoResume:    opts.NoResume,
+	}
+
+	// Track session bytes for the final rate; render the live bar lazily once
+	// the total is known (it comes from HeadObject inside the downloader).
+	enabled := f.Status() != nil && cmdutil.IsStderrTerminal() && !opts.quietProgress
+	var prog *transferProgress
+	var firstBytes, lastBytes int64
+	firstSet := false
+	dlOpts.OnProgress = func(done, total int64) {
+		if !firstSet {
+			firstBytes, firstSet = done, true
+		}
+		lastBytes = done
+		if enabled {
+			if prog == nil {
+				prog = newTransferProgress(ioStreams.ErrOut, "Downloading", rel, total, started)
+			}
+			prog.update(done)
 		}
 	}
 
-	return finalizeCp(ioStreams, f, &payload, started, opts.Dryrun)
+	n, err := resumableDownload(ctx, client, dlOpts)
+	if prog != nil {
+		prog.finish()
+	}
+	if err != nil {
+		return err
+	}
+	elapsed := time.Since(started)
+
+	rateSuffix := ""
+	if moved := lastBytes - firstBytes; moved > 0 && elapsed.Seconds() > 0 {
+		rateSuffix = fmt.Sprintf(" @ %s/s", humanBytes(int64(float64(moved)/elapsed.Seconds())))
+	}
+	payload.Transfers = append(payload.Transfers, transferEntry{
+		Source:      srcStr,
+		Destination: localPath,
+		Bytes:       n,
+		DurationMs:  elapsed.Milliseconds(),
+		Status:      "ok",
+	})
+	if !isStructured(f.OutputFormat()) {
+		_, _ = fmt.Fprintf(ioStreams.Out, "✓ downloaded %s (%s)%s\n", rel, humanBytes(n), rateSuffix)
+	}
+	return finalizeCp(ioStreams, f, &payload, started, false)
 }
 
 // downloadTree lists src.Key and downloads each matching object into dstDir

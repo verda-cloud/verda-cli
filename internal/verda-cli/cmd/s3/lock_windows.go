@@ -16,8 +16,8 @@
 
 package s3
 
-// acquireUploadLock is a no-op on Windows: syscall.Flock is unavailable and the
+// acquireTransferLock is a no-op on Windows: syscall.Flock is unavailable and the
 // CLI targets macOS/Linux. Same-host upload concurrency is not guarded here.
-func acquireUploadLock(_ string) (release func(), acquired bool, err error) {
+func acquireTransferLock(_ string) (release func(), acquired bool, err error) {
 	return func() {}, true, nil
 }

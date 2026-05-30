@@ -124,7 +124,7 @@ func resumableUpload(ctx context.Context, client API, opts *resumableOptions) er
 
 	// Same-host guard: refuse a second concurrent upload of this object so two
 	// processes can't race on the checkpoint and double-upload parts.
-	release, acquired, err := acquireUploadLock(identity)
+	release, acquired, err := acquireTransferLock(identity)
 	if err != nil {
 		return err
 	}
