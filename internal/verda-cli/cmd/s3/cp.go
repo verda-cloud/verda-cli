@@ -283,18 +283,15 @@ func runResumable(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOSt
 	announceResume(ctx, f, ioStreams, client, ropts)
 
 	partSize := computePartSize(ropts.FileSize, ropts.PartSize)
+	started := time.Now()
 
-	// A part-level progress bar (table output only). The OnProgress callback is
-	// always installed (to measure throughput), and drives the bar when present;
-	// it runs on the uploader's serialized result loop, so it's race-free.
-	var prog interface {
-		SetPercent(float64)
-		Stop(string)
-	}
-	if status := f.Status(); status != nil {
-		if ph, perr := status.Progress(ctx, fmt.Sprintf("Uploading %s", displayName)); perr == nil {
-			prog = ph
-		}
+	// Self-rendered part-level progress line (bar + % + live rate), shown only
+	// on an interactive terminal with table output. The OnProgress callback is
+	// always installed (to measure throughput) and runs on the uploader's
+	// serialized result loop, so it's race-free.
+	var prog *uploadProgress
+	if f.Status() != nil && cmdutil.IsStderrTerminal() {
+		prog = newUploadProgress(ioStreams.ErrOut, displayName, ropts.FileSize, partSize, started)
 	}
 	var firstDone, lastDone int32
 	firstSet := false
@@ -303,15 +300,14 @@ func runResumable(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOSt
 			firstDone, firstSet = done, true
 		}
 		lastDone = done
-		if prog != nil && total > 0 {
-			prog.SetPercent(float64(done) / float64(total))
+		if prog != nil {
+			prog.update(done, total)
 		}
 	}
 
-	started := time.Now()
 	err := resumableUpload(ctx, client, ropts)
 	if prog != nil {
-		prog.Stop("")
+		prog.finish()
 	}
 	if err != nil {
 		return err
