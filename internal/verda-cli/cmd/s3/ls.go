@@ -107,6 +107,17 @@ func NewCmdLs(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 }
 
 func runLs(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *lsOptions, args []string) error {
+	// The interactive browser is unbounded: user navigation (think-time) and its
+	// downloads must not hit the short per-request --timeout. The static
+	// listings keep the timeout — they're quick control-plane calls.
+	if len(args) == 0 && cmdutil.IsStdoutTerminal() && !f.AgentMode() && f.OutputFormat() == "table" {
+		client, err := buildClient(cmd.Context(), f, ClientOverrides{})
+		if err != nil {
+			return err
+		}
+		return runLsBrowser(cmd.Context(), f, ioStreams, client)
+	}
+
 	ctx, cancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
 	defer cancel()
 
@@ -114,13 +125,7 @@ func runLs(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, o
 	if err != nil {
 		return err
 	}
-
 	if len(args) == 0 {
-		// No bucket on an interactive terminal -> the TUI explorer; otherwise
-		// (pipes, --agent, -o json) the static, scriptable bucket list.
-		if cmdutil.IsStdoutTerminal() && !f.AgentMode() && f.OutputFormat() == "table" {
-			return runLsBrowser(ctx, f, ioStreams, client)
-		}
 		return runLsBuckets(ctx, f, ioStreams, client)
 	}
 
@@ -128,7 +133,6 @@ func runLs(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, o
 	if err != nil {
 		return cmdutil.UsageErrorf(cmd, "%v", err)
 	}
-
 	return runLsObjects(ctx, f, ioStreams, client, uri, opts)
 }
 
