@@ -63,6 +63,9 @@ type resumableDownloadOptions struct {
 	// OnProgress, if set, is called with (doneBytes, totalBytes) after the
 	// initial reconcile and after each chunk. Calls are serialized.
 	OnProgress func(done, total int64)
+	// OnResume, if set, is called once with (alreadyBytes, totalBytes) when the
+	// download is continuing from a checkpoint (some chunks already on disk).
+	OnResume func(already, total int64)
 }
 
 func downloadIdentity(absDest, bucket, key string) string {
@@ -205,6 +208,10 @@ func resumableDownload(ctx context.Context, client API, opts *resumableDownloadO
 		if err := saveDownloadCheckpoint(identity, cp); err != nil {
 			return 0, err
 		}
+	}
+
+	if len(done) > 0 && opts.OnResume != nil {
+		opts.OnResume(min(int64(len(done))*partSize, total), total)
 	}
 
 	if err := os.MkdirAll(filepath.Dir(opts.DestPath), 0o750); err != nil {

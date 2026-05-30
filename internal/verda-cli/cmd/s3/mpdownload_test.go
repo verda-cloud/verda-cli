@@ -70,11 +70,16 @@ func TestResumableDownload_Fresh(t *testing.T) {
 	content := bytes.Repeat([]byte("ab"), 1280) // 2560 bytes -> 3 chunks at 1 KiB
 	fake := &dlFakeAPI{content: content, etag: "\"e\"", partSize: 1024}
 
+	resumeCalled := false
 	n, err := resumableDownload(context.Background(), fake, &resumableDownloadOptions{
 		Bucket: "b", Key: "k", DestPath: "out.bin", PartSize: 1024, Concurrency: 1,
+		OnResume: func(already, total int64) { resumeCalled = true },
 	})
 	if err != nil {
 		t.Fatalf("resumableDownload: %v", err)
+	}
+	if resumeCalled {
+		t.Error("OnResume should not fire on a fresh download")
 	}
 	if n != int64(len(content)) {
 		t.Errorf("size = %d, want %d", n, len(content))
@@ -113,11 +118,16 @@ func TestResumableDownload_BreakThenResume(t *testing.T) {
 	fake.mu.Lock()
 	fake.getCalls = 0
 	fake.mu.Unlock()
+	var resumeAlready, resumeTotal int64
 	n, err := resumableDownload(context.Background(), fake, &resumableDownloadOptions{
 		Bucket: "b", Key: "k", DestPath: dst, PartSize: 1024, Concurrency: 1,
+		OnResume: func(already, total int64) { resumeAlready, resumeTotal = already, total },
 	})
 	if err != nil {
 		t.Fatalf("resume: %v", err)
+	}
+	if resumeAlready != 1024 || resumeTotal != int64(len(content)) {
+		t.Errorf("OnResume = (%d, %d), want (1024, %d) — one chunk already on disk", resumeAlready, resumeTotal, len(content))
 	}
 	if n != int64(len(content)) {
 		t.Errorf("size = %d, want %d", n, len(content))

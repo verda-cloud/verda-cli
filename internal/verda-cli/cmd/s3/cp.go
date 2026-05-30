@@ -130,8 +130,17 @@ func NewCmdCp(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 			# Upload a single file
 			verda s3 cp ./report.csv s3://my-bucket/reports/report.csv
 
+				# Upload into a "folder" (trailing slash keeps the filename)
+				verda s3 cp ./report.csv s3://my-bucket/reports/
+
 			# Download a single object
 			verda s3 cp s3://my-bucket/report.csv ./report.csv
+
+				# Download into a directory (keeps the object's name)
+				verda s3 cp s3://my-bucket/report.csv ./downloads/
+
+				# Recursively download a whole prefix
+				verda s3 cp s3://my-bucket/logs/ ./logs --recursive
 
 			# Resume an interrupted upload or download — re-run the same command
 				verda s3 cp ./model.bin s3://my-bucket/model.bin
@@ -145,6 +154,12 @@ func NewCmdCp(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 
 			# Recursive upload with filter
 			verda s3 cp ./data s3://my-bucket/data/ --recursive --include "*.csv"
+
+				# Recursive upload, skipping temp files
+				verda s3 cp ./site s3://my-bucket/site/ --recursive --exclude "*.tmp"
+
+				# Override the content type on upload
+				verda s3 cp ./page.html s3://my-bucket/page.html --content-type text/html
 
 			# Preview a recursive download
 			verda s3 cp s3://my-bucket/logs/ ./logs --recursive --dryrun
@@ -559,9 +574,20 @@ func downloadToLocal(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.I
 	firstSet := false
 	started := time.Now()
 
+	announce := !quiet && !isStructured(f.OutputFormat())
 	n, err := resumableDownload(ctx, client, &resumableDownloadOptions{
 		Bucket: src.Bucket, Key: src.Key, DestPath: localPath,
 		PartSize: partSize, Concurrency: concurrency, NoResume: noResume,
+		OnResume: func(already, total int64) {
+			if announce {
+				pct := 0.0
+				if total > 0 {
+					pct = float64(already) / float64(total) * 100
+				}
+				_, _ = fmt.Fprintf(ioStreams.ErrOut, "Resuming download of %s (%s of %s, %.0f%% already on disk)\n",
+					rel, humanBytes(already), humanBytes(total), pct)
+			}
+		},
 		OnProgress: func(done, total int64) {
 			if !firstSet {
 				firstBytes, firstSet = done, true
