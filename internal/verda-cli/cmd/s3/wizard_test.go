@@ -17,23 +17,28 @@ package s3
 import (
 	"context"
 	"io"
+	"path/filepath"
 	"testing"
 
 	"github.com/verda-cloud/verdagostack/pkg/tui/wizard"
 )
 
 func TestBuildConfigureFlowHappyPath(t *testing.T) {
-	t.Parallel()
+	// No t.Parallel: t.Setenv isolates the credentials file the profile Loader reads.
+	t.Setenv("VERDA_SHARED_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "credentials"))
 
 	opts := &configureOptions{
-		Profile: "default",
+		Profile: defaultProfileName,
 	}
 
+	// No existing profiles → the only choice is "+ Create new profile…" (index 0);
+	// picking it prompts for the new name.
 	flow := buildConfigureFlow(opts)
 	engine := wizard.NewEngine(nil, nil,
 		wizard.WithOutput(io.Discard),
 		wizard.WithTestResults(
-			wizard.TextResult("staging"),                               // profile
+			wizard.SelectResult(0),                                     // profile: create new
+			wizard.TextResult("staging"),                               // new profile name
 			wizard.TextResult("AKIA1234567890EXAMPLE"),                 // access key
 			wizard.TextResult("wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLE"), // secret key
 			wizard.TextResult("https://objects.lab.verda.storage"),     // endpoint
@@ -63,7 +68,8 @@ func TestBuildConfigureFlowHappyPath(t *testing.T) {
 }
 
 func TestBuildConfigureFlowWithPresetFlags(t *testing.T) {
-	t.Parallel()
+	// No t.Parallel: t.Setenv isolates the credentials file the profile Loader reads.
+	t.Setenv("VERDA_SHARED_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "credentials"))
 
 	opts := &configureOptions{
 		Profile:   "prod",
@@ -71,7 +77,8 @@ func TestBuildConfigureFlowWithPresetFlags(t *testing.T) {
 		Endpoint:  "https://preset.endpoint",
 	}
 
-	// Only secret key and region need prompting.
+	// Profile preset (≠ default) skips the picker and the new-name step; only the
+	// secret key and region need prompting.
 	flow := buildConfigureFlow(opts)
 	engine := wizard.NewEngine(nil, nil,
 		wizard.WithOutput(io.Discard),

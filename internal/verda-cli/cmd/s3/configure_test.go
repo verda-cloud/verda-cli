@@ -47,6 +47,44 @@ func TestResolveCredentialsFileExplicit(t *testing.T) {
 	}
 }
 
+func TestProfileChoices(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "credentials")
+	content := `[default]
+verda_s3_access_key = AKIA
+verda_s3_secret_key = secret
+verda_s3_endpoint = https://objects.example.storage
+
+[production]
+verda_client_id = api-only
+`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	choices := profileChoices(path)
+	if len(choices) != 3 {
+		t.Fatalf("choices = %d, want 3 (default, production, create-new): %+v", len(choices), choices)
+	}
+	if choices[0].Value != "default" || choices[0].Description != "S3 configured" {
+		t.Errorf("choice[0] = %+v, want default / S3 configured", choices[0])
+	}
+	if choices[1].Value != "production" || choices[1].Description != "no S3 credentials yet" {
+		t.Errorf("choice[1] = %+v, want production / no S3 credentials yet", choices[1])
+	}
+	if choices[2].Value != newProfileSentinel {
+		t.Errorf("last choice = %+v, want the create-new sentinel", choices[2])
+	}
+}
+
+func TestProfileChoices_NoFile(t *testing.T) {
+	t.Parallel()
+	choices := profileChoices(filepath.Join(t.TempDir(), "does-not-exist"))
+	if len(choices) != 1 || choices[0].Value != newProfileSentinel {
+		t.Errorf("with no credentials file, want only the create-new choice, got %+v", choices)
+	}
+}
+
 func TestConfigureWritesINI(t *testing.T) {
 	t.Parallel()
 

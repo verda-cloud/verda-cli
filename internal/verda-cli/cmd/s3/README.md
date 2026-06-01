@@ -268,10 +268,13 @@ Business logic:
 
 Wizard flow (`configure`):
 
-1. Profile name (default `default`)
-2. S3 access key ID (masked)
-3. S3 secret access key (password prompt)
-4. S3 endpoint URL (must start with `http://` or `https://`)
-5. S3 region (default `us-east-1`)
+1. Profile — **pick an existing profile** (each tagged "S3 configured" / "no S3 credentials yet") **or "+ Create new profile…"**. The selection defaults to the active profile (`--profile` / `VERDA_PROFILE` / `verda auth use`).
+2. New profile name — only when "Create new" was chosen.
+3. S3 access key ID
+4. S3 secret access key (password prompt)
+5. S3 endpoint URL (must start with `http://` or `https://`)
+6. S3 region (default `us-east-1`)
 
-All five steps are skipped individually when the corresponding flag is already set — so `verda s3 configure --access-key X --endpoint Y` only prompts for the secret and region.
+Steps are skipped individually when the corresponding flag is already set — so `verda s3 configure --access-key X --endpoint Y` only prompts for the secret and region, and `--profile staging` skips the profile picker entirely (targeting `[staging]`).
+
+> Note: `configure` writes to the profile you pick/name here; it does **not** auto-follow the active profile the way the read commands (`ls`/`cp`/…) do. The picker defaulting to the active profile keeps the two aligned, but if you create credentials for a non-active profile, pass `--profile` to the read commands or `verda auth use <name>` to switch.
