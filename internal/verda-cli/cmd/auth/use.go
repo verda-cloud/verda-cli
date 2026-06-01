@@ -19,6 +19,7 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+	"github.com/verda-cloud/verdagostack/pkg/tui"
 	"go.yaml.in/yaml/v3"
 
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
@@ -58,7 +59,7 @@ func NewCmdUse(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 					return fmt.Errorf("no profiles found in %s — run 'verda auth login' first", path)
 				}
 
-				idx, err := f.Prompter().Select(cmd.Context(), "Select profile", profiles)
+				idx, err := f.Prompter().Select(cmd.Context(), "Select profile", profiles, tui.WithShowHints(true))
 				if err != nil {
 					return nil //nolint:nilerr // User pressed Esc/Ctrl+C.
 				}

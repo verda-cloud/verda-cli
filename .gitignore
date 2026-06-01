@@ -385,3 +385,5 @@ docs/plans/
 
 # AI agent project-level configs (installed by users, not shipped)
 .cursor/
+.claude/skills/
+.gitnexus

@@ -15,14 +15,63 @@
 package util
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/verda-cloud/verdagostack/pkg/tui"
 )
+
+// IsPromptCancel reports whether err represents a clean prompter exit
+// (Ctrl+C surfaces as tui.ErrInterrupted, Esc as context.Canceled) rather
+// than a real failure. Real I/O errors and context deadlines should propagate.
+//
+// Most call sites should prefer IsPromptInterrupt / IsPromptBack so the
+// two cancel keys can be handled differently — Ctrl+C is a deliberate
+// "I'm done with everything", Esc is a lightweight "back / cancel this
+// scope". Conflating them produces UX where the "esc back" hint surfaces
+// an unexpected confirmation dialog.
+func IsPromptCancel(err error) bool {
+	return IsPromptInterrupt(err) || IsPromptBack(err)
+}
+
+// IsPromptInterrupt reports whether err is specifically a Ctrl+C interrupt
+// from the prompter (tui.ErrInterrupted). Use this to gate exit-confirmation
+// prompts — Ctrl+C is a deliberate "I want out" signal.
+func IsPromptInterrupt(err error) bool {
+	return errors.Is(err, tui.ErrInterrupted)
+}
+
+// IsPromptBack reports whether err is specifically an Esc / soft-cancel
+// from the prompter (context.Canceled). Use this to drive "back" or
+// "return to previous scope" behavior — Esc should not surface an exit
+// confirmation since the hint bar already advertises "esc back".
+func IsPromptBack(err error) bool {
+	return errors.Is(err, context.Canceled)
+}
+
+// PromptBackOrExit renders the two-choice "Back to list / Exit" gate shown
+// after a detail view in interactive list loops. Esc returns to the list
+// (exit=false), Ctrl+C exits the loop (exit=true, no confirmation), and an
+// explicit "Exit" selection exits. Real prompter failures propagate.
+func PromptBackOrExit(ctx context.Context, prompter tui.Prompter) (exit bool, err error) {
+	nextIdx, nerr := prompter.Select(ctx, "", []string{"Back to list", "Exit"}, tui.WithShowHints(true))
+	if nerr != nil {
+		if IsPromptInterrupt(nerr) {
+			return true, nil // Ctrl+C = exit
+		}
+		if IsPromptBack(nerr) {
+			return false, nil // Esc = back to list
+		}
+		return false, nerr
+	}
+	return nextIdx == 1, nil
+}
 
 // CheckErr prints a user-friendly error to stderr and exits with code 1.
 func CheckErr(err error) {

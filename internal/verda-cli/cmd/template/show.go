@@ -21,6 +21,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/verda-cloud/verdagostack/pkg/tui"
 
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
@@ -173,7 +174,7 @@ func pickTemplateEntry(cmd *cobra.Command, f cmdutil.Factory) (*Entry, error) {
 		labels[i] = fmt.Sprintf("%-25s  %s", e.Resource+"/"+e.Name, e.Description)
 	}
 
-	idx, err := f.Prompter().Select(cmd.Context(), "Select a template", labels)
+	idx, err := f.Prompter().Select(cmd.Context(), "Select a template", labels, tui.WithShowHints(true))
 	if err != nil {
 		return nil, nil //nolint:nilerr // user canceled
 	}

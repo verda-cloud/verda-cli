@@ -79,7 +79,7 @@ func NewCmdUpdate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if listVersions {
-				return runList(cmd.Context(), ioStreams)
+				return runList(cmd.Context(), f, ioStreams)
 			}
 			if verify {
 				info := version.Get()
@@ -96,8 +96,10 @@ func NewCmdUpdate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 	return cmd
 }
 
-func runList(ctx context.Context, ioStreams cmdutil.IOStreams) error {
-	versions, err := fetchVersions(ctx)
+func runList(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams) error {
+	versions, err := cmdutil.WithSpinner(ctx, f.Status(), "Fetching available versions...", func() ([]string, error) {
+		return fetchVersions(ctx)
+	})
 	if err != nil {
 		return err
 	}
@@ -126,7 +128,9 @@ func runUpdate(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStrea
 	// Resolve target version.
 	target := targetVersion
 	if target == "" {
-		latest, err := fetchLatestVersion(ctx)
+		latest, err := cmdutil.WithSpinner(ctx, f.Status(), "Checking for latest version...", func() (string, error) {
+			return fetchLatestVersion(ctx)
+		})
 		if err != nil {
 			return err
 		}

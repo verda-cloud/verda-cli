@@ -1,0 +1,143 @@
+# Serverless Command Knowledge
+
+> Go house style lives in the root `CLAUDE.md` § "Go House Style". This file carries serverless-specific idioms only — see below for the two-SDK-service split, scaling-preset math, the "spot = container-only" invariant, and the fixed-storage contract that do not apply elsewhere.
+
+## ⚠️ Wire-Format Tests Must Stay in Sync (HARD RULE)
+
+**Any change to the create-request payload must come with a matching update to `wire_format_test.go`.** That file is the only test layer that catches bugs the SDK's `ValidateCreate*DeploymentRequest` does not (e.g. the `type:"shared"` → `volume_id` 400 we hit in production). `opts.request()` unit tests check field assembly in Go; the wire-format tests check the JSON the API actually receives.
+
+What "change to the create-request payload" covers:
+- Adding/removing/renaming any field on `containerCreateOptions` or `batchjobCreateOptions` that flows into `request()`.
+- Changing `buildVolumeMounts`, `buildEnvVars`, `buildContainerScaling`, or any helper that contributes to the request body.
+- Changing mount-type constants in `shared.go`, the SDK type tags, or the API path.
+- Adding new flags whose values appear in the request.
+
+What to do when you change the flow:
+1. Update `wire_format_test.go` so the assertions describe the *new* expected JSON, not the old one. Don't relax an assertion just to make it pass — that defeats the test.
+2. If you added a flag, add a focused wire-format case for the non-default value (like `TestContainerCreate_SecretMountWireFormat` does for `--secret-mount`).
+3. Run `make test`. If wire-format tests fail and you can't explain *why* the new JSON is correct, the production API will reject the request — go back and fix the flow before touching the test.
+
+This rule applies equally to Claude, Codex, Cursor, or a human editing the package. Reviewers should reject any PR that changes the create flow without also changing the wire-format tests.
+
+## Quick Reference
+
+- **Two top-level commands**, both registered in `cmd/cmd.go` under the "Serverless Commands" group:
+  - `verda container` → `/container-deployments` (continuous endpoints, supports spot)
+  - `verda batchjob` → `/job-deployments` (one-shot jobs, deadline-based, **no spot**)
+- There is **no** `verda serverless` parent command — the two trees were promoted to root for shorter invocations. They still share this Go package because they share wizard step factories, validators, and the API cache.
+- Verbs (both trees): `create`, `list` (alias `ls`), `describe` (aliases `get`, `show`), `delete` (aliases `rm`, `del`), `pause`, `resume`, `purge-queue`. Container also has `restart`.
+- Files:
+  - `container.go`, `batchjob.go` — Top-level command builders. `NewCmdContainer` and `NewCmdBatchjob` are exported and called directly from `cmd/cmd.go`. **Pre-release, two-layer gated like registry:** the Serverless command group is only registered when `VERDA_SERVERLESS_ENABLED=1` (`serverlessEnabled()` in `cmd/cmd.go`), and both parents set `Hidden: true` so they stay out of `verda --help` even when a tester flips the env var on. Drop the env gate + the two `Hidden: true` flags when serverless ships GA.
+  - `container_create.go` — `containerCreateOptions`, flags, `request()`, validate(), wizard entry point.
+  - `container_list.go` — `GetDeployments` + tabwriter + structured output.
+  - `container_describe.go` — `GetDeploymentByName` + `GetDeploymentStatus` (best-effort) + `selectContainerDeployment` picker.
+  - `container_delete.go` — `DeleteDeployment(timeoutMs)` + destructive confirm.
+  - `container_actions.go` — Data-driven action factory `newContainerActionCmd` (pause/resume/restart/purge-queue).
+  - `batchjob_create.go` — `batchjobCreateOptions` (simpler: no spot, deadline required).
+  - `batchjob_list.go`, `batchjob_describe.go`, `batchjob_delete.go`, `batchjob_actions.go` — Same shape as container, trimmed.
+  - `shared.go` — `validateDeploymentName` (RFC-1123 subset), `rejectLatestTag`, `parseEnvFlag`, `parseSecretMountFlag`, `confirmDestructive`, `statusColor`, `mountType*` + `envType*` constants.
+  - `wizard_shared.go` — Step builders shared by both create wizards: `stepName`, `stepImage`, `stepCompute`, `stepComputeSize`, `stepRegistryCreds`, `stepPort`, `stepEnvVars`, `stepMaxReplicas`, `stepRequestTTL`, `stepSecretMounts`. Plus the generic `durationStep` helper and three int validators. Each takes a `*T` pointer to the field it mutates, so the same step definition drives both `containerCreateOptions` and `batchjobCreateOptions`.
+  - `wizard.go` — `buildContainerCreateFlow` + container-only steps: spot/compute-type, healthcheck on/off + path (port is NOT prompted; it always defaults to the exposed port in `request()`), min-replicas, concurrency, queue-load preset + custom override, CPU/GPU util triggers, scale-up/down delays. 21 total steps in the container flow.
+  - `wizard_batchjob.go` — `buildBatchjobCreateFlow` + `stepBatchjobDeadline`. 11 total steps: 10 reused from `wizard_shared.go` + the batchjob-only deadline. Jobs have no spot, no min replicas, no scaling triggers, no healthcheck, no concurrency — all of those steps are simply absent from the flow.
+  - `wizard_cache.go` — `apiCache` with lazy loaders for compute resources, registry creds, secrets, file secrets. Shared across wizard passes so back-navigation doesn't re-hit the API. Used by both container and batchjob wizards.
+  - `wizard_subflows.go` — `promptEnvVar`, `promptSecretMount` for the two loop-add steps.
+  - `wizard_summary.go` — `renderContainerSummary` + `renderBatchjobSummary`. Printed from `runContainerCreate` / `runBatchjobCreate` after the wizard returns, immediately before the final deploy confirm. **Not** a wizard step — runs outside the engine so the review card gets full terminal width.
+  - `*_test.go` alongside each file.
+
+## Domain-Specific Logic
+
+### Two SDK services, two subcommands
+
+The web UI's "Deployment type: Continuous | Job" radio maps to two separate SDK services and two separate HTTP paths:
+
+- `ContainerDeploymentsService` at `/container-deployments` — full `ContainerScalingOptions` (min/max replicas, ScalingTriggers with QueueLoad + CPU/GPU util, scale-up/down policies, request TTL, concurrent requests). Supports `IsSpot: true`.
+- `ServerlessJobsService` at `/job-deployments` — thin `JobScalingOptions` (`MaxReplicaCount`, `QueueMessageTTLSeconds`, `DeadlineSeconds`). No min replicas, no triggers, no scale-up/down policies, no spot option.
+
+Consequence: **the CLI never re-asks** deployment type inside the wizard. Pick the subcommand, get the right API shape.
+
+### Scaling preset mapping (CRITICAL)
+
+`queue-preset` → `ScalingTriggers.QueueLoad.Threshold`:
+
+| Preset | Threshold |
+|--------|-----------|
+| `instant` | 1 |
+| `balanced` (default) | 3 |
+| `cost-saver` | 6 |
+| `custom` | value of `--queue-load` (1..1000) |
+
+Setting `--queue-load N` alone (without `--queue-preset custom`) is also accepted and behaves as custom. The preset name is NOT persisted server-side — on describe, the CLI reverses the mapping for display (threshold 1/3/6 → the named preset, else "custom: N"). See `resolveQueueLoad` in `container_create.go`.
+
+Aliases accepted for the "cost-saver" preset: `cost_saver`, `costsaver` — underscore and camel-case forms show up in copy-pasted configs, so we normalize.
+
+### :latest tag rejection
+
+Both `container create` and `batchjob create` call `verda.IsLatestTag(image)` via `rejectLatestTag` before the API call. The SDK also rejects in `ValidateCreate*DeploymentRequest`, but we fail fast with a friendly error before spinner. Tests: `TestRejectLatestTag`, `TestContainerRequest_RejectsLatest`, `TestBatchjobRequest_RejectsLatest`.
+
+### Deployment name format
+
+`[a-z0-9]([-a-z0-9]*[a-z0-9])?`, max 63 chars (RFC-1123 subset, URL-safe). Becomes part of `https://containers.datacrunch.io/<name>`. Immutable after create — the server refuses updates. `validateDeploymentName` enforces; tests cover edge cases (uppercase, underscore, leading/trailing hyphen, too long, empty).
+
+### Storage is server-allocated scratch
+
+Every create request includes exactly one `scratch` volume mount at `/data`. The CLI sends `{type: "scratch", mount_path: "/data"}` with no `size_in_mb` — the server allocates and sizes the scratch volume. `/dev/shm` is provided by the runtime; the CLI does not send a mount for it.
+
+There is **no** `--general-storage-size` or `--shm-size` flag. They were removed after the API rejected sized mounts with `volume_mounts.0.volume_id should not be null or undefined`: a sized mount must be `type: "shared"`, which references a named persistent volume by `volume_id` — a feature the CLI does not yet expose.
+
+Mount types in `ContainerVolumeMount.Type` that the CLI currently sends:
+
+- `"scratch"` — auto-allocated `/data`; no `SizeInMB`, no `VolumeID`. See `buildVolumeMounts` in `container_create.go`.
+- `"secret"` — from `--secret-mount NAME:PATH`; `SecretName` set.
+
+`"shared"` (named persistent volume) is intentionally unused — it requires `volume_id`, which has no flag yet. If the CLI gains a `verda volume` integration for serverless deployments, this is the wiring point.
+
+### Batchjob cannot use spot
+
+`batchjobCreateOptions` has no `Spot` field and no `--spot` flag. `CreateJobDeploymentRequest` has no `IsSpot`. The user asked for this invariant up front — if the web UI ever adds spot to jobs, revisit both structs and the wizard at the same time.
+
+### Deadline is required for batchjob
+
+`JobScalingOptions.DeadlineSeconds` must be `> 0` — enforced in `batchjobCreateOptions.request()`, in the SDK via `ValidateCreateJobDeploymentRequest`, and listed in `missingBatchjobCreateFlags`. The batchjob wizard (when implemented — see Gotchas) must include a deadline prompt as a required field.
+
+### Action-command factory pattern
+
+`newContainerActionCmd` / `newBatchjobActionCmd` build a `*cobra.Command` from `(verb, short, spinner, successMsg, destructive, fn)`. This avoids five nearly-identical files per subcommand. If you need to add an action (e.g. a future `scaling get`), add a new call site with the right SDK method. If you need per-action flags beyond `--yes`, you'll have to step out of the factory — acceptable if one action grows special, not if two do.
+
+### Destructive confirms
+
+`restart` and `purge-queue` are marked destructive (they break in-flight requests); `pause` and `resume` are not. In agent mode, destructive actions require `--yes` and return `CONFIRMATION_REQUIRED` otherwise. Non-agent TTY uses `confirmDestructive` from `shared.go` (red warning + "cannot be undone" line + `prompter.Confirm`).
+
+### Status color and card rendering
+
+`statusColor(status)` in `shared.go` heuristically picks green (running/active/healthy), red (error/failed), dim (paused/stopped/offline), yellow (transitional) by substring match. There's no SDK enum for deployment status — the server returns free-form strings today. Keep the matcher lenient.
+
+Describe cards (`renderContainerDeploymentCard`, `renderJobDeploymentCard`) print one `Label  value` line per section, using color-6 bold for labels. Env var VALUES are intentionally not printed — only names — since values may contain secrets.
+
+## Gotchas & Edge Cases
+
+- **Wizard omits the healthcheck-path step when healthcheck is Off.** The `healthcheck-path` step has `ShouldSkip: c["healthcheck"] == "off"`; the engine wires the skip gate via `DependsOn`. There is intentionally no `healthcheck-port` wizard step — `request()` always defaults the probe port to the exposed port (`hcPort = o.Port` when `HealthcheckPort == 0`). The `--healthcheck-port` flag still works for the rare case where the probe must hit a different port than the public listener.
+- **`registryPublicValue = "__public__"` sentinel.** The registry-creds step's loader prepends a "Public (no credentials)" choice with this sentinel as its Value. The Setter maps the sentinel back to `opts.RegistryCreds = ""`. If you rename the sentinel, grep both sides — the Setter reads the string literal.
+- **`compute-size` is a separate step from `compute`.** VM's wizard combines resource + count in a single step via in-Loader prompting; serverless keeps them separate so users can go back and change the size without re-picking the resource. Lower engineering cost, same UX.
+- **Util triggers off by default, but wizard asks anyway.** The CPU/GPU util steps accept empty ("off"), "off", or `1..100`. Setter maps empty/"off" to 0 (trigger disabled). Users should be able to Enter-through both without setting them.
+- **Custom queue-load is a separate step.** `queue-load-custom` has `ShouldSkip: c["queue-preset"] != "custom"`. If the user goes back and changes preset to a named one, the engine's reset logic clears the custom value via `Resetter`.
+- **No `+ Create new` for registry creds in the wizard.** v1 intentionally omits the inline create-new sub-flow for registry credentials — users pick existing or Public. Adding new creds requires `verda registry configure` out-of-band, or a future top-level `verda registry-creds` command. The design doc notes this as future work.
+- **Confirm is NOT a wizard step.** `runContainerCreate` prints the summary + runs `prompter.Confirm` after `engine.Run` returns. Keeps the review card at full terminal width and lets us pipe through `--yes` cleanly. If you move it into the wizard, you lose layout control.
+- **Agent mode + create = flag-only.** In `--agent`, if any of `--name/--image/--compute` is missing we return `MISSING_REQUIRED_FLAGS` immediately. The wizard is never launched under `--agent`, even without credentials — that would be an interactive prompt, which is blocked.
+- **Batchjob wizard shares 10 steps with container.** The split lives in `wizard_shared.go` (shared factories taking `*T` pointers) vs `wizard.go` (container-only) vs `wizard_batchjob.go` (batchjob-only). Adding a new shared field: put the step factory in `wizard_shared.go` and wire it into both flows. Adding a field that only one subcommand needs: put it directly in `wizard.go` or `wizard_batchjob.go`.
+- **Scaling preset + legacy rows on describe.** When a deployment was created via the web UI with a custom queue-load (say 10), our CLI shows "custom: 10" rather than a named preset. Don't try to round-trip it back to a named preset — exact threshold wins.
+- **`ContainerDeployment.Status` is NOT in the `GetDeployments` list response.** The list endpoint returns `ContainerDeployment` without status. We call `GetDeploymentStatus(name)` per-row in `describe`, but NOT in `list` (would N+1). If the web UI grows a bulk status endpoint, wire it in.
+- **Env-var name validation:** `^[A-Z_][A-Z0-9_]*$`. Lowercase or leading-digit names are rejected client-side in both `parseEnvFlag` and `promptEnvVar`. This is stricter than POSIX (which allows lowercase) but matches Verda's conventions.
+- **Secret mount path must be absolute.** `parseSecretMountFlag` and `promptSecretMount` both check `strings.HasPrefix(path, "/")`. No trailing-slash normalization is applied.
+- **`DeleteDeployment` timeout semantics:** `--timeout-ms` flag maps directly to the SDK's `timeoutMs` parameter. `-1` (default) uses the API default of 60s; `0` returns immediately; `>0` waits up to that many ms (capped at 300000 server-side).
+
+## Relationships
+
+- `cmdutil` (`internal/verda-cli/cmd/util`) — `Factory`, `IOStreams`, `WithSpinner`, `RunWithSpinner`, `DebugJSON`, `WriteStructured`, `NewMissingFlagsError`, `NewConfirmationRequiredError`, `UsageErrorf`, `LongDesc`, `Examples`, `DefaultSubCommandRun`.
+- `verdagostack/pkg/tui/wizard` — `Flow`, `Step`, `Choice`, `Store`, `Engine`, `NewEngine`, `StaticChoices`, `WithOutput`, `WithExitConfirmation`, prompt-type enums.
+- `verdagostack/pkg/tui` — `Prompter`, `Status`, `WithConfirmDefault`.
+- SDK (`verdacloud-sdk-go/pkg/verda`):
+  - `ContainerDeploymentsService` — `GetDeployments`, `CreateDeployment`, `GetDeploymentByName`, `DeleteDeployment`, `GetDeploymentStatus`, `PauseDeployment`, `ResumeDeployment`, `RestartDeployment`, `PurgeDeploymentQueue`, `GetServerlessComputeResources`, `GetRegistryCredentials`, `GetSecrets`, `GetFileSecrets`, `ValidateCreateDeploymentRequest`.
+  - `ServerlessJobsService` — `GetJobDeployments`, `CreateJobDeployment`, `GetJobDeploymentByName`, `DeleteJobDeployment`, `GetJobDeploymentStatus`, `PauseJobDeployment`, `ResumeJobDeployment`, `PurgeJobDeploymentQueue`, `ValidateCreateJobDeploymentRequest`.
+  - Types: `ContainerDeployment`, `JobDeployment`, `JobDeploymentShortInfo`, `CreateDeploymentRequest`, `CreateJobDeploymentRequest`, `ContainerScalingOptions`, `JobScalingOptions`, `ScalingTriggers`, `QueueLoadTrigger`, `UtilizationTrigger`, `ScalingPolicy`, `ContainerCompute`, `ContainerRegistrySettings`, `RegistryCredentialsRef`, `ContainerEnvVar`, `ContainerVolumeMount`, `ContainerHealthcheck`, `ContainerEntrypointOverrides`, `ComputeResource`, `Secret`, `FileSecret`, `RegistryCredentials`.
+- `charm.land/lipgloss/v2` — status color styles + describe-card labels.
+- `github.com/spf13/cobra` — command plumbing.

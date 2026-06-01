@@ -42,6 +42,10 @@ func translateError(err error) error {
 			return cmdutil.NewAuthError(apiErr.ErrorMessage())
 		case "BucketAlreadyOwnedByYou", "BucketAlreadyExists":
 			return cmdutil.NewValidationError("bucket", apiErr.ErrorMessage())
+		case "BucketNotEmpty":
+			return cmdutil.NewValidationError("bucket", "bucket is not empty — pass --force to delete its contents first")
+		case "NoSuchUpload":
+			return cmdutil.NewNotFoundError("upload", apiErr.ErrorMessage())
 		}
 	}
 
@@ -50,6 +54,21 @@ func translateError(err error) error {
 	}
 
 	return err
+}
+
+// isNoSuchUpload reports whether err is the S3/RGW NoSuchUpload (404) returned
+// when a multipart UploadId is unknown — expired, aborted, or never existed.
+// The resume decision tree treats this as "drop checkpoint + fresh upload".
+// Keeps smithy imports isolated to this file.
+func isNoSuchUpload(err error) bool {
+	if err == nil {
+		return false
+	}
+	var apiErr smithy.APIError
+	if errors.As(err, &apiErr) {
+		return apiErr.ErrorCode() == "NoSuchUpload"
+	}
+	return false
 }
 
 func isNetworkError(err error) bool {

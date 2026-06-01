@@ -15,9 +15,15 @@
 package util
 
 import (
+	"bytes"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
+	"regexp"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
 	"github.com/verda-cloud/verdagostack/pkg/tui"
@@ -26,6 +32,28 @@ import (
 
 	clioptions "github.com/verda-cloud/verda-cli/internal/verda-cli/options"
 )
+
+const (
+	// retryMaxAttempts is the number of retries (additional attempts after the
+	// initial request) for transient API failures: 429, 408, 5xx. The SDK
+	// applies exponential backoff with jitter between attempts.
+	retryMaxAttempts = 3
+	// retryInitialDelay is the base delay before the first retry. Doubles
+	// each attempt, capped at 30s by the SDK middleware.
+	retryInitialDelay = 200 * time.Millisecond
+)
+
+// sensitiveJSONFieldRe matches "field": "value" JSON entries whose values must
+// not appear in debug output (OAuth credentials, bearer tokens, etc.).
+// Value pattern allows escaped quotes (\") so values containing them are
+// redacted whole — a bare [^"]* would stop at the first escaped quote and
+// leak the remainder while emitting malformed JSON.
+var sensitiveJSONFieldRe = regexp.MustCompile(
+	`("(?:client_secret|access_token|refresh_token|id_token|password|api_key|bearer|authorization)")(\s*:\s*)"(?:[^"\\]|\\.)*"`)
+
+func redactSensitiveJSON(s string) string {
+	return sensitiveJSONFieldRe.ReplaceAllString(s, `$1$2"<redacted>"`)
+}
 
 // Factory provides shared resources that are created once in the root command
 // and passed down to every subcommand. This pattern keeps commands testable
@@ -81,17 +109,89 @@ func (t *userAgentTransport) RoundTrip(req *http.Request) (*http.Response, error
 	return t.base.RoundTrip(req)
 }
 
-// NewFactory creates a Factory from the given Options.
-func NewFactory(opts *clioptions.Options) Factory {
-	f := &factoryImpl{
-		opts: opts,
-		client: &http.Client{
-			Timeout:   opts.Timeout,
-			Transport: &userAgentTransport{base: http.DefaultTransport, userAgent: userAgentString()},
-		},
-		prompter: tui.Default(),
-		status:   tui.DefaultStatus(),
+// debugTransport logs HTTP request and response wire details to out when
+// enabled() returns true. The Authorization header value is redacted.
+type debugTransport struct {
+	base    http.RoundTripper
+	out     io.Writer
+	enabled func() bool
+}
+
+func (t *debugTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if t.enabled == nil || !t.enabled() || t.out == nil {
+		return t.base.RoundTrip(req)
 	}
+
+	var reqBody []byte
+	if req.Body != nil {
+		b, rerr := io.ReadAll(req.Body)
+		_ = req.Body.Close()
+		if rerr != nil {
+			// Body already drained; sending a silently-truncated request would
+			// be worse than failing. Surface the read error instead.
+			_, _ = fmt.Fprintf(t.out, "DEBUG: error reading request body: %v\n", rerr)
+			return nil, rerr
+		}
+		reqBody = b
+		req.Body = io.NopCloser(bytes.NewReader(reqBody))
+	}
+
+	_, _ = fmt.Fprintf(t.out, "DEBUG: HTTP %s %s\n", req.Method, req.URL)
+	keys := make([]string, 0, len(req.Header))
+	for k := range req.Header {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		if strings.EqualFold(k, "Authorization") {
+			_, _ = fmt.Fprintf(t.out, "DEBUG:   %s: <redacted>\n", k)
+			continue
+		}
+		_, _ = fmt.Fprintf(t.out, "DEBUG:   %s: %s\n", k, strings.Join(req.Header[k], ", "))
+	}
+	if len(reqBody) > 0 {
+		_, _ = fmt.Fprintf(t.out, "DEBUG: request body: %s\n", redactSensitiveJSON(string(reqBody)))
+	}
+
+	resp, err := t.base.RoundTrip(req)
+	if err != nil {
+		_, _ = fmt.Fprintf(t.out, "DEBUG: HTTP error: %v\n", err)
+		return resp, err
+	}
+
+	var respBody []byte
+	if resp.Body != nil {
+		b, rerr := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if rerr != nil {
+			// Body already drained; handing the SDK an empty body would decode
+			// to a misleading "unexpected end of JSON". Surface the real error.
+			_, _ = fmt.Fprintf(t.out, "DEBUG: error reading response body: %v\n", rerr)
+			resp.Body = http.NoBody
+			return resp, rerr
+		}
+		respBody = b
+		resp.Body = io.NopCloser(bytes.NewReader(respBody))
+	}
+	_, _ = fmt.Fprintf(t.out, "DEBUG: HTTP response %s\n", resp.Status)
+	if len(respBody) > 0 {
+		_, _ = fmt.Fprintf(t.out, "DEBUG: response body: %s\n", redactSensitiveJSON(string(respBody)))
+	}
+	return resp, nil
+}
+
+// NewFactory creates a Factory from the given Options. debugOut receives
+// HTTP request/response dumps when --debug is enabled.
+func NewFactory(opts *clioptions.Options, debugOut io.Writer) Factory {
+	f := &factoryImpl{opts: opts}
+	var rt http.RoundTripper = &userAgentTransport{base: http.DefaultTransport, userAgent: userAgentString()}
+	rt = &debugTransport{base: rt, out: debugOut, enabled: f.Debug}
+	f.client = &http.Client{
+		Timeout:   opts.Timeout,
+		Transport: rt,
+	}
+	f.prompter = tui.Default()
+	f.status = tui.DefaultStatus()
 	if opts.Agent {
 		f.prompter = &agentPrompter{}
 		f.status = nil
@@ -142,6 +242,20 @@ func (f *factoryImpl) VerdaClient() (*verda.Client, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// SDK doesn't enable retry by default. Add the exponential-backoff
+	// middleware so transient failures (429 rate limit, 5xx, 408, 504)
+	// retry transparently across all CLI commands. Auth/client errors
+	// (4xx except 408/429) never retry — see shouldRetry in the SDK.
+	//
+	// shouldRetry is method-agnostic, so POST creates also retry on 5xx. That's
+	// safe here: deployment names are unique slugs, so a retry after a partial
+	// commit gets 409 (4xx, non-retryable) rather than creating a duplicate. If
+	// a non-idempotent endpoint without a natural unique key is ever added, make
+	// shouldRetry method-aware in the SDK before relying on this.
+	client.AddRequestMiddleware(verda.ExponentialBackoffRetryMiddleware(
+		retryMaxAttempts, retryInitialDelay, client.Logger,
+	))
 
 	f.verda = client
 	return client, nil

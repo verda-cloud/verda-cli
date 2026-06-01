@@ -17,6 +17,7 @@ package s3
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -84,6 +85,22 @@ type cpFakeAPI struct {
 	listObjectsPages []*s3.ListObjectsV2Output
 	listObjectsCalls int
 	listErr          error
+	downloadBody     []byte // served by Head/GetObject for the resumable downloader
+}
+
+func (c *cpFakeAPI) HeadObject(ctx context.Context, in *s3.HeadObjectInput, opts ...func(*s3.Options)) (*s3.HeadObjectOutput, error) {
+	return &s3.HeadObjectOutput{ContentLength: aws.Int64(int64(len(c.downloadBody))), ETag: aws.String("\"e\"")}, nil
+}
+
+func (c *cpFakeAPI) GetObject(ctx context.Context, in *s3.GetObjectInput, opts ...func(*s3.Options)) (*s3.GetObjectOutput, error) {
+	body := c.downloadBody
+	if rng := aws.ToString(in.Range); rng != "" {
+		var start, end int64
+		if _, err := fmt.Sscanf(rng, "bytes=%d-%d", &start, &end); err == nil && start <= end && end < int64(len(body)) {
+			body = body[start : end+1]
+		}
+	}
+	return &s3.GetObjectOutput{Body: io.NopCloser(bytes.NewReader(body))}, nil
 }
 
 func (c *cpFakeAPI) CopyObject(ctx context.Context, in *s3.CopyObjectInput, opts ...func(*s3.Options)) (*s3.CopyObjectOutput, error) {
@@ -180,14 +197,12 @@ func TestCp_Upload_SingleFile(t *testing.T) {
 }
 
 func TestCp_Download_SingleFile(t *testing.T) {
-	// no t.Parallel
+	// no t.Parallel. Single-file download goes through the resumable downloader,
+	// which fetches via the API (Head + ranged Get), not the transfer manager.
 	tmp := t.TempDir()
 	dst := filepath.Join(tmp, "out.txt")
 
-	fake := &cpFakeTransporter{downloadWrite: []byte("hello")}
-	restoreT := withFakeTransporter(fake)
-	defer restoreT()
-	restore := withFakeClient(&cpFakeAPI{})
+	restore := withFakeClient(&cpFakeAPI{downloadBody: []byte("hello")})
 	defer restore()
 
 	out := &bytes.Buffer{}
@@ -198,9 +213,6 @@ func TestCp_Download_SingleFile(t *testing.T) {
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute: %v", err)
-	}
-	if len(fake.downloads) != 1 {
-		t.Fatalf("Download calls = %d, want 1", len(fake.downloads))
 	}
 	body, err := os.ReadFile(dst) // #nosec G304 -- dst is under t.TempDir()
 	if err != nil {
@@ -440,6 +452,58 @@ func TestCp_RecursiveDownload_EscapeAttempt(t *testing.T) {
 	// And no local file should exist at the escape target.
 	if _, statErr := os.Stat(filepath.Join(tmp, "etc", "passwd")); statErr == nil {
 		t.Errorf("file written outside dstDir: %s", filepath.Join(tmp, "etc", "passwd"))
+	}
+}
+
+// TestCp_RecursiveS3ToS3 exercises copyTree: every listed key under the source
+// prefix is copied to the destination prefix with its relative path preserved,
+// and --exclude is honored against the relative key.
+func TestCp_RecursiveS3ToS3(t *testing.T) {
+	// no t.Parallel
+	fake := &cpFakeAPI{
+		listObjectsPages: []*s3.ListObjectsV2Output{
+			{
+				Contents: []s3types.Object{
+					{Key: aws.String("data/a.txt"), Size: aws.Int64(1)},
+					{Key: aws.String("data/sub/b.txt"), Size: aws.Int64(1)},
+					{Key: aws.String("data/skip.log"), Size: aws.Int64(1)},
+				},
+				IsTruncated: aws.Bool(false),
+			},
+		},
+	}
+	restore := withFakeClient(fake)
+	defer restore()
+	restoreT := withFakeTransporter(&cpFakeTransporter{})
+	defer restoreT()
+
+	out := &bytes.Buffer{}
+	f := cmdutil.NewTestFactory(nil)
+	cmd := NewCmdCp(f, cmdutil.IOStreams{Out: out, ErrOut: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"s3://src-bucket/data/", "s3://dst-bucket/dest/", "--recursive", "--exclude", "*.log"})
+	cmd.SetContext(context.Background())
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	// "*.log" excludes data/skip.log (rel "skip.log"); the two .txt keys copy
+	// with their relative paths preserved under the dest prefix.
+	gotKeys := make([]string, 0, len(fake.copyInputs))
+	for _, in := range fake.copyInputs {
+		if b := aws.ToString(in.Bucket); b != "dst-bucket" {
+			t.Errorf("copy dst Bucket = %q, want dst-bucket", b)
+		}
+		gotKeys = append(gotKeys, aws.ToString(in.Key))
+	}
+	sort.Strings(gotKeys)
+	want := []string{"dest/a.txt", "dest/sub/b.txt"}
+	if len(gotKeys) != len(want) {
+		t.Fatalf("copied keys = %v, want %v", gotKeys, want)
+	}
+	for i := range want {
+		if gotKeys[i] != want[i] {
+			t.Errorf("copied keys[%d] = %q, want %q (all=%v)", i, gotKeys[i], want[i], gotKeys)
+		}
 	}
 }
 

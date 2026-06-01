@@ -82,14 +82,19 @@ func runDoctor(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 	// 3. Authentication valid (skip if creds or API failed)
 	authResult := checkAuthentication(f, credResult, apiResult)
 
+	// CLI update check hits GitHub; spinner covers ~2s of silence.
+	versionResult, _ := cmdutil.WithSpinner(ctx, f.Status(), "Checking for CLI updates...", func() (checkResult, error) {
+		return checkCLIVersion(ctx), nil
+	})
+
 	checks := []checkResult{
 		credResult,
 		apiResult,
 		authResult,
-		checkCLIVersion(ctx),   // 4. CLI up to date
-		checkBinaryInstalled(), // 5. Binary installed
-		checkTemplatesDir(),    // 6. Templates directory
-		checkConfigDir(),       // 7. Config directory
+		versionResult,
+		checkBinaryInstalled(),
+		checkTemplatesDir(),
+		checkConfigDir(),
 	}
 
 	r := report{Checks: checks}

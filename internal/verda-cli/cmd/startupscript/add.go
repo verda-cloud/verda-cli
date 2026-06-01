@@ -105,7 +105,7 @@ func runAdd(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, 
 		sourceIdx, err := prompter.Select(ctx, "Script source", []string{
 			"Load from file",
 			"Paste content",
-		})
+		}, tui.WithShowHints(true))
 		if err != nil {
 			return nil
 		}

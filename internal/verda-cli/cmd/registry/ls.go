@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/verda-cloud/verdagostack/pkg/tui"
 
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
@@ -180,7 +181,7 @@ func runLsInteractive(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.
 	labels = append(labels, "Exit")
 
 	for {
-		idx, err := prompter.Select(ctx, "Select repository (type to filter)", labels)
+		idx, err := prompter.Select(ctx, "Select repository (type to filter)", labels, tui.WithShowHints(true))
 		if err != nil {
 			// Prompter-layer cancellation (Ctrl-C, ESC) returns a
 			// sentinel error; vm list treats it as a clean exit.

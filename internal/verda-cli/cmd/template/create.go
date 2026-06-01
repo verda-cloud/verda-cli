@@ -20,6 +20,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/verda-cloud/verdagostack/pkg/tui"
 
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/vm"
@@ -78,7 +79,7 @@ func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 	prompter := f.Prompter()
 
 	// 1. Select resource type.
-	idx, err := prompter.Select(ctx, "Resource type", resourceTypes)
+	idx, err := prompter.Select(ctx, "Resource type", resourceTypes, tui.WithShowHints(true))
 	if err != nil {
 		return nil //nolint:nilerr // user cancellation (Ctrl+C) is not an error
 	}

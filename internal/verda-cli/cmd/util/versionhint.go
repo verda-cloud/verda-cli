@@ -85,11 +85,8 @@ func SaveVersionCache(path string, c *VersionCache) error {
 	return os.WriteFile(path, data, 0o644) //nolint:gosec // version cache is not sensitive
 }
 
-// FetchLatestVersion queries the GitHub releases API for the latest release
-// tag of verda-cli. The per-request timeout is intentionally tight (2s): the
-// only callers are `doctor`, `update`, and help/root — if GitHub is slow or
-// unreachable we'd rather skip the hint than make the user wait, and a live
-// CLI on a reachable network comfortably returns in well under 2s.
+// FetchLatestVersion returns the latest verda-cli release tag from GitHub.
+// Uses a 2s timeout so slow/unreachable GitHub fails fast instead of stalling UX.
 func FetchLatestVersion(ctx context.Context) (string, error) {
 	const url = "https://api.github.com/repos/verda-cloud/verda-cli/releases/latest"
 
@@ -125,6 +122,21 @@ func FetchLatestVersion(ctx context.Context) (string, error) {
 	return release.TagName, nil
 }
 
+// CheckVersionFromCache reads ~/.verda/version-check.json only—no network.
+// Empty cache yields latest "" and callers skip the hint.
+func CheckVersionFromCache() (latest, current string, err error) {
+	cachePath, err := VersionCachePath()
+	if err != nil {
+		return "", "", err
+	}
+	cache, err := LoadVersionCache(cachePath)
+	if err != nil {
+		return "", "", err
+	}
+	current = currentVersion()
+	return cache.LatestVersion, current, nil
+}
+
 // CheckVersion loads the version cache, fetches if stale (24h TTL), saves the
 // cache, and returns the latest and current versions. On fetch error it falls
 // back to the cached value.
@@ -154,15 +166,22 @@ func CheckVersion(ctx context.Context) (latest, current string, err error) {
 			cache.CheckedAt = time.Now()
 			_ = SaveVersionCache(cachePath, cache) // best-effort
 		}
-		// fetchErr != nil && cache.LatestVersion != "": fall back to cached value
+		// Stale fetch with retained cache: keep serving cached latest.
 	}
 
-	current = version.Get().GitVersion
-	if !strings.HasPrefix(current, "v") {
-		current = "v" + current
-	}
+	current = currentVersion()
 
 	return latest, current, nil
+}
+
+// currentVersion returns the running CLI version, ensuring a "v" prefix so it
+// compares cleanly against tag names from the GitHub releases API.
+func currentVersion() string {
+	v := version.Get().GitVersion
+	if !strings.HasPrefix(v, "v") {
+		v = "v" + v
+	}
+	return v
 }
 
 // PrintVersionHint prints an update hint to w if latest > current.
@@ -178,7 +197,7 @@ func CompareVersions(a, b string) int {
 	aParts := parseSemver(a)
 	bParts := parseSemver(b)
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if aParts[i] < bParts[i] {
 			return -1
 		}

@@ -42,3 +42,9 @@ func NewStdIOStreams() IOStreams {
 func IsStdoutTerminal() bool {
 	return term.IsTerminal(os.Stdout.Fd())
 }
+
+// IsStderrTerminal returns true if stderr is a terminal. Progress/status output
+// goes to stderr, so in-place (\r) rendering should be gated on this.
+func IsStderrTerminal() bool {
+	return term.IsTerminal(os.Stderr.Fd())
+}

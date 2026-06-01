@@ -25,6 +25,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
+	"github.com/verda-cloud/verdagostack/pkg/tui"
 
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
@@ -198,7 +199,7 @@ func pickInstance(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOSt
 	}
 	labels = append(labels, "Cancel")
 
-	idx, err := f.Prompter().Select(ctx, "Select instance to SSH into", labels)
+	idx, err := f.Prompter().Select(ctx, "Select instance to SSH into", labels, tui.WithShowHints(true))
 	if err != nil {
 		return "", err
 	}

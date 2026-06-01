@@ -253,7 +253,7 @@ func runAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 		}
 		actionLabels = append(actionLabels, "Cancel")
 
-		actionIdx, err := prompter.Select(ctx, "Select action", actionLabels)
+		actionIdx, err := prompter.Select(ctx, "Select action", actionLabels, tui.WithShowHints(true))
 		if err != nil {
 			return nil
 		}
@@ -412,7 +412,7 @@ func selectInstance(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IO
 	}
 	labels = append(labels, "Cancel")
 
-	idx, err := f.Prompter().Select(ctx, "Select instance (type to filter)", labels)
+	idx, err := f.Prompter().Select(ctx, "Select instance (type to filter)", labels, tui.WithShowHints(true))
 	if err != nil {
 		return "", nil //nolint:nilerr // User pressed Esc/Ctrl+C during prompt.
 	}

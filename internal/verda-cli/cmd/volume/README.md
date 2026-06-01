@@ -48,7 +48,7 @@ verda vol trash
 ## Interactive vs Non-Interactive
 
 ### create
-All four flags (`--name`, `--size`, `--type`, `--location`) can be provided for fully non-interactive mode. Any missing flag triggers an interactive prompt for that field. Type is prompted as a selection (NVMe / HDD with pricing), size defaults to 100 GiB, location is fetched from the API and offered as a selection.
+All four flags (`--name`, `--size`, `--type`, `--location`) can be provided for fully non-interactive mode. Any missing flag triggers an interactive prompt for that field. Type defaults to NVMe (HDD is deprecated and no longer offered; NVMe pricing is shown in the confirmation summary), size defaults to 100 GiB, location is fetched from the API and offered as a selection.
 
 ### action
 If `--id` is omitted, an interactive volume picker is shown. The action itself is always selected interactively. Destructive actions (detach, delete) require confirmation. Rename, resize, and clone prompt for additional input via a `Prepare` callback before execution.

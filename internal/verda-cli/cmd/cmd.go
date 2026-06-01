@@ -37,6 +37,7 @@ import (
 	mcpcmd "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/mcp"
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/registry"
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/s3"
+	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/serverless"
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/settings"
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/skills"
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/ssh"
@@ -70,21 +71,17 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) (*cobra.Command, *clioptions.Op
 				_, _ = fmt.Fprint(cmd.OutOrStdout(), versionOutput())
 				return ErrVersionRequested
 			}
+			printBanner(cmd.OutOrStdout())
 			return cmd.Help()
 		},
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-			// Agent mode always implies JSON output and no TUI. Apply
-			// this before the credential-skip check so commands that
-			// bypass Complete() (skills, mcp serve, auth show/use) still
-			// get the right output mode and suppress spinners.
+			// --agent forces JSON before credential skip paths run Complete().
 			if opts.Agent {
 				opts.Output = "json"
 			}
 
-			// Skip heavy credential resolution for commands that don't need it:
-			// - mcp serve: defers auth to the first tool call
-			// - auth show: diagnostic command that should work even without valid credentials
-			// - auth use: switches profiles, doesn't need current credentials
+			// Commands that legitimately run without resolved credentials (mcp serve,
+			// auth show/use, registry/s3/skills trees, doctor).
 			if skipCredentialResolution(cmd) {
 				log.Init(opts.Log)
 				return nil
@@ -94,26 +91,22 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) (*cobra.Command, *clioptions.Op
 				return err
 			}
 			log.Init(opts.Log)
-			// Apply saved theme (best effort).
+			// Best-effort theme from ~/.verda config.
 			if theme := viper.GetString("settings.theme"); theme != "" {
 				bubbletea.SetThemeByName(theme)
 			}
 			return nil
 		},
 		PersistentPostRun: func(cmd *cobra.Command, _ []string) {
-			// Version-update hint is best-effort and ONLY runs on commands
-			// where the user is plausibly interested in version info
-			// (doctor, update, help, and bare `verda`). Business commands
-			// like `vm list` or `vccr ls` never do a network fetch for a
-			// cosmetic hint. See shouldCheckVersion below.
+			// Update hint: read disk cache only (doctor refreshes it over the network).
 			if opts.Agent || opts.Output != "table" {
 				return
 			}
 			if !shouldCheckVersion(cmd) {
 				return
 			}
-			latest, current, err := cmdutil.CheckVersion(cmd.Context())
-			if err != nil {
+			latest, current, err := cmdutil.CheckVersionFromCache()
+			if err != nil || latest == "" {
 				return
 			}
 			cmdutil.PrintVersionHint(ioStreams.ErrOut, latest, current)
@@ -135,20 +128,18 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) (*cobra.Command, *clioptions.Op
 		initConfig(viper.GetString(clioptions.FlagConfig))
 	})
 
-	f := cmdutil.NewFactory(opts)
+	f := cmdutil.NewFactory(opts, ioStreams.ErrOut)
 
 	resourceCmds := []*cobra.Command{
 		availability.NewCmdAvailability(f, ioStreams),
 		images.NewCmdImages(f, ioStreams),
 		instancetypes.NewCmdInstanceTypes(f, ioStreams),
 		locations.NewCmdLocations(f, ioStreams),
+		s3.NewCmdS3(f, ioStreams),
 		sshkey.NewCmdSSHKey(f, ioStreams),
 		startupscript.NewCmdStartupScript(f, ioStreams),
 		template.NewCmdTemplate(f, ioStreams),
 		volume.NewCmdVolume(f, ioStreams),
-	}
-	if s3Enabled() {
-		resourceCmds = append(resourceCmds, s3.NewCmdS3(f, ioStreams))
 	}
 	if registryEnabled() {
 		resourceCmds = append(resourceCmds, registry.NewCmdRegistry(f, ioStreams))
@@ -168,25 +159,36 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) (*cobra.Command, *clioptions.Op
 				ssh.NewCmdSSH(f, ioStreams),
 			},
 		},
-		{
+	}
+	if serverlessEnabled() {
+		groups = append(groups, cmdutil.CommandGroup{
+			Message: "Serverless Commands:",
+			Commands: []*cobra.Command{
+				serverless.NewCmdContainer(f, ioStreams),
+				serverless.NewCmdBatchjob(f, ioStreams),
+			},
+		})
+	}
+	groups = append(groups,
+		cmdutil.CommandGroup{
 			Message:  "Resource Commands:",
 			Commands: resourceCmds,
 		},
-		{
+		cmdutil.CommandGroup{
 			Message: "Info Commands:",
 			Commands: []*cobra.Command{
 				status.NewCmdStatus(f, ioStreams),
 				cost.NewCmdCost(f, ioStreams),
 			},
 		},
-		{
+		cmdutil.CommandGroup{
 			Message: "AI Agent Commands:",
 			Commands: []*cobra.Command{
 				mcpcmd.NewCmdMCP(f, ioStreams),
 				skills.NewCmdSkills(f, ioStreams),
 			},
 		},
-		{
+		cmdutil.CommandGroup{
 			Message: "Other Commands:",
 			Commands: []*cobra.Command{
 				completion.NewCmdCompletion(ioStreams),
@@ -195,7 +197,7 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) (*cobra.Command, *clioptions.Op
 				update.NewCmdUpdate(f, ioStreams),
 			},
 		},
-	}
+	)
 
 	groups.Add(cmd)
 	cmdutil.SetUsageTemplate(cmd, groups)
@@ -203,22 +205,19 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) (*cobra.Command, *clioptions.Op
 	return cmd, opts
 }
 
-// s3Enabled gates the pre-release S3 object-storage commands. The whole
-// command tree is omitted from registration unless VERDA_S3_ENABLED is "1"
-// or "true". When the feature ships GA, delete this function, drop the
-// gate in NewRootCommand, and remove `Hidden: true` from cmd/s3/s3.go.
-func s3Enabled() bool {
-	v := os.Getenv("VERDA_S3_ENABLED")
+// registryEnabled hides the registry subtree unless VERDA_REGISTRY_ENABLED is 1/true (pre-GA).
+func registryEnabled() bool {
+	v := os.Getenv("VERDA_REGISTRY_ENABLED")
 	return v == "1" || v == "true"
 }
 
-// registryEnabled gates the pre-release Verda Container Registry commands.
-// The whole command tree is omitted from registration unless
-// VERDA_REGISTRY_ENABLED is "1" or "true". When the feature ships GA,
-// delete this function, drop the gate in NewRootCommand, and remove
-// `Hidden: true` from cmd/registry/registry.go.
-func registryEnabled() bool {
-	v := os.Getenv("VERDA_REGISTRY_ENABLED")
+// serverlessEnabled gates the container + batchjob subtrees behind
+// VERDA_SERVERLESS_ENABLED=1/true (pre-GA). Without it the Serverless group is
+// not registered; `verda container`/`verda batchjob` return "unknown command".
+// The parent commands also set Hidden so they stay out of `verda --help` even
+// when a tester flips the env var on.
+func serverlessEnabled() bool {
+	v := os.Getenv("VERDA_SERVERLESS_ENABLED")
 	return v == "1" || v == "true"
 }
 
@@ -249,29 +248,14 @@ func skipCredentialResolution(cmd *cobra.Command) bool {
 	return false
 }
 
-// shouldCheckVersion returns true for commands where the user is plausibly
-// interested in version information, so it's okay to spend up to a couple of
-// seconds on a GitHub fetch after the command runs. Everything else (business
-// commands like `vm list`, `vccr ls`, `volume rm`, etc.) must never pay that
-// cost for a cosmetic hint — they read no cache and perform no network I/O.
-//
-// Included:
-//   - `verda doctor`             (explicit diagnostic; network expected)
-//   - `verda update`             (canonical place for version info)
-//   - `verda help` / help on any
-//     subcommand via `help` verb  (user is reading docs)
-//   - bare `verda`               (no args, prints help — new-user first run)
-//
-// Not included: every subcommand bare-invocation (e.g. `verda vm` with no
-// subcommand). Those also print help, but users running them are browsing
-// a specific feature area, not asking about the CLI itself.
+// shouldCheckVersion limits PostRun update hints to bare root/help only.
+// PostRun never hits the network; doctor/update already surface version noise.
 func shouldCheckVersion(cmd *cobra.Command) bool {
 	switch cmd.Name() {
-	case "doctor", "update", "help":
+	case "help":
 		return true
 	case "verda":
-		// Root command, typically invoked as `verda` (no args) — cobra
-		// runs RunE which calls cmd.Help(), then PersistentPostRun.
+		// Root with no subcommand (prints help then PostRun).
 		return true
 	}
 	return false

@@ -93,10 +93,34 @@ func NewCmdRm(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 
 			# Skip confirmation
 			verda s3 rm s3://my-bucket/obj --yes
+
+			# Browse and tick files to delete interactively
+			verda s3 rm
 		`),
-		Args: cobra.ExactArgs(1),
+		// 0 args on a TTY launches the folder browser (drill in, tick files to
+		// delete); an explicit URI runs directly. --agent/non-TTY needs the URI.
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runRm(cmd, f, ioStreams, opts, args[0])
+			if len(args) == 1 {
+				return runRm(cmd, f, ioStreams, opts, args[0])
+			}
+			if f.AgentMode() {
+				return cmdutil.NewMissingFlagsError([]string{"s3://bucket/key"})
+			}
+			if !interactiveTTY(f) {
+				return cmd.Help()
+			}
+			// The browser ignores rm's flags; refuse rather than silently drop them
+			// (a user expecting --dryrun to preview would otherwise get real deletes).
+			if opts.Recursive || opts.Dryrun || opts.Yes || len(opts.Include) > 0 || len(opts.Exclude) > 0 {
+				return cmdutil.UsageErrorf(cmd, "--recursive/--dryrun/--yes/--include/--exclude require an explicit s3://bucket/key; run 'verda s3 rm' with no flags to browse interactively")
+			}
+			ctx := cmd.Context()
+			client, err := buildClient(ctx, f, ClientOverrides{})
+			if err != nil {
+				return err
+			}
+			return runRmBrowser(ctx, f, ioStreams, client)
 		},
 	}
 
@@ -141,7 +165,14 @@ func runRm(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, o
 	// Interactive confirmation (TTY path).
 	if !opts.Yes && !f.AgentMode() {
 		confirmed, confirmErr := confirmRm(ctx, f, ioStreams, uri, targets, opts.Recursive)
-		if confirmErr != nil || !confirmed {
+		if confirmErr != nil {
+			if cmdutil.IsPromptCancel(confirmErr) {
+				_, _ = fmt.Fprintln(ioStreams.ErrOut, "Canceled.")
+				return nil
+			}
+			return confirmErr
+		}
+		if !confirmed {
 			_, _ = fmt.Fprintln(ioStreams.ErrOut, "Canceled.")
 			return nil
 		}

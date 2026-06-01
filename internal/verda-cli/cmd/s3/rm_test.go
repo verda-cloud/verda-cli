@@ -25,6 +25,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
+	tuitest "github.com/verda-cloud/verdagostack/pkg/tui/testing"
 
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
@@ -291,6 +292,104 @@ func TestRm_MissingKeyWithoutRecursive(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "object key") && !strings.Contains(err.Error(), "recursive") {
 		t.Errorf("error should mention missing key or --recursive, got: %v", err)
+	}
+}
+
+// TestRm_InteractiveConfirm_Yes drives the TTY confirmation path (no --yes, not
+// agent mode): the prompter approves, so the object is deleted.
+func TestRm_InteractiveConfirm_Yes(t *testing.T) {
+	// no t.Parallel — clientBuilder mutation
+	fake := &rmFakeAPI{}
+	restore := withFakeClient(fake)
+	defer restore()
+
+	mock := tuitest.New().AddConfirm(true)
+	out := &bytes.Buffer{}
+	errOut := &bytes.Buffer{}
+	f := cmdutil.NewTestFactory(mock)
+	cmd := NewCmdRm(f, cmdutil.IOStreams{Out: out, ErrOut: errOut})
+	cmd.SetArgs([]string{"s3://my-bucket/path/obj.txt"})
+	cmd.SetContext(context.Background())
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if fake.deleteObjectCalls != 1 {
+		t.Fatalf("DeleteObject calls = %d, want 1 (confirmed)", fake.deleteObjectCalls)
+	}
+	if !strings.Contains(errOut.String(), "permanently delete") {
+		t.Errorf("expected the destructive warning on stderr:\n%s", errOut.String())
+	}
+}
+
+// TestRm_InteractiveConfirm_No verifies that declining the prompt aborts with no
+// delete and a clean (nil) exit.
+func TestRm_InteractiveConfirm_No(t *testing.T) {
+	// no t.Parallel
+	fake := &rmFakeAPI{}
+	restore := withFakeClient(fake)
+	defer restore()
+
+	mock := tuitest.New().AddConfirm(false)
+	out := &bytes.Buffer{}
+	errOut := &bytes.Buffer{}
+	f := cmdutil.NewTestFactory(mock)
+	cmd := NewCmdRm(f, cmdutil.IOStreams{Out: out, ErrOut: errOut})
+	cmd.SetArgs([]string{"s3://my-bucket/path/obj.txt"})
+	cmd.SetContext(context.Background())
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute should not error on a declined confirmation: %v", err)
+	}
+	if fake.deleteObjectCalls != 0 {
+		t.Errorf("DeleteObject should not be called when the user declines, got %d", fake.deleteObjectCalls)
+	}
+	if !strings.Contains(errOut.String(), "Canceled") {
+		t.Errorf("expected 'Canceled.' on stderr after declining:\n%s", errOut.String())
+	}
+}
+
+// TestRm_InteractiveConfirm_Recursive_Yes drives the recursive branch of
+// confirmRm: the prefix preview is printed and, on approval, every matching
+// object is batch-deleted.
+func TestRm_InteractiveConfirm_Recursive_Yes(t *testing.T) {
+	// no t.Parallel
+	fake := &rmFakeAPI{
+		listObjectsPages: []*s3.ListObjectsV2Output{
+			{
+				Contents: []s3types.Object{
+					{Key: aws.String("logs/a.txt")},
+					{Key: aws.String("logs/b.txt")},
+				},
+				IsTruncated: aws.Bool(false),
+			},
+		},
+	}
+	restore := withFakeClient(fake)
+	defer restore()
+
+	mock := tuitest.New().AddConfirm(true)
+	out := &bytes.Buffer{}
+	errOut := &bytes.Buffer{}
+	f := cmdutil.NewTestFactory(mock)
+	cmd := NewCmdRm(f, cmdutil.IOStreams{Out: out, ErrOut: errOut})
+	cmd.SetArgs([]string{"s3://my-bucket/logs/", "--recursive"})
+	cmd.SetContext(context.Background())
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if fake.deleteObjectsCalls != 1 {
+		t.Fatalf("DeleteObjects calls = %d, want 1 (confirmed recursive)", fake.deleteObjectsCalls)
+	}
+	keys := batchKeys(fake.deleteObjectsIns[0])
+	want := []string{"logs/a.txt", "logs/b.txt"}
+	if len(keys) != len(want) {
+		t.Fatalf("deleted keys = %v, want %v", keys, want)
+	}
+	// The recursive preview lists the count + at least one key on stderr.
+	if !strings.Contains(errOut.String(), "permanently delete 2 object(s)") {
+		t.Errorf("expected recursive preview header on stderr:\n%s", errOut.String())
 	}
 }
 

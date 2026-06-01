@@ -65,7 +65,7 @@ func NewCmdCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 	flags := cmd.Flags()
 	flags.StringVar(&opts.Name, "name", "", "Volume name")
 	flags.IntVar(&opts.Size, "size", 0, "Volume size in GiB")
-	flags.StringVar(&opts.Type, "type", "", "Volume type: NVMe or HDD")
+	flags.StringVar(&opts.Type, "type", "", "Volume type (default: NVMe)")
 	flags.StringVar(&opts.Location, "location", "", "Location code, e.g. FIN-01")
 	opts.Wait.AddFlags(flags, false) // --wait defaults to false for volume create
 
@@ -100,25 +100,10 @@ func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 		vtMap[vt.Type] = vt
 	}
 
-	// Volume type.
-	if opts.Type == "" { //nolint:nestif // Interactive prompt flow requires nested conditionals.
-		nvmeLabel := "NVMe (fast SSD)"
-		hddLabel := "HDD (large capacity)"
-		if vt, ok := vtMap[verda.VolumeTypeNVMe]; ok && vt.Price.PricePerMonthPerGB > 0 {
-			nvmeLabel = fmt.Sprintf("NVMe (fast SSD)  $%.2f/GB/mo", vt.Price.PricePerMonthPerGB)
-		}
-		if vt, ok := vtMap[verda.VolumeTypeHDD]; ok && vt.Price.PricePerMonthPerGB > 0 {
-			hddLabel = fmt.Sprintf("HDD (large capacity)  $%.2f/GB/mo", vt.Price.PricePerMonthPerGB)
-		}
-		idx, err := prompter.Select(ctx, "Volume type", []string{nvmeLabel, hddLabel})
-		if err != nil {
-			return nil
-		}
-		if idx == 0 {
-			opts.Type = verda.VolumeTypeNVMe
-		} else {
-			opts.Type = verda.VolumeTypeHDD
-		}
+	// Volume type: NVMe is the only provisionable type (HDD deprecated), so we
+	// default it rather than prompt. Pricing is still shown in the summary below.
+	if opts.Type == "" {
+		opts.Type = verda.VolumeTypeNVMe
 	}
 
 	// Name.
@@ -161,7 +146,7 @@ func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 		for i, loc := range locations {
 			labels[i] = fmt.Sprintf("%s (%s)", loc.Code, loc.Name)
 		}
-		idx, err := prompter.Select(ctx, "Location", labels)
+		idx, err := prompter.Select(ctx, "Location", labels, tui.WithShowHints(true))
 		if err != nil {
 			return nil
 		}

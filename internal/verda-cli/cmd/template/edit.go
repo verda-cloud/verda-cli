@@ -100,7 +100,7 @@ func runEdit(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams,
 		}
 		labels[len(fields)] = "Save & exit"
 
-		idx, selErr := prompter.Select(ctx, "Edit field", labels, tui.WithSelectDefault(len(fields)), tui.WithPageSize(len(labels)))
+		idx, selErr := prompter.Select(ctx, "Edit field", labels, tui.WithSelectDefault(len(fields)), tui.WithPageSize(len(labels)), tui.WithShowHints(true))
 		if selErr != nil {
 			// Ctrl+C — save what we have
 			break
@@ -137,7 +137,7 @@ func buildFieldMenu(tmpl *Template) []editableField {
 			display: func(t *Template) string { return valueOrDash(t.BillingType) },
 			edit: func(ctx context.Context, f cmdutil.Factory, t *Template) error {
 				choices := []string{"on-demand", "spot"}
-				idx, err := f.Prompter().Select(ctx, "Billing type", choices)
+				idx, err := f.Prompter().Select(ctx, "Billing type", choices, tui.WithShowHints(true))
 				if err != nil {
 					return nil //nolint:nilerr // user canceled
 				}
@@ -153,7 +153,7 @@ func buildFieldMenu(tmpl *Template) []editableField {
 			display: func(t *Template) string { return valueOrDash(t.Kind) },
 			edit: func(ctx context.Context, f cmdutil.Factory, t *Template) error {
 				choices := []string{"gpu", "cpu"}
-				idx, err := f.Prompter().Select(ctx, "Kind", choices)
+				idx, err := f.Prompter().Select(ctx, "Kind", choices, tui.WithShowHints(true))
 				if err != nil {
 					return nil //nolint:nilerr // user canceled
 				}
@@ -303,7 +303,7 @@ func editInstanceType(ctx context.Context, f cmdutil.Factory, t *Template) error
 	}
 
 	choices = append(choices, "← Back")
-	idx, selErr := f.Prompter().Select(ctx, "Instance type", choices)
+	idx, selErr := f.Prompter().Select(ctx, "Instance type", choices, tui.WithShowHints(true))
 	if selErr != nil || idx == len(values) {
 		return nil //nolint:nilerr // user canceled or back
 	}
@@ -328,7 +328,7 @@ func editLocation(ctx context.Context, f cmdutil.Factory, t *Template) error {
 		choices = append(choices, loc.Code)
 	}
 
-	idx, selErr := f.Prompter().Select(ctx, "Location", choices)
+	idx, selErr := f.Prompter().Select(ctx, "Location", choices, tui.WithShowHints(true))
 	if selErr != nil {
 		return nil //nolint:nilerr // user canceled
 	}
@@ -364,7 +364,7 @@ func editImage(ctx context.Context, f cmdutil.Factory, t *Template) error {
 		choices = append(choices, img.Name)
 	}
 
-	idx, selErr := f.Prompter().Select(ctx, "Image", choices)
+	idx, selErr := f.Prompter().Select(ctx, "Image", choices, tui.WithShowHints(true))
 	if selErr != nil {
 		return nil //nolint:nilerr // user canceled
 	}
@@ -430,7 +430,7 @@ func editStartupScript(ctx context.Context, f cmdutil.Factory, t *Template) erro
 		choices = append(choices, s.Name)
 	}
 
-	idx, selErr := f.Prompter().Select(ctx, "Startup script", choices)
+	idx, selErr := f.Prompter().Select(ctx, "Startup script", choices, tui.WithShowHints(true))
 	if selErr != nil {
 		return nil //nolint:nilerr // user canceled
 	}

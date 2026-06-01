@@ -51,7 +51,7 @@ func NewCmdShow(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 			}
 
 			if profile == "" {
-				profile = f.Options().AuthOptions.Profile
+				profile = options.ActiveProfile(f.Options().AuthOptions.Profile)
 			}
 			if profile == "" {
 				profile = "default"

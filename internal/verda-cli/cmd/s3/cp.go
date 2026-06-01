@@ -17,6 +17,7 @@ package s3
 import (
 	"context"
 	"fmt"
+	"io"
 	"io/fs"
 	"net/url"
 	"os"
@@ -42,6 +43,20 @@ const (
 	dirCopy
 )
 
+// Output format names (mirrors options.Output*); kept local so s3 helpers can
+// compare without importing options just for the strings.
+const (
+	outputTable = "table"
+	outputJSON  = "json"
+	outputYAML  = "yaml"
+)
+
+// interactiveTTY reports whether to drive an interactive TUI: stdout is a
+// terminal, not agent mode, and the default table format (not json/yaml).
+func interactiveTTY(f cmdutil.Factory) bool {
+	return cmdutil.IsStdoutTerminal() && !f.AgentMode() && f.OutputFormat() == outputTable
+}
+
 // detectDirection returns the direction implied by src/dst. Both-local is
 // reported as dirInvalid; the caller turns that into a UsageErrorf.
 func detectDirection(src, dst string) direction {
@@ -66,6 +81,13 @@ type cpOptions struct {
 	Exclude     []string
 	Dryrun      bool
 	ContentType string
+	PartSize    string
+	Concurrency int
+	NoResume    bool
+
+	// quietProgress suppresses the per-file live progress line. Set by sync
+	// (many files) and other batch callers that render their own output.
+	quietProgress bool
 }
 
 // transferEntry is the structured shape for a single completed (or previewed)
@@ -109,28 +131,66 @@ func NewCmdCp(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 			the set (matched against the relative path; '*' does not
 			cross '/').
 
-			With --dryrun, the planned transfers are listed but no SDK
+			Large single-file uploads and single-object downloads are multipart
+				and parallel, and they RESUME: re-run the EXACT same command to
+				continue an interrupted transfer (only the missing parts move).
+				--no-resume starts over; --concurrency / --part-size tune throughput.
+				Interactive downloads from the "verda s3 ls" browser resume the same way.
+
+				With --dryrun, the planned transfers are listed but no SDK
 			calls are made.
 		`),
 		Example: cmdutil.Examples(`
 			# Upload a single file
 			verda s3 cp ./report.csv s3://my-bucket/reports/report.csv
 
+				# Upload into a "folder" (trailing slash keeps the filename)
+				verda s3 cp ./report.csv s3://my-bucket/reports/
+
 			# Download a single object
 			verda s3 cp s3://my-bucket/report.csv ./report.csv
 
-			# Copy between buckets
+				# Download into a directory (keeps the object's name)
+				verda s3 cp s3://my-bucket/report.csv ./downloads/
+
+				# Recursively download a whole prefix
+				verda s3 cp s3://my-bucket/logs/ ./logs --recursive
+
+			# Resume an interrupted upload or download — re-run the same command
+				verda s3 cp ./model.bin s3://my-bucket/model.bin
+				verda s3 cp s3://my-bucket/model.bin ./model.bin
+
+				# Faster large transfer
+				verda s3 cp s3://my-bucket/model.bin ./model.bin --concurrency 16 --part-size 32MiB
+
+				# Copy between buckets
 			verda s3 cp s3://src/a.txt s3://dst/b.txt
 
 			# Recursive upload with filter
 			verda s3 cp ./data s3://my-bucket/data/ --recursive --include "*.csv"
 
+				# Recursive upload, skipping temp files
+				verda s3 cp ./site s3://my-bucket/site/ --recursive --exclude "*.tmp"
+
+				# Override the content type on upload
+				verda s3 cp ./page.html s3://my-bucket/page.html --content-type text/html
+
 			# Preview a recursive download
 			verda s3 cp s3://my-bucket/logs/ ./logs --recursive --dryrun
 		`),
-		Args: cobra.ExactArgs(2),
+		// 2 args = direct cp. Fewer args on a TTY guides an upload interactively
+		// (source -> bucket -> location); pipes/--agent still require both args.
+		Args: cobra.MaximumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runCp(cmd, f, ioStreams, opts, args[0], args[1])
+			if len(args) == 2 {
+				return runCp(cmd, f, ioStreams, opts, args[0], args[1])
+			}
+			interactive := interactiveTTY(f)
+			loneS3 := len(args) == 1 && IsS3URI(args[0]) // a bare s3:// is a download w/o dest, not an upload
+			if interactive && !loneS3 {
+				return runUploadWizard(cmd, f, ioStreams, opts, args)
+			}
+			return cmdutil.UsageErrorf(cmd, "cp requires a source and destination: verda s3 cp <src> <dst>")
 		},
 	}
 
@@ -140,6 +200,9 @@ func NewCmdCp(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 	flags.StringArrayVar(&opts.Exclude, "exclude", nil, "Skip entries matching this glob (repeatable, overrides --include)")
 	flags.BoolVar(&opts.Dryrun, "dryrun", false, "Preview transfers without performing them")
 	flags.StringVar(&opts.ContentType, "content-type", "", "Override Content-Type on uploads")
+	flags.StringVar(&opts.PartSize, "part-size", "", "Part size for large uploads/downloads, e.g. 32MiB (default auto)")
+	flags.IntVar(&opts.Concurrency, "concurrency", defaultConcurrency, "Parallel parts for large uploads/downloads")
+	flags.BoolVar(&opts.NoResume, "no-resume", false, "Ignore saved progress and restart the transfer (upload or download)")
 
 	return cmd
 }
@@ -150,8 +213,11 @@ func runCp(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, o
 		return cmdutil.UsageErrorf(cmd, "cp requires at least one s3:// URI")
 	}
 
-	ctx, cancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
-	defer cancel()
+	// Bulk transfers are NOT bounded by the short per-request --timeout: a large
+	// object legitimately takes minutes, and bounding the whole operation made
+	// big uploads fail with "context deadline exceeded". cmd.Context() (Ctrl+C)
+	// is the stop signal; the resumable uploader continues an interrupted upload.
+	ctx := cmd.Context()
 
 	switch dir {
 	case dirUpload:
@@ -194,6 +260,20 @@ func runUpload(ctx context.Context, cmd *cobra.Command, f cmdutil.Factory, ioStr
 		return cmdutil.UsageErrorf(cmd, "--recursive requires the source to be a directory")
 	}
 
+	flagPartSize, err := parseByteSize(opts.PartSize)
+	if err != nil {
+		return cmdutil.UsageErrorf(cmd, "%v", err)
+	}
+
+	// Prune stale local checkpoints from prior aborted uploads (best-effort).
+	_ = gcCheckpoints(0)
+
+	// Single large file → custom resumable multipart uploader; everything else
+	// (recursive trees, small files) stays on the transfer-manager path.
+	if !opts.Recursive && !opts.Dryrun && info.Size() > computePartSize(info.Size(), flagPartSize) {
+		return runResumableUpload(ctx, f, ioStreams, src, info, dst, opts, flagPartSize)
+	}
+
 	transporter, err := transporterBuilder(ctx, f, ClientOverrides{})
 	if err != nil {
 		return err
@@ -214,6 +294,122 @@ func runUpload(ctx context.Context, cmd *cobra.Command, f cmdutil.Factory, ioStr
 	}
 
 	return finalizeCp(ioStreams, f, &payload, started, opts.Dryrun)
+}
+
+// runResumableUpload drives the custom multipart uploader for a single large
+// local file. It resolves an absolute source path (the checkpoint identity and
+// every part read depend on it), prints a resume line when the server already
+// holds parts, and emits the same finalize footer as the transfer-manager path.
+func runResumableUpload(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, src string, info os.FileInfo, dst URI, opts *cpOptions, flagPartSize int64) error {
+	absPath, err := filepath.Abs(src)
+	if err != nil {
+		return err
+	}
+	client, err := buildClient(ctx, f, ClientOverrides{})
+	if err != nil {
+		return err
+	}
+	ropts := resumableOptions{
+		AbsPath:     absPath,
+		Bucket:      dst.Bucket,
+		Key:         singleTargetKey(dst.Key, filepath.Base(src)),
+		ContentType: inferContentType(absPath, opts.ContentType),
+		FileSize:    info.Size(),
+		MTime:       info.ModTime(),
+		PartSize:    flagPartSize,
+		Concurrency: opts.Concurrency,
+		NoResume:    opts.NoResume,
+	}
+	return runResumable(ctx, f, ioStreams, client, &ropts, filepath.Base(src))
+}
+
+// runResumable wraps resumableUpload with the resume announcement, a part-level
+// progress bar, and the finalize footer. ropts must be fully populated; shared
+// by the cp upload path and the ls-uploads resume path.
+func runResumable(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client API, ropts *resumableOptions, displayName string) error {
+	announceResume(ctx, f, ioStreams, client, ropts)
+
+	partSize := computePartSize(ropts.FileSize, ropts.PartSize)
+	started := time.Now()
+
+	// Self-rendered part-level progress line (bar + % + live rate), shown only
+	// on an interactive terminal with table output. The OnProgress callback is
+	// always installed (to measure throughput) and runs on the uploader's
+	// serialized result loop, so it's race-free.
+	var prog *transferProgress
+	if f.Status() != nil && cmdutil.IsStderrTerminal() {
+		prog = newTransferProgress(ioStreams.ErrOut, "Uploading", displayName, ropts.FileSize, started)
+	}
+	var firstDone, lastDone int32
+	firstSet := false
+	ropts.OnProgress = func(done, _ int32) {
+		if !firstSet {
+			firstDone, firstSet = done, true
+		}
+		lastDone = done
+		if prog != nil {
+			prog.update(min(int64(done)*partSize, ropts.FileSize))
+		}
+	}
+
+	err := resumableUpload(ctx, client, ropts)
+	if prog != nil {
+		prog.finish()
+	}
+	if err != nil {
+		return err
+	}
+	elapsed := time.Since(started)
+
+	// Rate over the bytes actually moved this run (a resume only sends the
+	// missing parts, so this reports the true session throughput, not inflated).
+	rateSuffix := ""
+	if newParts := lastDone - firstDone; newParts > 0 {
+		transferred := min(int64(newParts)*partSize, ropts.FileSize)
+		if secs := elapsed.Seconds(); secs > 0 {
+			rateSuffix = fmt.Sprintf(" @ %s/s", humanBytes(int64(float64(transferred)/secs)))
+		}
+	}
+
+	payload := newCpPayload(false)
+	payload.Transfers = append(payload.Transfers, transferEntry{
+		Source:      ropts.AbsPath,
+		Destination: URI{Bucket: ropts.Bucket, Key: ropts.Key}.String(),
+		Bytes:       ropts.FileSize,
+		DurationMs:  elapsed.Milliseconds(),
+		Status:      "ok",
+	})
+	if !isStructured(f.OutputFormat()) {
+		_, _ = fmt.Fprintf(ioStreams.Out, "✓ uploaded %s (%s)%s\n", displayName, humanBytes(ropts.FileSize), rateSuffix)
+	}
+	return finalizeCp(ioStreams, f, &payload, started, false)
+}
+
+// announceResume prints a concise human resume line to ErrOut when a valid
+// checkpoint and live server-side upload still hold k of N parts. Best-effort:
+// any error (no checkpoint, expired upload, --no-resume) leaves it silent and
+// resumableUpload handles the real decision tree authoritatively.
+func announceResume(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client API, ropts *resumableOptions) {
+	if ropts.NoResume || isStructured(f.OutputFormat()) {
+		return
+	}
+	identity := uploadIdentity(ropts.AbsPath, ropts.Bucket, ropts.Key)
+	cp, err := loadCheckpoint(identity)
+	if err != nil || cp == nil {
+		return
+	}
+	if cp.FileSize != ropts.FileSize || !cp.MTime.Equal(ropts.MTime) || cp.UploadID == "" {
+		return
+	}
+	// Paginated: a single ListParts caps at 1000, which would understate the
+	// resumed count for files with >1000 parts.
+	listed, err := listAllParts(ctx, client, ropts.Bucket, ropts.Key, cp.UploadID)
+	if err != nil {
+		return
+	}
+	partSize := computePartSize(ropts.FileSize, ropts.PartSize)
+	total := numParts(ropts.FileSize, partSize)
+	_, _ = fmt.Fprintf(ioStreams.ErrOut, "Resuming upload (%d/%d parts already on server)\n", len(listed), total)
 }
 
 // uploadTree walks srcDir and uploads every regular file matching the filters.
@@ -306,6 +502,12 @@ func runDownload(ctx context.Context, cmd *cobra.Command, f cmdutil.Factory, ioS
 		return cmdutil.UsageErrorf(cmd, "source is a bucket/prefix; pass --recursive to download its contents")
 	}
 
+	// Single object -> resumable, parallel downloader (progress + rate + resume).
+	if !opts.Recursive {
+		return runResumableDownload(ctx, f, ioStreams, src, dst, opts)
+	}
+
+	// Recursive -> the transfer-manager path (per-file resume is a follow-up).
 	transporter, err := transporterBuilder(ctx, f, ClientOverrides{})
 	if err != nil {
 		return err
@@ -314,22 +516,123 @@ func runDownload(ctx context.Context, cmd *cobra.Command, f cmdutil.Factory, ioS
 	if err != nil {
 		return err
 	}
+	payload := newCpPayload(opts.Dryrun)
+	started := time.Now()
+	if err := downloadTree(ctx, f, ioStreams, apiClient, transporter, src, dst, opts, &payload); err != nil {
+		return err
+	}
+	return finalizeCp(ioStreams, f, &payload, started, opts.Dryrun)
+}
 
+// runResumableDownload downloads a single object with the resumable parallel
+// downloader, a live progress bar, and a final rate. Re-running the same command
+// resumes from "<dest>.part" if the object is unchanged.
+func runResumableDownload(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, src URI, dst string, opts *cpOptions) error {
+	localPath := resolveDownloadPath(dst, src.Key)
+	srcStr := src.String()
 	payload := newCpPayload(opts.Dryrun)
 	started := time.Now()
 
-	if opts.Recursive {
-		if err := downloadTree(ctx, f, ioStreams, apiClient, transporter, src, dst, opts, &payload); err != nil {
-			return err
+	if opts.Dryrun {
+		if !isStructured(f.OutputFormat()) {
+			_, _ = fmt.Fprintf(ioStreams.Out, "(dry run) would download %s -> %s\n", srcStr, localPath)
 		}
-	} else {
-		localPath := resolveDownloadPath(dst, src.Key)
-		if err := downloadOne(ctx, f, ioStreams, transporter, src, localPath, src.Key, opts, &payload); err != nil {
-			return err
-		}
+		payload.Transfers = append(payload.Transfers, transferEntry{Source: srcStr, Destination: localPath, Status: "dryrun"})
+		return finalizeCp(ioStreams, f, &payload, started, true)
 	}
 
-	return finalizeCp(ioStreams, f, &payload, started, opts.Dryrun)
+	client, err := buildClient(ctx, f, ClientOverrides{})
+	if err != nil {
+		return err
+	}
+	partSize, err := parseByteSize(opts.PartSize)
+	if err != nil {
+		return err
+	}
+
+	// Best-effort prune of stale download checkpoints and shared lock files from
+	// prior interrupted transfers (downloads never triggered the upload-path GC).
+	_ = gcDownloadCheckpoints(0)
+	_ = gcCheckpoints(0)
+
+	n, rateSuffix, err := downloadToLocal(ctx, f, ioStreams, client, src, localPath, partSize, opts.Concurrency, opts.NoResume, opts.quietProgress)
+	if err != nil {
+		return err
+	}
+	payload.Transfers = append(payload.Transfers, transferEntry{
+		Source:      srcStr,
+		Destination: localPath,
+		Bytes:       n,
+		DurationMs:  time.Since(started).Milliseconds(),
+		Status:      "ok",
+	})
+	if !isStructured(f.OutputFormat()) {
+		_, _ = fmt.Fprintf(ioStreams.Out, "✓ downloaded %s -> %s (%s)%s\n", srcStr, absOrSelf(localPath), humanBytes(n), rateSuffix)
+	}
+	return finalizeCp(ioStreams, f, &payload, started, false)
+}
+
+// absOrSelf returns the absolute form of p for display, falling back to p if it
+// can't be resolved. Used so download result lines show the full local path.
+func absOrSelf(p string) string {
+	if abs, err := filepath.Abs(p); err == nil {
+		return abs
+	}
+	return p
+}
+
+// downloadToLocal runs a resumable download of src to localPath with a live
+// progress bar (when interactive) and returns the object size plus a " @ rate"
+// suffix for the result line. Shared by `cp` and the ls browser, so both get
+// resumable downloads + progress. quiet suppresses the live bar.
+func downloadToLocal(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client API, src URI, localPath string, partSize int64, concurrency int, noResume, quiet bool) (size int64, rateSuffix string, err error) {
+	rel := filepath.Base(localPath)
+	enabled := !quiet && f.Status() != nil && cmdutil.IsStderrTerminal()
+	var prog *transferProgress
+	var firstBytes, lastBytes int64
+	firstSet := false
+	started := time.Now()
+
+	announce := !quiet && !isStructured(f.OutputFormat())
+	n, err := resumableDownload(ctx, client, &resumableDownloadOptions{
+		Bucket: src.Bucket, Key: src.Key, DestPath: localPath,
+		PartSize: partSize, Concurrency: concurrency, NoResume: noResume,
+		OnResume: func(already, total int64) {
+			if announce {
+				pct := 0.0
+				if total > 0 {
+					pct = float64(already) / float64(total) * 100
+				}
+				_, _ = fmt.Fprintf(ioStreams.ErrOut, "Resuming download of %s (%s of %s, %.0f%% already on disk)\n",
+					rel, humanBytes(already), humanBytes(total), pct)
+			}
+		},
+		OnProgress: func(done, total int64) {
+			if !firstSet {
+				firstBytes, firstSet = done, true
+			}
+			lastBytes = done
+			if enabled {
+				if prog == nil {
+					prog = newTransferProgress(ioStreams.ErrOut, "Downloading", rel, total, started)
+				}
+				prog.update(done)
+			}
+		},
+	})
+	if prog != nil {
+		prog.finish()
+	}
+	if err != nil {
+		return 0, "", err
+	}
+	rate := ""
+	if moved := lastBytes - firstBytes; moved > 0 {
+		if secs := time.Since(started).Seconds(); secs > 0 {
+			rate = fmt.Sprintf(" @ %s/s", humanBytes(int64(float64(moved)/secs)))
+		}
+	}
+	return n, rate, nil
 }
 
 // downloadTree lists src.Key and downloads each matching object into dstDir
@@ -350,7 +653,7 @@ func downloadTree(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOSt
 		if err != nil {
 			return err
 		}
-		if err := downloadOne(ctx, f, ioStreams, tr, URI{Bucket: src.Bucket, Key: k}, localPath, rel, opts, payload); err != nil {
+		if err := downloadOne(ctx, f, ioStreams, tr, client, URI{Bucket: src.Bucket, Key: k}, localPath, rel, opts, payload); err != nil {
 			return err
 		}
 	}
@@ -358,7 +661,7 @@ func downloadTree(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOSt
 }
 
 // downloadOne performs a single GetObject download (or records a dryrun entry).
-func downloadOne(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, tr Transporter, src URI, localPath, rel string, opts *cpOptions, payload *cpPayload) error {
+func downloadOne(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, tr Transporter, client API, src URI, localPath, rel string, opts *cpOptions, payload *cpPayload) error {
 	srcStr := src.String()
 	structured := isStructured(f.OutputFormat())
 	if opts.Dryrun {
@@ -383,9 +686,27 @@ func downloadOne(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStr
 	}
 
 	in := &s3.GetObjectInput{Bucket: aws.String(src.Bucket), Key: aws.String(src.Key)}
+
+	// Live progress (bar + % + rate) on an interactive terminal. HeadObject is
+	// only issued when we're actually rendering, so non-interactive/batch
+	// (sync, --agent, pipes) pay no extra request.
+	var prog *transferProgress
+	var w io.WriterAt = file
+	if !opts.quietProgress && f.Status() != nil && cmdutil.IsStderrTerminal() {
+		var total int64
+		if head, herr := client.HeadObject(ctx, &s3.HeadObjectInput{Bucket: aws.String(src.Bucket), Key: aws.String(src.Key)}); herr == nil {
+			total = aws.ToInt64(head.ContentLength)
+		}
+		prog = newTransferProgress(ioStreams.ErrOut, "Downloading", rel, total, time.Now())
+		w = &countingWriterAt{w: file, onWrite: prog.update}
+	}
+
 	started := time.Now()
-	n, err := tr.Download(ctx, file, in)
+	n, err := tr.Download(ctx, w, in)
 	elapsed := time.Since(started)
+	if prog != nil {
+		prog.finish()
+	}
 	if closeErr := file.Close(); err == nil {
 		err = closeErr
 	}
@@ -407,8 +728,12 @@ func downloadOne(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStr
 		DurationMs:  elapsed.Milliseconds(),
 		Status:      "ok",
 	})
+	rateSuffix := ""
+	if secs := elapsed.Seconds(); n > 0 && secs > 0 {
+		rateSuffix = fmt.Sprintf(" @ %s/s", humanBytes(int64(float64(n)/secs)))
+	}
 	if !structured {
-		_, _ = fmt.Fprintf(ioStreams.Out, "\u2713 downloaded %s (%s)\n", rel, humanBytes(n))
+		_, _ = fmt.Fprintf(ioStreams.Out, "\u2713 downloaded %s (%s)%s\n", rel, humanBytes(n), rateSuffix)
 	}
 	return nil
 }
@@ -513,7 +838,7 @@ func copyOne(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams
 // that must not be interleaved with human progress lines. "table" (or an
 // empty default) yields false.
 func isStructured(format string) bool {
-	return format == "json" || format == "yaml"
+	return format == outputJSON || format == outputYAML
 }
 
 func newCpPayload(dryrun bool) cpPayload {

@@ -281,33 +281,10 @@ func buildStorageChoices(volumes []verda.VolumeCreateRequest, existingIDs []stri
 	return choices
 }
 
-func promptAddVolume(ctx context.Context, prompter tui.Prompter, store *wizard.Store, cache *apiCache) (*verda.VolumeCreateRequest, error) {
-	// Volume type with prices.
-	nvmeLabel := "NVMe (fast SSD)"
-	hddLabel := "HDD (large capacity)"
-	if cache != nil && cache.volumeTypes != nil {
-		if vt, ok := cache.volumeTypes[verda.VolumeTypeNVMe]; ok && vt.Price.PricePerMonthPerGB > 0 {
-			nvmeLabel = fmt.Sprintf("NVMe (fast SSD)  $%.2f/GB/mo", vt.Price.PricePerMonthPerGB)
-		}
-		if vt, ok := cache.volumeTypes[verda.VolumeTypeHDD]; ok && vt.Price.PricePerMonthPerGB > 0 {
-			hddLabel = fmt.Sprintf("HDD (large capacity)  $%.2f/GB/mo", vt.Price.PricePerMonthPerGB)
-		}
-	}
-	typeIdx, err := prompter.Select(ctx, "Volume type", []string{
-		nvmeLabel,
-		hddLabel,
-		"← Back",
-	})
-	if err != nil {
-		return nil, nil //nolint:nilerr // User pressed Esc/Ctrl+C during prompt.
-	}
-	if typeIdx == 2 { // "← Back"
-		return nil, nil
-	}
+func promptAddVolume(ctx context.Context, prompter tui.Prompter, store *wizard.Store) (*verda.VolumeCreateRequest, error) {
+	// NVMe is the only provisionable volume type — HDD is deprecated. Existing
+	// HDD volumes still display in list/describe; we just no longer offer it.
 	volType := verda.VolumeTypeNVMe
-	if typeIdx == 1 {
-		volType = verda.VolumeTypeHDD
-	}
 
 	// Name
 	c := store.Collected()

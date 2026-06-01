@@ -20,14 +20,197 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
+
+// keysFromDeletes / keysFromCopies / keysFromUploads collect+sort keys for
+// order-independent assertions in the recursive mv tests.
+func keysFromDeletes(ins []*s3.DeleteObjectInput) []string {
+	out := make([]string, 0, len(ins))
+	for _, in := range ins {
+		out = append(out, aws.ToString(in.Key))
+	}
+	sort.Strings(out)
+	return out
+}
+
+func keysFromCopies(ins []*s3.CopyObjectInput) []string {
+	out := make([]string, 0, len(ins))
+	for _, in := range ins {
+		out = append(out, aws.ToString(in.Key))
+	}
+	sort.Strings(out)
+	return out
+}
+
+func keysFromUploads(ins []*s3.PutObjectInput) []string {
+	out := make([]string, 0, len(ins))
+	for _, in := range ins {
+		out = append(out, aws.ToString(in.Key))
+	}
+	sort.Strings(out)
+	return out
+}
+
+// TestMv_RecursiveUpload exercises uploadMoveTree: every file under the local
+// dir is uploaded with its relative path preserved, then removed from disk.
+func TestMv_RecursiveUpload(t *testing.T) {
+	// no t.Parallel
+	tmp := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tmp, "a.txt"), []byte("A"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(tmp, "sub"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmp, "sub", "c.txt"), []byte("C"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	fakeT := &cpFakeTransporter{}
+	restoreT := withFakeTransporter(fakeT)
+	defer restoreT()
+	restore := withFakeClient(&mvFakeAPI{})
+	defer restore()
+
+	out := &bytes.Buffer{}
+	f := cmdutil.NewTestFactory(nil)
+	cmd := NewCmdMv(f, cmdutil.IOStreams{Out: out, ErrOut: &bytes.Buffer{}})
+	cmd.SetArgs([]string{tmp, "s3://my-bucket/prefix/", "--recursive"})
+	cmd.SetContext(context.Background())
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	gotKeys := keysFromUploads(fakeT.uploads)
+	want := []string{"prefix/a.txt", "prefix/sub/c.txt"}
+	if len(gotKeys) != len(want) {
+		t.Fatalf("uploaded keys = %v, want %v", gotKeys, want)
+	}
+	for i := range want {
+		if gotKeys[i] != want[i] {
+			t.Errorf("uploaded keys[%d] = %q, want %q (all=%v)", i, gotKeys[i], want[i], gotKeys)
+		}
+	}
+	// Both local sources must be gone after a successful move.
+	for _, p := range []string{filepath.Join(tmp, "a.txt"), filepath.Join(tmp, "sub", "c.txt")} {
+		if _, err := os.Stat(p); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("source %s still present after recursive mv (err=%v)", p, err)
+		}
+	}
+}
+
+// TestMv_RecursiveDownload exercises downloadMoveTree: every listed object is
+// downloaded under the dest dir with its relative path preserved, then deleted
+// from the bucket.
+func TestMv_RecursiveDownload(t *testing.T) {
+	// no t.Parallel
+	tmp := t.TempDir()
+	fakeAPI := &mvFakeAPI{cpFakeAPI: cpFakeAPI{
+		listObjectsPages: []*s3.ListObjectsV2Output{
+			{
+				Contents: []s3types.Object{
+					{Key: aws.String("data/a.txt"), Size: aws.Int64(1)},
+					{Key: aws.String("data/sub/b.txt"), Size: aws.Int64(1)},
+				},
+				IsTruncated: aws.Bool(false),
+			},
+		},
+	}}
+	restore := withFakeClient(fakeAPI)
+	defer restore()
+	fakeT := &cpFakeTransporter{downloadWrite: []byte("X")}
+	restoreT := withFakeTransporter(fakeT)
+	defer restoreT()
+
+	out := &bytes.Buffer{}
+	f := cmdutil.NewTestFactory(nil)
+	cmd := NewCmdMv(f, cmdutil.IOStreams{Out: out, ErrOut: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"s3://my-bucket/data/", tmp, "--recursive"})
+	cmd.SetContext(context.Background())
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if len(fakeT.downloads) != 2 {
+		t.Fatalf("Download calls = %d, want 2", len(fakeT.downloads))
+	}
+	for _, p := range []string{filepath.Join(tmp, "a.txt"), filepath.Join(tmp, "sub", "b.txt")} {
+		if _, err := os.Stat(p); err != nil {
+			t.Errorf("expected downloaded file at %s: %v", p, err)
+		}
+	}
+	// Each source object is deleted after its download succeeds.
+	gotDel := keysFromDeletes(fakeAPI.deleteInputs)
+	want := []string{"data/a.txt", "data/sub/b.txt"}
+	if len(gotDel) != len(want) {
+		t.Fatalf("deleted source keys = %v, want %v", gotDel, want)
+	}
+	for i := range want {
+		if gotDel[i] != want[i] {
+			t.Errorf("deleted keys[%d] = %q, want %q (all=%v)", i, gotDel[i], want[i], gotDel)
+		}
+	}
+}
+
+// TestMv_RecursiveS3ToS3 exercises s3MoveTree: copy each key to the dest prefix
+// then delete the source key.
+func TestMv_RecursiveS3ToS3(t *testing.T) {
+	// no t.Parallel
+	fakeAPI := &mvFakeAPI{cpFakeAPI: cpFakeAPI{
+		listObjectsPages: []*s3.ListObjectsV2Output{
+			{
+				Contents: []s3types.Object{
+					{Key: aws.String("src/a.txt"), Size: aws.Int64(1)},
+					{Key: aws.String("src/b.txt"), Size: aws.Int64(1)},
+				},
+				IsTruncated: aws.Bool(false),
+			},
+		},
+	}}
+	restore := withFakeClient(fakeAPI)
+	defer restore()
+	restoreT := withFakeTransporter(&cpFakeTransporter{})
+	defer restoreT()
+
+	out := &bytes.Buffer{}
+	f := cmdutil.NewTestFactory(nil)
+	cmd := NewCmdMv(f, cmdutil.IOStreams{Out: out, ErrOut: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"s3://src-bucket/src/", "s3://dst-bucket/dst/", "--recursive"})
+	cmd.SetContext(context.Background())
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	gotCopy := keysFromCopies(fakeAPI.copyInputs)
+	wantCopy := []string{"dst/a.txt", "dst/b.txt"}
+	if len(gotCopy) != len(wantCopy) {
+		t.Fatalf("copied keys = %v, want %v", gotCopy, wantCopy)
+	}
+	for i := range wantCopy {
+		if gotCopy[i] != wantCopy[i] {
+			t.Errorf("copied keys[%d] = %q, want %q (all=%v)", i, gotCopy[i], wantCopy[i], gotCopy)
+		}
+	}
+	gotDel := keysFromDeletes(fakeAPI.deleteInputs)
+	wantDel := []string{"src/a.txt", "src/b.txt"}
+	if len(gotDel) != len(wantDel) {
+		t.Fatalf("deleted source keys = %v, want %v", gotDel, wantDel)
+	}
+	for i := range wantDel {
+		if gotDel[i] != wantDel[i] {
+			t.Errorf("deleted keys[%d] = %q, want %q (all=%v)", i, gotDel[i], wantDel[i], gotDel)
+		}
+	}
+}
 
 // mvFakeAPI extends cpFakeAPI with DeleteObject recording so mv tests can
 // assert the post-transfer source cleanup.

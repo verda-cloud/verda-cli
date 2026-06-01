@@ -22,6 +22,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
+	"github.com/verda-cloud/verdagostack/pkg/tui"
 
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
@@ -105,7 +106,16 @@ func runList(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams,
 	}
 
 	_, _ = fmt.Fprintf(ioStreams.ErrOut, "  %d instance(s) found\n\n", len(instances))
+	return runListInteractive(cmd, f, ioStreams, client, instances)
+}
 
+func runListInteractive(
+	cmd *cobra.Command,
+	f cmdutil.Factory,
+	ioStreams cmdutil.IOStreams,
+	client *verda.Client,
+	instances []verda.Instance,
+) error {
 	prompter := f.Prompter()
 	labels := make([]string, 0, len(instances)+1)
 	for i := range instances {
@@ -114,15 +124,17 @@ func runList(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams,
 	labels = append(labels, "Exit")
 
 	for {
-		idx, err := prompter.Select(cmd.Context(), "Select instance (type to filter)", labels)
+		idx, err := prompter.Select(cmd.Context(), "Select instance (type to filter)", labels, tui.WithShowHints(true))
 		if err != nil {
-			return nil
+			if cmdutil.IsPromptCancel(err) {
+				return nil // Esc / Ctrl+C at top level = clean exit
+			}
+			return err
 		}
 		if idx == len(instances) { // "Exit"
 			return nil
 		}
 
-		// Fetch fresh details and volumes.
 		inst, err := client.Instances.GetByID(cmd.Context(), instances[idx].ID)
 		if err != nil {
 			_, _ = fmt.Fprintf(ioStreams.ErrOut, "Error: %v\n", err)
@@ -131,7 +143,13 @@ func runList(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams,
 		volumes := fetchInstanceVolumes(cmd.Context(), client, inst)
 		_, _ = fmt.Fprint(ioStreams.Out, renderInstanceCard(inst, volumes...))
 
-		// After showing details, loop back to the list.
+		exit, perr := cmdutil.PromptBackOrExit(cmd.Context(), prompter)
+		if perr != nil {
+			return perr
+		}
+		if exit {
+			return nil
+		}
 	}
 }
 
