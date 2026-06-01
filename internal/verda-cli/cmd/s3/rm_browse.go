@@ -135,10 +135,8 @@ func buildRmRows(cur URI, payload objectsPayload) []browseRow {
 // ticked set through the shared confirm + executeRm path. Objects only (folders
 // are drilled into, not bulk-deleted here).
 func rmBrowseDeleteMulti(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client API, cur URI, payload objectsPayload) error {
-	var (
-		keys   []string
-		labels []string
-	)
+	keys := make([]string, 0, len(payload.Objects))
+	labels := make([]string, 0, len(payload.Objects))
 	for i := range payload.Objects {
 		name := relName(cur.Key, payload.Objects[i].Key)
 		if name == "" {

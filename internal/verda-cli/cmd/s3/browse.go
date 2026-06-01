@@ -289,8 +289,8 @@ func browseDownload(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IO
 // the same name is renamed rather than overwritten. Non-destructive, so no
 // confirmation. Pauses on a Back/Exit gate after the summary so it stays on screen.
 func browseDownloadMulti(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client API, cur URI, payload objectsPayload) (bool, error) {
-	var objs []objectEntry
-	var labels []string
+	objs := make([]objectEntry, 0, len(payload.Objects))
+	labels := make([]string, 0, len(payload.Objects))
 	for i := range payload.Objects {
 		name := relName(cur.Key, payload.Objects[i].Key)
 		if name == "" {
