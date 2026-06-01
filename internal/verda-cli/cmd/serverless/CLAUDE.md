@@ -27,7 +27,7 @@ This rule applies equally to Claude, Codex, Cursor, or a human editing the packa
 - There is **no** `verda serverless` parent command — the two trees were promoted to root for shorter invocations. They still share this Go package because they share wizard step factories, validators, and the API cache.
 - Verbs (both trees): `create`, `list` (alias `ls`), `describe` (aliases `get`, `show`), `delete` (aliases `rm`, `del`), `pause`, `resume`, `purge-queue`. Container also has `restart`.
 - Files:
-  - `container.go`, `batchjob.go` — Top-level command builders. `NewCmdContainer` and `NewCmdBatchjob` are exported and called directly from `cmd/cmd.go`. **No feature gate, no `Hidden: true`** — this is a GA feature, unlike s3/registry.
+  - `container.go`, `batchjob.go` — Top-level command builders. `NewCmdContainer` and `NewCmdBatchjob` are exported and called directly from `cmd/cmd.go`. **Pre-release, two-layer gated like registry:** the Serverless command group is only registered when `VERDA_SERVERLESS_ENABLED=1` (`serverlessEnabled()` in `cmd/cmd.go`), and both parents set `Hidden: true` so they stay out of `verda --help` even when a tester flips the env var on. Drop the env gate + the two `Hidden: true` flags when serverless ships GA.
   - `container_create.go` — `containerCreateOptions`, flags, `request()`, validate(), wizard entry point.
   - `container_list.go` — `GetDeployments` + tabwriter + structured output.
   - `container_describe.go` — `GetDeploymentByName` + `GetDeploymentStatus` (best-effort) + `selectContainerDeployment` picker.
