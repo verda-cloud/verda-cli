@@ -208,7 +208,7 @@ func verifyCompletedParts(t *testing.T, parts []s3types.CompletedPart, wantN int
 		t.Fatalf("completed parts = %d, want %d", len(parts), wantN)
 	}
 	for i := range parts {
-		wantNum := int32(i + 1)
+		wantNum := int32(i + 1) //nolint:gosec // G115: test loop index
 		if aws.ToInt32(parts[i].PartNumber) != wantNum {
 			t.Errorf("completed[%d] PartNumber = %d, want %d (must be ascending)", i, aws.ToInt32(parts[i].PartNumber), wantNum)
 		}
@@ -597,7 +597,7 @@ func TestPartRange(t *testing.T) {
 		{2 * ps, fileSize},
 	}
 	for i := range wantRanges {
-		n := int32(i + 1)
+		n := int32(i + 1) //nolint:gosec // G115: test loop index
 		start, end := partRange(n, fileSize, ps)
 		if start != wantRanges[i][0] || end != wantRanges[i][1] {
 			t.Errorf("part %d range = [%d,%d), want [%d,%d)", n, start, end, wantRanges[i][0], wantRanges[i][1])

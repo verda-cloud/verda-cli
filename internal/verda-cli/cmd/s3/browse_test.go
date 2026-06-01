@@ -138,7 +138,7 @@ func TestBrowse_MultiDownload(t *testing.T) {
 	}
 
 	// The resumable downloader wrote file.txt (basename of data/file.txt) to ~/Downloads.
-	got, err := os.ReadFile(filepath.Join(home, "Downloads", "file.txt"))
+	got, err := os.ReadFile(filepath.Join(home, "Downloads", "file.txt")) //nolint:gosec // G304: reads from the test's own temp HOME
 	if err != nil || !bytes.Equal(got, fake.dlBody) {
 		t.Errorf("downloaded file.txt mismatch (err=%v, got=%q)", err, got)
 	}

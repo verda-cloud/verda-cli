@@ -52,7 +52,7 @@ func (d *dlFakeAPI) GetObject(ctx context.Context, in *s3.GetObjectInput, opts .
 	if _, err := fmt.Sscanf(aws.ToString(in.Range), "bytes=%d-%d", &start, &end); err != nil {
 		return nil, fmt.Errorf("bad range %q", aws.ToString(in.Range))
 	}
-	n := int32(start/d.partSize) + 1
+	n := int32(start/d.partSize) + 1 //nolint:gosec // G115: test chunk index
 	d.mu.Lock()
 	d.getCalls++
 	d.mu.Unlock()

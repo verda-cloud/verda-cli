@@ -89,7 +89,7 @@ func numParts(fileSize, partSize int64) int32 {
 	if n > maxParts {
 		n = maxParts
 	}
-	return int32(n)
+	return int32(n) //nolint:gosec // G115: capped at maxParts (10000) just above
 }
 
 // partRange returns the deterministic byte range [start,end) for part n
