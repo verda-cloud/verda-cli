@@ -17,15 +17,15 @@ package s3
 import (
 	"bytes"
 	"context"
-	"errors"
+	"io"
 	"strings"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
-	"github.com/verda-cloud/verdagostack/pkg/tui"
 	tuitest "github.com/verda-cloud/verdagostack/pkg/tui/testing"
+	"github.com/verda-cloud/verdagostack/pkg/tui/wizard"
 
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
@@ -49,36 +49,6 @@ func TestPromptNewBucketName_EmptyIsCleanCancel(t *testing.T) {
 	got, err := promptNewBucketName(context.Background(), f)
 	if err != nil || got != "" {
 		t.Errorf("got (%q, %v), want empty/no-error for blank input", got, err)
-	}
-}
-
-// ----- picker: flat object selection (mv source) -------------------------
-
-func TestSelectObjectKey_PicksChosen(t *testing.T) {
-	fake := &fakeS3API{objects: []s3types.Object{
-		{Key: aws.String("a.txt")},
-		{Key: aws.String("b.txt")},
-	}}
-	f := cmdutil.NewTestFactory(tuitest.New().AddSelect(1))
-	got, err := selectObjectKey(context.Background(), f, ioBufs(), fake, "bucket")
-	if err != nil {
-		t.Fatalf("selectObjectKey: %v", err)
-	}
-	if got != "b.txt" {
-		t.Errorf("chosen key = %q, want b.txt", got)
-	}
-}
-
-func TestSelectObjectKey_EmptyBucketReturnsBlank(t *testing.T) {
-	fake := &fakeS3API{}
-	f := cmdutil.NewTestFactory(tuitest.New())
-	errOut := &bytes.Buffer{}
-	got, err := selectObjectKey(context.Background(), f, cmdutil.IOStreams{Out: &bytes.Buffer{}, ErrOut: errOut}, fake, "bucket")
-	if err != nil || got != "" {
-		t.Errorf("got (%q, %v), want empty for empty bucket", got, err)
-	}
-	if !strings.Contains(errOut.String(), "No objects") {
-		t.Errorf("missing empty-bucket note: %q", errOut.String())
 	}
 }
 
@@ -184,28 +154,47 @@ func (m *mvWizardFake) DeleteObject(ctx context.Context, in *s3.DeleteObjectInpu
 	return &s3.DeleteObjectOutput{}, nil
 }
 
-func TestMoveWizard_S3ToS3(t *testing.T) {
-	// no t.Parallel — clientBuilder/prompter state
+// TestBuildMoveFlow_CollectsSelections drives the engine flow (no source arg) and
+// asserts the steps populate the wizard state: source bucket → object → dest
+// bucket (existing) → dest key. The dest-bucket choices are [src, dst, +create],
+// so index 1 selects "dst" and the new-bucket step is skipped.
+func TestBuildMoveFlow_CollectsSelections(t *testing.T) {
+	// no t.Parallel — clientBuilder/prompter state via fake
 	fake := &mvWizardFake{buckets: []string{"src", "dst"}, objects: []string{"a.txt"}}
+	f := cmdutil.NewTestFactory(tuitest.New())
+	st := &moveWizardState{}
+
+	engine := wizard.NewEngine(nil, nil,
+		wizard.WithOutput(io.Discard),
+		wizard.WithTestResults(
+			wizard.SelectResult(0),           // source bucket: src
+			wizard.SelectResult(0),           // source object: a.txt
+			wizard.SelectResult(1),           // dest bucket: dst
+			wizard.TextResult("renamed.txt"), // dest key
+		),
+	)
+	if err := engine.Run(context.Background(), buildMoveFlow(f, fake, st)); err != nil {
+		t.Fatalf("engine Run: %v", err)
+	}
+	if st.srcBucket != "src" || st.srcKey != "a.txt" || st.dstBucket != "dst" || st.dstKey != "renamed.txt" {
+		t.Errorf("state = %+v, want src/a.txt -> dst/renamed.txt", st)
+	}
+}
+
+// TestFinalizeMove_S3ToS3 covers the post-wizard execution: confirm → CopyObject
+// on the destination + DeleteObject on the source.
+func TestFinalizeMove_S3ToS3(t *testing.T) {
+	// no t.Parallel — clientBuilder/prompter state
+	fake := &mvWizardFake{}
 	restore := withFakeClient(fake)
 	defer restore()
 
-	// src bucket(0) -> object a.txt(0) -> dst bucket(1) -> dest key -> confirm.
-	mock := tuitest.New().
-		AddSelect(0).AddSelect(0).AddSelect(1).
-		AddTextInput("renamed.txt").
-		AddConfirm(true)
-
-	f := cmdutil.NewTestFactory(mock)
+	f := cmdutil.NewTestFactory(tuitest.New().AddConfirm(true))
 	cmd := NewCmdMv(f, ioBufs())
+	st := &moveWizardState{srcBucket: "src", srcKey: "a.txt", dstBucket: "dst", dstKey: "renamed.txt"}
 
-	errOut := &bytes.Buffer{}
-	io := cmdutil.IOStreams{Out: &bytes.Buffer{}, ErrOut: errOut}
-	if err := runMoveWizard(cmd, f, io, &cpOptions{}, nil); err != nil {
-		t.Fatalf("runMoveWizard: %v", err)
-	}
-	if !strings.Contains(errOut.String(), "Move / rename an S3 object") {
-		t.Errorf("missing wizard intro banner:\n%s", errOut.String())
+	if err := finalizeMove(context.Background(), cmd, f, ioBufs(), fake, &cpOptions{}, st); err != nil {
+		t.Fatalf("finalizeMove: %v", err)
 	}
 	if fake.deleted != "src/a.txt" {
 		t.Errorf("source deleted = %q, want src/a.txt", fake.deleted)
@@ -215,46 +204,6 @@ func TestMoveWizard_S3ToS3(t *testing.T) {
 	}
 	if !strings.Contains(fake.copiedSrc, "src") || !strings.Contains(fake.copiedSrc, "a.txt") {
 		t.Errorf("copy source = %q, want it to reference src/a.txt", fake.copiedSrc)
-	}
-}
-
-// TestNavIdx covers the wizard index navigation that makes Esc=back work:
-// success advances and applies, Esc steps back, Ctrl+C/real errors terminate.
-func TestNavIdx(t *testing.T) {
-	t.Parallel()
-	boom := errors.New("io failure")
-	cases := []struct {
-		name      string
-		err       error
-		wantNext  int
-		wantErr   error
-		wantApply bool
-	}{
-		{"success advances + applies", nil, 3, nil, true},
-		{"esc steps back", context.Canceled, 1, nil, false},
-		{"ctrl+c terminates", tui.ErrInterrupted, -1, nil, false},
-		{"real error propagates", boom, 2, boom, false},
-	}
-	for _, tc := range cases {
-		applied := false
-		next, out := navIdx(2, tc.err, func() { applied = true })
-		if next != tc.wantNext || !errors.Is(out, tc.wantErr) || applied != tc.wantApply {
-			t.Errorf("%s: navIdx = (next=%d err=%v applied=%v), want (%d %v %v)",
-				tc.name, next, out, applied, tc.wantNext, tc.wantErr, tc.wantApply)
-		}
-	}
-}
-
-func TestSelectStep_EmptyValueExits(t *testing.T) {
-	t.Parallel()
-	applied := false
-	next, err := selectStep(0, "", nil, func() { applied = true })
-	if next != -1 || err != nil || applied {
-		t.Errorf("selectStep(empty) = (next=%d err=%v applied=%v), want (-1, nil, false)", next, err, applied)
-	}
-	// Non-empty success still advances + applies.
-	if next, _ := selectStep(0, "bucket", nil, func() { applied = true }); next != 1 || !applied {
-		t.Errorf("selectStep(value) next=%d applied=%v, want 1/true", next, applied)
 	}
 }
 

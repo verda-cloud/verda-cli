@@ -132,58 +132,6 @@ func promptNewBucketName(ctx context.Context, f cmdutil.Factory) (string, error)
 	return strings.TrimSpace(name), nil
 }
 
-// selectObjectKey lists object keys in bucket (paginated, capped at
-// objectPickerCap) and prompts for one. Returns ("", nil) on a clean cancel or
-// an empty bucket.
-func selectObjectKey(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client API, bucket string) (string, error) {
-	res, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading objects...", func() (cappedKeys, error) {
-		k, truncated, e := listKeysCapped(ctx, client, bucket, objectPickerCap)
-		return cappedKeys{keys: k, truncated: truncated}, e
-	})
-	if err != nil {
-		return "", err
-	}
-	if len(res.keys) == 0 {
-		_, _ = fmt.Fprintf(ioStreams.ErrOut, "No objects in s3://%s.\n", bucket)
-		return "", nil
-	}
-	if res.truncated {
-		_, _ = fmt.Fprintf(ioStreams.ErrOut, "Showing the first %d objects of s3://%s; pass an explicit key for the rest.\n", objectPickerCap, bucket)
-	}
-	// Raw error on cancel so a wizard caller can tell Esc (go back) from Ctrl+C
-	// (exit). A non-wizard caller can still use cmdutil.IsPromptCancel.
-	idx, err := f.Prompter().Select(ctx, "Select object in s3://"+bucket, res.keys, tui.WithShowHints(true))
-	if err != nil {
-		return "", err
-	}
-	return res.keys[idx], nil
-}
-
-// pickSourceBucket lists existing buckets and returns the chosen name, surfacing
-// the raw prompter error on cancel (so a wizard can distinguish Esc from Ctrl+C).
-// Returns ("", nil) when there are no buckets.
-func pickSourceBucket(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client API) (string, error) {
-	out, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading buckets...", func() (*s3.ListBucketsOutput, error) {
-		return client.ListBuckets(ctx, &s3.ListBucketsInput{})
-	})
-	if err != nil {
-		return "", translateError(err)
-	}
-	if len(out.Buckets) == 0 {
-		_, _ = fmt.Fprintln(ioStreams.ErrOut, "No buckets found.")
-		return "", nil
-	}
-	labels := make([]string, len(out.Buckets))
-	for i := range out.Buckets {
-		labels[i] = aws.ToString(out.Buckets[i].Name)
-	}
-	idx, err := f.Prompter().Select(ctx, "Select source bucket", labels, tui.WithShowHints(true))
-	if err != nil {
-		return "", err
-	}
-	return aws.ToString(out.Buckets[idx].Name), nil
-}
-
 type cappedKeys struct {
 	keys      []string
 	truncated bool

@@ -16,44 +16,39 @@ package s3
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
-	"charm.land/lipgloss/v2"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/spf13/cobra"
 	"github.com/verda-cloud/verdagostack/pkg/tui"
+	"github.com/verda-cloud/verdagostack/pkg/tui/bubbletea"
+	"github.com/verda-cloud/verdagostack/pkg/tui/wizard"
 
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
 
-// printMoveWizardIntro tells the user up front what the wizard will do — a move
-// is a copy followed by deleting the source, so the heads-up matters.
-func printMoveWizardIntro(ioStreams cmdutil.IOStreams) {
-	title := lipgloss.NewStyle().Bold(true)
-	dim := lipgloss.NewStyle().Faint(true)
-	_, _ = fmt.Fprintf(ioStreams.ErrOut, "\n  %s\n", title.Render("Move / rename an S3 object"))
-	_, _ = fmt.Fprintf(ioStreams.ErrOut, "  %s\n", dim.Render("Copies the object to a new location, then deletes the source."))
-	_, _ = fmt.Fprintf(ioStreams.ErrOut, "  %s\n\n", dim.Render("Steps: pick source object → destination bucket → destination key → confirm.   Esc: back · Ctrl+C: cancel"))
+// newBucketSentinel is the dest-bucket Choice value for "create a new bucket". A
+// NUL byte can't be a bucket name, so it never collides with a real one.
+const newBucketSentinel = "\x00new-bucket"
+
+// moveWizardState holds the selections collected across the move wizard steps.
+type moveWizardState struct {
+	srcBucket    string
+	srcKey       string
+	dstBucket    string
+	newDstBucket string // set when the user chose "create new bucket"
+	dstKey       string
 }
 
-// move wizard steps.
-const (
-	mvStepSourceBucket = iota
-	mvStepSourceObject
-	mvStepDestBucket
-	mvStepDestKey
-	mvStepConfirm
-)
-
-// moveStepTitles is indexed by the step constants above. Keep in sync.
-var moveStepTitles = []string{"Source bucket", "Source object", "Destination bucket", "Destination key", "Confirm"}
-
-// runMoveWizard guides an interactive S3->S3 move/rename as a stepped wizard.
-// Every prompt is its own step, walked by an index into a steps slice, so Esc
-// steps BACK exactly one prompt and Ctrl+C exits — the standard hint-bar
-// contract. Steps the user can't act on (a source fixed by an argument) are
-// dropped from the slice, so the "Step N of M" numbering always matches reality.
-// On confirm it reuses the normal S3->S3 move path (CopyObject + delete).
+// runMoveWizard guides an interactive S3->S3 move/rename using the shared wizard
+// engine (same progress bar + hint bar + exit-confirmation as `s3 configure`):
+// source bucket → source object → destination bucket (pick or create) →
+// destination key. A source fixed by an argument pre-sets and skips those steps.
+// After the engine collects the selections it previews + confirms, creates the
+// destination bucket if new, and runs the normal S3->S3 move (CopyObject + delete).
 //
 // ctx is cmd.Context() (unbounded): the prompts involve user think-time and must
 // not hit the short per-request --timeout.
@@ -64,66 +59,25 @@ func runMoveWizard(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOSt
 		return err
 	}
 
-	srcBucket, srcKey, sourceFixed, err := parseMoveSourceArg(cmd, args)
+	srcBucket, srcKey, _, err := parseMoveSourceArg(cmd, args)
 	if err != nil {
 		return err
 	}
-	var dstBucket, dstKey string
+	st := &moveWizardState{srcBucket: srcBucket, srcKey: srcKey}
 
-	printMoveWizardIntro(ioStreams)
-
-	steps := buildMoveSteps(sourceFixed, srcBucket)
-	// i < 0 (Esc on the first step) or i == len(steps) (done) ends the loop.
-	for i := 0; i >= 0 && i < len(steps); {
-		step := steps[i]
-		printMoveStep(ioStreams, i, len(steps), step)
-
-		switch step {
-		case mvStepSourceBucket:
-			b, perr := pickSourceBucket(ctx, f, ioStreams, client)
-			if i, err = selectStep(i, b, perr, func() { srcBucket = b }); err != nil {
-				return err
-			}
-
-		case mvStepSourceObject:
-			k, perr := selectObjectKey(ctx, f, ioStreams, client, srcBucket)
-			if i, err = selectStep(i, k, perr, func() { srcKey = k }); err != nil {
-				return err
-			}
-
-		case mvStepDestBucket:
-			b, perr := selectBucketOrCreate(ctx, f, ioStreams, client)
-			// selectBucketOrCreate never returns an empty name without an error.
-			if i, err = navIdx(i, perr, func() { dstBucket = b }); err != nil {
-				return err
-			}
-
-		case mvStepDestKey:
-			k, perr := f.Prompter().TextInput(ctx, "Destination key", tui.WithDefault(srcKey))
-			i, err = navIdx(i, perr, func() {
-				if k = strings.TrimSpace(k); k == "" {
-					k = srcKey
-				}
-				dstKey = k
-			})
-			if err != nil {
-				return err
-			}
-
-		case mvStepConfirm:
-			done, cerr := moveConfirmStep(ctx, cmd, f, ioStreams, opts, URI{Bucket: srcBucket, Key: srcKey}, URI{Bucket: dstBucket, Key: dstKey})
-			if cerr != nil || done {
-				return cerr
-			}
-			i-- // not done (Esc or identical src/dst) -> back to the destination key
-		}
+	engine := wizard.NewEngine(f.Prompter(), f.Status(),
+		wizard.WithOutput(ioStreams.ErrOut), wizard.WithExitConfirmation())
+	if err := engine.Run(ctx, buildMoveFlow(f, client, st)); err != nil {
+		return err
 	}
-	return nil
+
+	return finalizeMove(ctx, cmd, f, ioStreams, client, opts, st)
 }
 
 // parseMoveSourceArg interprets an optional single s3:// argument: a full
-// bucket/key fixes the source (sourceFixed=true); a bucket-only URI pre-fills
-// srcBucket but still prompts for the object; no arg returns zeros.
+// bucket/key fixes the source; a bucket-only URI pre-fills the bucket but still
+// prompts for the object; no arg returns zeros. sourceFixed is informational —
+// step skipping is driven by which of srcBucket/srcKey are non-empty.
 func parseMoveSourceArg(cmd *cobra.Command, args []string) (srcBucket, srcKey string, sourceFixed bool, err error) {
 	if len(args) != 1 {
 		return "", "", false, nil
@@ -138,75 +92,226 @@ func parseMoveSourceArg(cmd *cobra.Command, args []string) (srcBucket, srcKey st
 	return uri.Bucket, "", false, nil
 }
 
-// buildMoveSteps returns the ordered steps the user will walk, dropping any that
-// an argument already satisfied: a full bucket/key source skips both source
-// steps; a bucket-only source skips just the bucket step.
-func buildMoveSteps(sourceFixed bool, srcBucket string) []int {
-	var steps []int
-	if !sourceFixed {
-		if srcBucket == "" {
-			steps = append(steps, mvStepSourceBucket)
+// buildMoveFlow assembles the engine flow. Steps bound to a non-empty preset
+// (source fixed by an arg) report IsSet and are skipped by the engine.
+func buildMoveFlow(f cmdutil.Factory, client API, st *moveWizardState) *wizard.Flow {
+	return &wizard.Flow{
+		Name: "s3-move",
+		Layout: []wizard.ViewDef{
+			{ID: "progress", View: wizard.NewProgressView(wizard.WithProgressPercent())},
+			{ID: "hints", View: wizard.NewHintBarView(wizard.WithHintStyle(bubbletea.HintStyle()))},
+		},
+		Steps: []wizard.Step{
+			moveStepSourceBucket(f, client, st),
+			moveStepSourceObject(f, client, st),
+			moveStepDestBucket(f, client, st),
+			moveStepNewDestBucket(st),
+			moveStepDestKey(st),
+		},
+	}
+}
+
+func moveStepSourceBucket(f cmdutil.Factory, client API, st *moveWizardState) wizard.Step {
+	return wizard.Step{
+		Name:        "source-bucket",
+		Description: "Source bucket",
+		Prompt:      wizard.SelectPrompt,
+		Required:    true,
+		Loader: func(ctx context.Context, _ tui.Prompter, _ tui.Status, _ *wizard.Store) ([]wizard.Choice, error) {
+			return bucketChoices(ctx, f, client, false)
+		},
+		Setter: func(v any) {
+			if s, _ := v.(string); s != "" {
+				st.srcBucket = s
+			}
+		},
+		Resetter: func() { st.srcBucket = "" },
+		IsSet:    func() bool { return st.srcBucket != "" },
+		Value:    func() any { return st.srcBucket },
+	}
+}
+
+func moveStepSourceObject(f cmdutil.Factory, client API, st *moveWizardState) wizard.Step {
+	return wizard.Step{
+		Name:        "source-object",
+		Description: "Source object",
+		Prompt:      wizard.SelectPrompt,
+		Required:    true,
+		DependsOn:   []string{"source-bucket"},
+		Loader: func(ctx context.Context, _ tui.Prompter, _ tui.Status, store *wizard.Store) ([]wizard.Choice, error) {
+			bucket, _ := store.Collected()["source-bucket"].(string)
+			if bucket == "" {
+				bucket = st.srcBucket
+			}
+			return objectChoices(ctx, f, client, bucket)
+		},
+		Setter:   func(v any) { st.srcKey, _ = v.(string) },
+		Resetter: func() { st.srcKey = "" },
+		IsSet:    func() bool { return st.srcKey != "" },
+		Value:    func() any { return st.srcKey },
+	}
+}
+
+func moveStepDestBucket(f cmdutil.Factory, client API, st *moveWizardState) wizard.Step {
+	return wizard.Step{
+		Name:        "dest-bucket",
+		Description: "Destination bucket",
+		Prompt:      wizard.SelectPrompt,
+		Required:    true,
+		Loader: func(ctx context.Context, _ tui.Prompter, _ tui.Status, _ *wizard.Store) ([]wizard.Choice, error) {
+			return bucketChoices(ctx, f, client, true)
+		},
+		// Sentinel ("create new") leaves dstBucket empty; the new-bucket step sets
+		// newDstBucket and finalizeMove creates it.
+		Setter: func(v any) {
+			if s, _ := v.(string); s != "" && s != newBucketSentinel {
+				st.dstBucket = s
+			}
+		},
+		Resetter: func() { st.dstBucket = "" },
+		IsSet:    func() bool { return false },
+		Value:    func() any { return st.dstBucket },
+	}
+}
+
+func moveStepNewDestBucket(st *moveWizardState) wizard.Step {
+	return wizard.Step{
+		Name:        "new-dest-bucket",
+		Description: "New bucket name",
+		Prompt:      wizard.TextInputPrompt,
+		Required:    true,
+		DependsOn:   []string{"dest-bucket"},
+		ShouldSkip: func(collected map[string]any) bool {
+			v, _ := collected["dest-bucket"].(string)
+			return v != newBucketSentinel
+		},
+		Validate: func(v any) error {
+			if strings.TrimSpace(v.(string)) == "" {
+				return errors.New("bucket name cannot be empty")
+			}
+			return nil
+		},
+		Setter: func(v any) { st.newDstBucket = strings.TrimSpace(v.(string)) },
+		// No-op: skipping (an existing dest bucket was chosen) must not clobber state.
+		Resetter: func() {},
+		IsSet:    func() bool { return false },
+		Value:    func() any { return st.newDstBucket },
+	}
+}
+
+func moveStepDestKey(st *moveWizardState) wizard.Step {
+	return wizard.Step{
+		Name:        "dest-key",
+		Description: "Destination key",
+		Prompt:      wizard.TextInputPrompt,
+		Required:    false, // blank → Default (the source key)
+		DependsOn:   []string{"source-object"},
+		Default: func(collected map[string]any) any {
+			if k, _ := collected["source-object"].(string); k != "" {
+				return k
+			}
+			return st.srcKey
+		},
+		Setter:   func(v any) { st.dstKey = strings.TrimSpace(v.(string)) },
+		Resetter: func() { st.dstKey = "" },
+		IsSet:    func() bool { return false },
+		Value:    func() any { return st.dstKey },
+	}
+}
+
+// bucketChoices lists buckets as wizard choices, optionally appending a trailing
+// "create new bucket" option (for destination selection).
+func bucketChoices(ctx context.Context, f cmdutil.Factory, client API, withCreate bool) ([]wizard.Choice, error) {
+	out, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading buckets...", func() (*s3.ListBucketsOutput, error) {
+		return client.ListBuckets(ctx, &s3.ListBucketsInput{})
+	})
+	if err != nil {
+		return nil, translateError(err)
+	}
+	choices := make([]wizard.Choice, 0, len(out.Buckets)+1)
+	for i := range out.Buckets {
+		name := aws.ToString(out.Buckets[i].Name)
+		choices = append(choices, wizard.Choice{Label: name, Value: name})
+	}
+	if withCreate {
+		choices = append(choices, wizard.Choice{Label: "+ Create new bucket…", Value: newBucketSentinel})
+	}
+	return choices, nil
+}
+
+// objectChoices lists object keys in bucket (capped) as wizard choices. An empty
+// bucket is an error — there is nothing to move out of it.
+func objectChoices(ctx context.Context, f cmdutil.Factory, client API, bucket string) ([]wizard.Choice, error) {
+	res, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading objects...", func() (cappedKeys, error) {
+		k, truncated, e := listKeysCapped(ctx, client, bucket, objectPickerCap)
+		return cappedKeys{keys: k, truncated: truncated}, e
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(res.keys) == 0 {
+		return nil, fmt.Errorf("no objects in s3://%s", bucket)
+	}
+	choices := make([]wizard.Choice, 0, len(res.keys))
+	for _, k := range res.keys {
+		choices = append(choices, wizard.Choice{Label: k, Value: k})
+	}
+	return choices, nil
+}
+
+// finalizeMove resolves the destination (creating a new bucket if requested),
+// previews + confirms, and runs the S3->S3 move. An identical src/dst re-prompts
+// the key rather than aborting. A clean cancel returns nil.
+func finalizeMove(ctx context.Context, cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client API, opts *cpOptions, st *moveWizardState) error {
+	dstBucket := st.dstBucket
+	if st.newDstBucket != "" {
+		dstBucket = st.newDstBucket
+	}
+	dstKey := st.dstKey
+	if dstKey == "" {
+		dstKey = st.srcKey
+	}
+	srcURI := URI{Bucket: st.srcBucket, Key: st.srcKey}
+
+	// Disallow moving onto itself; re-prompt the key until it differs.
+	dstURI := URI{Bucket: dstBucket, Key: dstKey}
+	for srcURI == dstURI {
+		_, _ = fmt.Fprintln(ioStreams.ErrOut, "  Source and destination are identical — enter a different destination key.")
+		k, kerr := f.Prompter().TextInput(ctx, "Destination key", tui.WithDefault(dstKey))
+		if kerr != nil {
+			if cmdutil.IsPromptCancel(kerr) {
+				return nil
+			}
+			return kerr
 		}
-		steps = append(steps, mvStepSourceObject)
+		if dstKey = strings.TrimSpace(k); dstKey == "" {
+			dstKey = st.srcKey
+		}
+		dstURI = URI{Bucket: dstBucket, Key: dstKey}
 	}
-	return append(steps, mvStepDestBucket, mvStepDestKey, mvStepConfirm)
-}
 
-// selectStep handles a list-picker step: an empty value with no error ends the
-// wizard (no buckets/objects to act on), otherwise it delegates to navIdx.
-func selectStep(i int, value string, perr error, apply func()) (next int, out error) {
-	if perr == nil && value == "" {
-		return -1, nil
-	}
-	return navIdx(i, perr, apply)
-}
-
-// navIdx advances the wizard index based on a prompter error: Esc steps back
-// (i-1; -1 on the first step ends the loop = exit), Ctrl+C exits (returns a
-// terminal index), a real error propagates, and success runs apply() then i+1.
-func navIdx(i int, err error, apply func()) (next int, out error) {
-	back, exit, fatal := classifyNav(err, false)
-	switch {
-	case fatal != nil:
-		return i, fatal
-	case exit:
-		return -1, nil // terminate the loop without acting
-	case back:
-		return i - 1, nil
-	default:
-		apply()
-		return i + 1, nil
-	}
-}
-
-// moveConfirmStep previews the move and confirms it. done=false means step back
-// to the key prompt (Esc, or an identical src/dst); done=true ends the wizard —
-// the move ran, or the user exited/declined, with err carrying any real failure.
-func moveConfirmStep(ctx context.Context, cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *cpOptions, srcURI, dstURI URI) (done bool, err error) {
-	if srcURI == dstURI {
-		_, _ = fmt.Fprintln(ioStreams.ErrOut, "  Source and destination are identical — choose a different destination.")
-		return false, nil
-	}
 	_, _ = fmt.Fprintf(ioStreams.ErrOut, "\n  Will run:  verda s3 mv %s %s\n\n", srcURI.String(), dstURI.String())
-	confirmed, cerr := f.Prompter().Confirm(ctx, "Proceed with move? (esc to go back)", tui.WithConfirmDefault(true))
-	back, exit, fatal := classifyNav(cerr, false)
-	switch {
-	case fatal != nil:
-		return true, fatal
-	case back:
-		return false, nil // Esc -> step back to the key prompt
-	case exit:
-		return true, nil // Ctrl+C
-	case !confirmed:
-		_, _ = fmt.Fprintln(ioStreams.ErrOut, "Canceled.")
-		return true, nil
-	default:
-		return true, runCopyMv(ctx, cmd, f, ioStreams, srcURI, dstURI, opts)
+	confirmed, cerr := f.Prompter().Confirm(ctx, "Proceed with move?", tui.WithConfirmDefault(true))
+	if cerr != nil {
+		if cmdutil.IsPromptCancel(cerr) {
+			_, _ = fmt.Fprintln(ioStreams.ErrOut, "Canceled.")
+			return nil
+		}
+		return cerr
 	}
-}
+	if !confirmed {
+		_, _ = fmt.Fprintln(ioStreams.ErrOut, "Canceled.")
+		return nil
+	}
 
-// printMoveStep renders the "Step N of M · Title" header for the i-th step of n.
-func printMoveStep(ioStreams cmdutil.IOStreams, i, n, step int) {
-	header := fmt.Sprintf("Step %d of %d · %s", i+1, n, moveStepTitles[step])
-	_, _ = fmt.Fprintf(ioStreams.ErrOut, "  %s\n", lipgloss.NewStyle().Bold(true).Render(header))
+	if st.newDstBucket != "" {
+		if _, err := cmdutil.WithSpinner(ctx, f.Status(), "Creating bucket...", func() (*s3.CreateBucketOutput, error) {
+			return client.CreateBucket(ctx, &s3.CreateBucketInput{Bucket: aws.String(dstBucket)})
+		}); err != nil {
+			return translateError(err)
+		}
+		_, _ = fmt.Fprintf(ioStreams.ErrOut, "  Created bucket %s\n", dstBucket)
+	}
+
+	return runCopyMv(ctx, cmd, f, ioStreams, srcURI, dstURI, opts)
 }
