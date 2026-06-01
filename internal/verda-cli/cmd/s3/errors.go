@@ -42,6 +42,8 @@ func translateError(err error) error {
 			return cmdutil.NewAuthError(apiErr.ErrorMessage())
 		case "BucketAlreadyOwnedByYou", "BucketAlreadyExists":
 			return cmdutil.NewValidationError("bucket", apiErr.ErrorMessage())
+		case "BucketNotEmpty":
+			return cmdutil.NewValidationError("bucket", "bucket is not empty — pass --force to delete its contents first")
 		case "NoSuchUpload":
 			return cmdutil.NewNotFoundError("upload", apiErr.ErrorMessage())
 		}

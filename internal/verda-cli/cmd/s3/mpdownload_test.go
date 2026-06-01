@@ -140,3 +140,52 @@ func TestResumableDownload_BreakThenResume(t *testing.T) {
 		t.Errorf("resume GetObject calls = %d, want 2 (only chunks 2,3)", c)
 	}
 }
+
+// TestResumableDownload_ETagChangeRestarts proves the If-Match safety property:
+// if the object changes between an interrupted run and the resume, the stale
+// .part is discarded and every chunk is re-fetched against the new object.
+func TestResumableDownload_ETagChangeRestarts(t *testing.T) {
+	withTempVerdaHome(t)
+	t.Chdir(t.TempDir())
+	content := bytes.Repeat([]byte("xy"), 1280) // 2560 bytes -> 3 chunks
+	dst := "obj.bin"
+
+	// Run 1: break on chunk 2 so chunk 1 lands in the .part + checkpoint.
+	fake := &dlFakeAPI{content: content, etag: "\"old\"", partSize: 1024, failChunk: 2}
+	if _, err := resumableDownload(context.Background(), fake, &resumableDownloadOptions{
+		Bucket: "b", Key: "k", DestPath: dst, PartSize: 1024, Concurrency: 1,
+	}); err == nil {
+		t.Fatal("expected first run to fail")
+	}
+
+	// Object changes server-side: new ETag and fresh content.
+	newContent := bytes.Repeat([]byte("zw"), 1280)
+	fake.etag = "\"new\""
+	fake.content = newContent
+	fake.failChunk = 0
+	fake.mu.Lock()
+	fake.getCalls = 0
+	fake.mu.Unlock()
+
+	resumeCalled := false
+	n, err := resumableDownload(context.Background(), fake, &resumableDownloadOptions{
+		Bucket: "b", Key: "k", DestPath: dst, PartSize: 1024, Concurrency: 1,
+		OnResume: func(already, total int64) { resumeCalled = true },
+	})
+	if err != nil {
+		t.Fatalf("resume after change: %v", err)
+	}
+	if resumeCalled {
+		t.Error("OnResume must not fire — a changed object restarts from scratch")
+	}
+	if c := fake.calls(); c != 3 {
+		t.Errorf("GetObject calls = %d, want 3 (full re-fetch, not a partial resume)", c)
+	}
+	if n != int64(len(newContent)) {
+		t.Errorf("size = %d, want %d", n, len(newContent))
+	}
+	got, _ := os.ReadFile(dst)
+	if !bytes.Equal(got, newContent) {
+		t.Error("restarted download must reflect the NEW object content, not a mix")
+	}
+}

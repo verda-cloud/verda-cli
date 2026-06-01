@@ -117,7 +117,7 @@ func TestClassifyNav(t *testing.T) {
 		firstStep bool
 		back      bool
 		exit      bool
-		real      error
+		fatal     error
 	}{
 		{"nil advances", nil, false, false, false, nil},
 		{"ctrl+c exits", tui.ErrInterrupted, false, false, true, nil},
@@ -126,10 +126,10 @@ func TestClassifyNav(t *testing.T) {
 		{"real error propagates", boom, false, false, false, boom},
 	}
 	for _, tc := range cases {
-		back, exit, real := classifyNav(tc.err, tc.firstStep)
-		if back != tc.back || exit != tc.exit || real != tc.real {
-			t.Errorf("%s: classifyNav = (back=%v exit=%v real=%v), want (%v %v %v)",
-				tc.name, back, exit, real, tc.back, tc.exit, tc.real)
+		back, exit, fatal := classifyNav(tc.err, tc.firstStep)
+		if back != tc.back || exit != tc.exit || !errors.Is(fatal, tc.fatal) {
+			t.Errorf("%s: classifyNav = (back=%v exit=%v fatal=%v), want (%v %v %v)",
+				tc.name, back, exit, fatal, tc.back, tc.exit, tc.fatal)
 		}
 	}
 }

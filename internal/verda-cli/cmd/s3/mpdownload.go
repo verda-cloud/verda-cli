@@ -127,6 +127,52 @@ func deleteDownloadCheckpoint(identity string) {
 	}
 }
 
+// hasResumableDownload reports whether a resume checkpoint exists for this exact
+// (local destination, object) triple — i.e. an adjacent ".part" belongs to THIS
+// download and should be continued, not treated as an occupied filename.
+func hasResumableDownload(destPath, bucket, key string) bool {
+	abs, err := filepath.Abs(destPath)
+	if err != nil {
+		abs = destPath
+	}
+	return loadDownloadCheckpoint(downloadIdentity(abs, bucket, key)) != nil
+}
+
+// gcDownloadCheckpoints prunes stale download checkpoints under
+// ~/.verda/s3-downloads (left behind by interrupted downloads that were never
+// resumed). Best-effort; a zero maxAge falls back to checkpointMaxAge.
+func gcDownloadCheckpoints(maxAge time.Duration) error {
+	base, err := options.VerdaDir()
+	if err != nil {
+		return err
+	}
+	return gcStaleFiles(filepath.Join(base, downloadCheckpointDirName), maxAge)
+}
+
+// loadOrResetDownloadCheckpoint returns the checkpoint to use and the set of
+// chunks already on disk. A checkpoint that still matches the remote object
+// (etag/size/partSize) with its .part file present is reused (resume); otherwise
+// the stale .part is removed and a fresh checkpoint is created and persisted.
+func loadOrResetDownloadCheckpoint(identity, partPath, etag string, total, partSize int64, opts *resumableDownloadOptions) (*downloadCheckpoint, map[int32]bool, error) {
+	done := map[int32]bool{}
+	cp := loadDownloadCheckpoint(identity)
+	if !opts.NoResume && cp != nil && cp.ETag == etag && cp.TotalSize == total && cp.PartSize == partSize && fileExists(partPath) {
+		for _, n := range cp.Chunks {
+			done[n] = true
+		}
+		return cp, done, nil
+	}
+	_ = os.Remove(partPath) // stale/changed -> start over
+	cp = &downloadCheckpoint{
+		Bucket: opts.Bucket, Key: opts.Key, ETag: etag, DestPath: opts.DestPath,
+		TotalSize: total, PartSize: partSize, CreatedAt: time.Now().UTC(),
+	}
+	if err := saveDownloadCheckpoint(identity, cp); err != nil {
+		return nil, nil, err
+	}
+	return cp, done, nil
+}
+
 // numChunks is the chunk count for total bytes at partSize (ceil division).
 func numChunks(total, partSize int64) int32 {
 	if total <= 0 {
@@ -136,7 +182,7 @@ func numChunks(total, partSize int64) int32 {
 	if total%partSize != 0 {
 		n++
 	}
-	return int32(n)
+	return int32(n) //nolint:gosec // G115: chunk count is bounded by object size / part size
 }
 
 // chunkRange returns the [start,end) byte range for chunk n (1-indexed).
@@ -192,22 +238,12 @@ func resumableDownload(ctx context.Context, client API, opts *resumableDownloadO
 	}
 	defer release()
 
-	partPath := opts.DestPath + ".part"
-	cp := loadDownloadCheckpoint(identity)
-	done := map[int32]bool{}
-	if !opts.NoResume && cp != nil && cp.ETag == etag && cp.TotalSize == total && cp.PartSize == partSize && fileExists(partPath) {
-		for _, n := range cp.Chunks {
-			done[n] = true
-		}
-	} else {
-		_ = os.Remove(partPath) // stale/changed -> start over
-		cp = &downloadCheckpoint{
-			Bucket: opts.Bucket, Key: opts.Key, ETag: etag, DestPath: opts.DestPath,
-			TotalSize: total, PartSize: partSize, CreatedAt: time.Now().UTC(),
-		}
-		if err := saveDownloadCheckpoint(identity, cp); err != nil {
-			return 0, err
-		}
+	// Keyed off absDest (not opts.DestPath) so the .part file is stable across
+	// runs regardless of cwd — matching the lock/checkpoint identity.
+	partPath := absDest + ".part"
+	cp, done, err := loadOrResetDownloadCheckpoint(identity, partPath, etag, total, partSize, opts)
+	if err != nil {
+		return 0, err
 	}
 
 	if len(done) > 0 && opts.OnResume != nil {

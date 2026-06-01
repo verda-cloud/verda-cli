@@ -115,7 +115,7 @@ func runLsUploads(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStr
 
 	// On an interactive terminal, offer to resume one. The resume itself runs a
 	// full upload, so it uses the unbounded cmd.Context() (not the listing ctx).
-	interactive := cmdutil.IsStdoutTerminal() && !f.AgentMode() && f.OutputFormat() == "table"
+	interactive := interactiveTTY(f)
 	if interactive && len(payload.Uploads) > 0 {
 		return promptResumeFromUploads(cmd.Context(), f, ioStreams, client, uri.Bucket, payload.Uploads)
 	}

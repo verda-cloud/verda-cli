@@ -43,7 +43,7 @@ func acquireTransferLock(identity string) (release func(), acquired bool, err er
 	if err != nil {
 		return nil, false, fmt.Errorf("open lock file: %w", err)
 	}
-	if flockErr := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); flockErr != nil {
+	if flockErr := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); flockErr != nil { //nolint:gosec // G115: a file descriptor always fits in int
 		_ = f.Close()
 		if errors.Is(flockErr, syscall.EWOULDBLOCK) {
 			return nil, false, nil // held by another process
@@ -51,7 +51,7 @@ func acquireTransferLock(identity string) (release func(), acquired bool, err er
 		return nil, false, fmt.Errorf("lock %q: %w", path, flockErr)
 	}
 	return func() {
-		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN) //nolint:gosec // G115: a file descriptor always fits in int
 		_ = f.Close()
 	}, true, nil
 }

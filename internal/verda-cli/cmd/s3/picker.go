@@ -17,6 +17,7 @@ package s3
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -25,6 +26,10 @@ import (
 
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
+
+// objectPickerCap bounds the flat object picker so a huge bucket can't produce
+// an unusable Select. The user is told when the list is truncated.
+const objectPickerCap = 1000
 
 // selectBucket lists buckets and prompts the user to pick one. Returns the
 // chosen bucket name, or ("", nil) on a clean cancel (Ctrl+C/Esc) or when no
@@ -71,7 +76,9 @@ func resolveBucketArg(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.I
 	if f.AgentMode() {
 		return "", cmdutil.NewMissingFlagsError([]string{"s3://bucket"})
 	}
-	if !cmdutil.IsStdoutTerminal() {
+	// interactiveTTY also guards OutputFormat: `-o json` on a TTY must not launch
+	// the picker, or a scripted caller gets an interactive session.
+	if !interactiveTTY(f) {
 		return "", cmd.Help()
 	}
 
@@ -89,4 +96,124 @@ func resolveBucketArg(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.I
 		return "", nil
 	}
 	return "s3://" + bucket, nil
+}
+
+// resolveNewBucketArg returns the s3:// argument for a bucket-CREATING command.
+// Like resolveBucketArg, but prompts for a NEW name (TextInput) rather than
+// listing existing buckets. A clean cancel / empty input returns ("", nil) so
+// callers treat it as "exit cleanly, nothing to do".
+func resolveNewBucketArg(cmd *cobra.Command, f cmdutil.Factory, args []string) (string, error) {
+	if len(args) > 0 {
+		return args[0], nil
+	}
+	if f.AgentMode() {
+		return "", cmdutil.NewMissingFlagsError([]string{"s3://bucket"})
+	}
+	if !interactiveTTY(f) {
+		return "", cmd.Help()
+	}
+	name, err := promptNewBucketName(cmd.Context(), f)
+	if err != nil || name == "" {
+		return "", err
+	}
+	return "s3://" + name, nil
+}
+
+// promptNewBucketName asks for a bucket name and returns it trimmed. A clean
+// cancel or empty input returns ("", nil).
+func promptNewBucketName(ctx context.Context, f cmdutil.Factory) (string, error) {
+	name, err := f.Prompter().TextInput(ctx, "New bucket name")
+	if err != nil {
+		if cmdutil.IsPromptCancel(err) {
+			return "", nil
+		}
+		return "", err
+	}
+	return strings.TrimSpace(name), nil
+}
+
+// selectObjectKey lists object keys in bucket (paginated, capped at
+// objectPickerCap) and prompts for one. Returns ("", nil) on a clean cancel or
+// an empty bucket.
+func selectObjectKey(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client API, bucket string) (string, error) {
+	res, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading objects...", func() (cappedKeys, error) {
+		k, truncated, e := listKeysCapped(ctx, client, bucket, objectPickerCap)
+		return cappedKeys{keys: k, truncated: truncated}, e
+	})
+	if err != nil {
+		return "", err
+	}
+	if len(res.keys) == 0 {
+		_, _ = fmt.Fprintf(ioStreams.ErrOut, "No objects in s3://%s.\n", bucket)
+		return "", nil
+	}
+	if res.truncated {
+		_, _ = fmt.Fprintf(ioStreams.ErrOut, "Showing the first %d objects of s3://%s; pass an explicit key for the rest.\n", objectPickerCap, bucket)
+	}
+	// Raw error on cancel so a wizard caller can tell Esc (go back) from Ctrl+C
+	// (exit). A non-wizard caller can still use cmdutil.IsPromptCancel.
+	idx, err := f.Prompter().Select(ctx, "Select object in s3://"+bucket, res.keys, tui.WithShowHints(true))
+	if err != nil {
+		return "", err
+	}
+	return res.keys[idx], nil
+}
+
+// pickSourceBucket lists existing buckets and returns the chosen name, surfacing
+// the raw prompter error on cancel (so a wizard can distinguish Esc from Ctrl+C).
+// Returns ("", nil) when there are no buckets.
+func pickSourceBucket(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client API) (string, error) {
+	out, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading buckets...", func() (*s3.ListBucketsOutput, error) {
+		return client.ListBuckets(ctx, &s3.ListBucketsInput{})
+	})
+	if err != nil {
+		return "", translateError(err)
+	}
+	if len(out.Buckets) == 0 {
+		_, _ = fmt.Fprintln(ioStreams.ErrOut, "No buckets found.")
+		return "", nil
+	}
+	labels := make([]string, len(out.Buckets))
+	for i := range out.Buckets {
+		labels[i] = aws.ToString(out.Buckets[i].Name)
+	}
+	idx, err := f.Prompter().Select(ctx, "Select source bucket", labels, tui.WithShowHints(true))
+	if err != nil {
+		return "", err
+	}
+	return aws.ToString(out.Buckets[idx].Name), nil
+}
+
+type cappedKeys struct {
+	keys      []string
+	truncated bool
+}
+
+// listKeysCapped flat-lists up to limit object keys under bucket, returning
+// truncated=true if the cap was hit before the listing finished.
+func listKeysCapped(ctx context.Context, client API, bucket string, limit int) (keys []string, truncated bool, err error) {
+	var token *string
+	for {
+		in := &s3.ListObjectsV2Input{Bucket: aws.String(bucket)}
+		if token != nil {
+			in.ContinuationToken = token
+		}
+		out, err := client.ListObjectsV2(ctx, in)
+		if err != nil {
+			return nil, false, translateError(err)
+		}
+		for i := range out.Contents {
+			keys = append(keys, aws.ToString(out.Contents[i].Key))
+			if len(keys) >= limit {
+				// Only truncated if more keys exist beyond this one (rest of this
+				// page, or another page) — a bucket of exactly `limit` is complete.
+				more := i < len(out.Contents)-1 || aws.ToBool(out.IsTruncated)
+				return keys, more, nil
+			}
+		}
+		if !aws.ToBool(out.IsTruncated) || out.NextContinuationToken == nil || *out.NextContinuationToken == "" {
+			return keys, false, nil
+		}
+		token = out.NextContinuationToken
+	}
 }

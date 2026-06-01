@@ -145,7 +145,7 @@ func resumableUpload(ctx context.Context, client API, opts *resumableOptions) er
 
 	total := numParts(opts.FileSize, partSize)
 	if opts.OnProgress != nil {
-		opts.OnProgress(int32(len(done)), total) // reflect parts already on the server
+		opts.OnProgress(int32(len(done)), total) //nolint:gosec // G115: part count is capped at 10000
 	}
 	if err := uploadMissingParts(ctx, client, opts, identity, cp, partSize, total, done); err != nil {
 		return err
@@ -182,7 +182,10 @@ func resolveUpload(ctx context.Context, client API, opts *resumableOptions, iden
 	if existing == nil || opts.NoResume {
 		return fresh()
 	}
-	if existing.FileSize != opts.FileSize || !existing.MTime.Equal(opts.MTime) {
+	// PartSize must match: the server holds parts at the checkpoint's boundaries,
+	// so resuming with a different part size (e.g. a changed --part-size) would
+	// upload misaligned ranges and assemble a corrupt object. Restart instead.
+	if existing.FileSize != opts.FileSize || !existing.MTime.Equal(opts.MTime) || existing.PartSize != partSize {
 		return fresh()
 	}
 
@@ -344,7 +347,7 @@ func uploadMissingParts(ctx context.Context, client API, opts *resumableOptions,
 
 	var mu sync.Mutex
 	var firstErr error
-	completed := int32(len(done)) // parts already on the server count toward progress
+	completed := int32(len(done)) //nolint:gosec // G115: part count is capped at 10000
 	for res := range results {
 		if res.err != nil {
 			if firstErr == nil {

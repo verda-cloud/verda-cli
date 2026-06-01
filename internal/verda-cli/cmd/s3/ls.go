@@ -110,7 +110,7 @@ func runLs(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, o
 	// The interactive browser is unbounded: user navigation (think-time) and its
 	// downloads must not hit the short per-request --timeout. The static
 	// listings keep the timeout — they're quick control-plane calls.
-	if len(args) == 0 && cmdutil.IsStdoutTerminal() && !f.AgentMode() && f.OutputFormat() == "table" {
+	if len(args) == 0 && interactiveTTY(f) {
 		client, err := buildClient(cmd.Context(), f, ClientOverrides{})
 		if err != nil {
 			return err

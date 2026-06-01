@@ -43,6 +43,20 @@ const (
 	dirCopy
 )
 
+// Output format names (mirrors options.Output*); kept local so s3 helpers can
+// compare without importing options just for the strings.
+const (
+	outputTable = "table"
+	outputJSON  = "json"
+	outputYAML  = "yaml"
+)
+
+// interactiveTTY reports whether to drive an interactive TUI: stdout is a
+// terminal, not agent mode, and the default table format (not json/yaml).
+func interactiveTTY(f cmdutil.Factory) bool {
+	return cmdutil.IsStdoutTerminal() && !f.AgentMode() && f.OutputFormat() == outputTable
+}
+
 // detectDirection returns the direction implied by src/dst. Both-local is
 // reported as dirInvalid; the caller turns that into a UsageErrorf.
 func detectDirection(src, dst string) direction {
@@ -171,7 +185,7 @@ func NewCmdCp(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 			if len(args) == 2 {
 				return runCp(cmd, f, ioStreams, opts, args[0], args[1])
 			}
-			interactive := cmdutil.IsStdoutTerminal() && !f.AgentMode() && f.OutputFormat() == "table"
+			interactive := interactiveTTY(f)
 			loneS3 := len(args) == 1 && IsS3URI(args[0]) // a bare s3:// is a download w/o dest, not an upload
 			if interactive && !loneS3 {
 				return runUploadWizard(cmd, f, ioStreams, opts, args)
@@ -536,6 +550,11 @@ func runResumableDownload(ctx context.Context, f cmdutil.Factory, ioStreams cmdu
 		return err
 	}
 
+	// Best-effort prune of stale download checkpoints and shared lock files from
+	// prior interrupted transfers (downloads never triggered the upload-path GC).
+	_ = gcDownloadCheckpoints(0)
+	_ = gcCheckpoints(0)
+
 	n, rateSuffix, err := downloadToLocal(ctx, f, ioStreams, client, src, localPath, partSize, opts.Concurrency, opts.NoResume, opts.quietProgress)
 	if err != nil {
 		return err
@@ -566,7 +585,7 @@ func absOrSelf(p string) string {
 // progress bar (when interactive) and returns the object size plus a " @ rate"
 // suffix for the result line. Shared by `cp` and the ls browser, so both get
 // resumable downloads + progress. quiet suppresses the live bar.
-func downloadToLocal(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client API, src URI, localPath string, partSize int64, concurrency int, noResume, quiet bool) (int64, string, error) {
+func downloadToLocal(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client API, src URI, localPath string, partSize int64, concurrency int, noResume, quiet bool) (size int64, rateSuffix string, err error) {
 	rel := filepath.Base(localPath)
 	enabled := !quiet && f.Status() != nil && cmdutil.IsStderrTerminal()
 	var prog *transferProgress
@@ -819,7 +838,7 @@ func copyOne(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams
 // that must not be interleaved with human progress lines. "table" (or an
 // empty default) yields false.
 func isStructured(format string) bool {
-	return format == "json" || format == "yaml"
+	return format == outputJSON || format == outputYAML
 }
 
 func newCpPayload(dryrun bool) cpPayload {

@@ -392,6 +392,50 @@ func TestResumableUpload_NoResume_AbortsAndRestarts(t *testing.T) {
 	}
 }
 
+// TestResumableUpload_PartSizeChanged_AbortsAndRestarts guards C-1: when the
+// file is unchanged (size+mtime match) but --part-size differs from the stored
+// checkpoint, resuming would assemble parts at mismatched boundaries into a
+// corrupt object. The run MUST abort the old upload and start fresh instead.
+func TestResumableUpload_PartSizeChanged_AbortsAndRestarts(t *testing.T) {
+	withTempVerdaHome(t)
+	abs, size, mtime := writeTempFile(t, 2*minPartSize+10) // 3 parts @ minPartSize
+	id := uploadIdentity(abs, "b", "k")
+
+	// Valid checkpoint at the OLD part size, with a part already "uploaded".
+	stale := &checkpoint{
+		UploadID:  "old-upload",
+		Bucket:    "b",
+		Key:       "k",
+		AbsPath:   abs,
+		FileSize:  size,
+		MTime:     mtime,
+		PartSize:  minPartSize,
+		CreatedAt: time.Now().UTC(),
+		Parts:     []checkpointPart{{N: 1, ETag: "\"old1\""}},
+	}
+	if err := saveCheckpoint(id, stale); err != nil {
+		t.Fatalf("seed checkpoint: %v", err)
+	}
+
+	// Resume with a DIFFERENT part size on the unchanged file.
+	fake := newFakeMPUploadAPI()
+	o := optsFor(abs, size, mtime, 2*minPartSize, 1)
+	if err := resumableUpload(context.Background(), fake, o); err != nil {
+		t.Fatalf("resumableUpload: %v", err)
+	}
+	if fake.abortCalls != 1 || fake.abortUploadIDs[0] != "old-upload" {
+		t.Errorf("Abort = %d (%v), want 1 [old-upload] (part-size change must abort the old upload)", fake.abortCalls, fake.abortUploadIDs)
+	}
+	if fake.listPartsCalls != 0 {
+		t.Errorf("ListParts calls = %d, want 0 (part-size mismatch must not reconcile/resume)", fake.listPartsCalls)
+	}
+	if fake.createCalls != 1 {
+		t.Errorf("Create calls = %d, want 1 (fresh upload at the new part size)", fake.createCalls)
+	}
+	// 2*minPartSize over a (2*minPartSize+10)-byte file => exactly 2 parts.
+	verifyCompletedParts(t, fake.completedSet, 2)
+}
+
 func TestResumableUpload_ListPartsNoSuchUpload_GracefulFresh(t *testing.T) {
 	withTempVerdaHome(t)
 	abs, size, mtime := writeTempFile(t, minPartSize+10) // 2 parts

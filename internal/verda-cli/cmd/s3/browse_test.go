@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -117,15 +118,16 @@ func TestBrowse_DrillDownDeleteAndExit(t *testing.T) {
 // ticks the one object, downloads it, then exits.
 func TestBrowse_MultiDownload(t *testing.T) {
 	// no t.Parallel — prompter/cwd/~/.verda state
-	withTempVerdaHome(t)  // resumable downloader writes checkpoint/lock here
-	t.Chdir(t.TempDir()) // isolate the cwd that downloads write into
+	withTempVerdaHome(t) // resumable downloader writes checkpoint/lock here
+	home := t.TempDir()
+	t.Setenv("HOME", home) // browser downloads land in $HOME/Downloads
 
 	fake := &browseFakeAPI{dlBody: []byte("hello-world")}
 
-	// Selects: bucket(0) -> folder data/(1) -> Download-files-here(1) -> Exit(3)
+	// Selects: bucket(0) -> folder data/(1) -> Download-files-here(1) -> Back/Exit gate Exit(1)
 	// MultiSelect: tick the single object [0].
 	mock := tuitest.New().
-		AddSelect(0).AddSelect(1).AddSelect(1).AddSelect(3).
+		AddSelect(0).AddSelect(1).AddSelect(1).AddSelect(1).
 		AddMultiSelect([]int{0})
 
 	out := &bytes.Buffer{}
@@ -135,13 +137,62 @@ func TestBrowse_MultiDownload(t *testing.T) {
 		t.Fatalf("runLsBrowser: %v", err)
 	}
 
-	// The resumable downloader wrote file.txt (basename of data/file.txt) to cwd.
-	got, err := os.ReadFile("file.txt")
+	// The resumable downloader wrote file.txt (basename of data/file.txt) to ~/Downloads.
+	got, err := os.ReadFile(filepath.Join(home, "Downloads", "file.txt"))
 	if err != nil || !bytes.Equal(got, fake.dlBody) {
 		t.Errorf("downloaded file.txt mismatch (err=%v, got=%q)", err, got)
 	}
 	if !strings.Contains(out.String(), "Downloaded 1 file(s)") {
 		t.Errorf("stdout missing multi-download summary:\n%s", out.String())
+	}
+}
+
+// TestResolveLocalDest covers the local-overwrite policy: a free name is used
+// as-is, an existing unrelated file is dodged with a "-N" suffix, an in-progress
+// resume of the SAME object keeps its name, and batch-assigned names don't repeat.
+func TestResolveLocalDest(t *testing.T) {
+	withTempVerdaHome(t) // hasResumableDownload reads checkpoints under VERDA_HOME
+	dir := t.TempDir()
+	used := map[string]bool{}
+
+	// 1. Free name -> used verbatim.
+	if got := resolveLocalDest(dir, "report.pdf", "b", "k1", used); got != filepath.Join(dir, "report.pdf") {
+		t.Errorf("free name = %q, want report.pdf", got)
+	}
+	// 2. Same batch again -> the just-assigned name is taken, so suffix.
+	if got := resolveLocalDest(dir, "report.pdf", "b", "k1", used); got != filepath.Join(dir, "report-2.pdf") {
+		t.Errorf("batch repeat = %q, want report-2.pdf", got)
+	}
+
+	// 3. An unrelated completed file on disk -> dodge it.
+	if err := os.WriteFile(filepath.Join(dir, "data.bin"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := resolveLocalDest(dir, "data.bin", "b", "k2", map[string]bool{}); got != filepath.Join(dir, "data-2.bin") {
+		t.Errorf("existing-file dodge = %q, want data-2.bin", got)
+	}
+
+	// 4. A resumable .part for THIS object at the default name -> keep the name.
+	partBase := filepath.Join(dir, "model.safetensors")
+	if err := os.WriteFile(partBase+".part", []byte("partial"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	abs, _ := filepath.Abs(partBase)
+	if err := saveDownloadCheckpoint(downloadIdentity(abs, "b", "k3"), &downloadCheckpoint{
+		Bucket: "b", Key: "k3", DestPath: partBase,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := resolveLocalDest(dir, "model.safetensors", "b", "k3", map[string]bool{}); got != partBase {
+		t.Errorf("resume = %q, want the original name %q (must not dodge its own .part)", got, partBase)
+	}
+
+	// 5. A foreign .part (no matching checkpoint) -> treated as occupied, dodge.
+	if err := os.WriteFile(filepath.Join(dir, "foreign.bin")+".part", []byte("partial"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := resolveLocalDest(dir, "foreign.bin", "b", "k4", map[string]bool{}); got != filepath.Join(dir, "foreign-2.bin") {
+		t.Errorf("foreign .part dodge = %q, want foreign-2.bin", got)
 	}
 }
 

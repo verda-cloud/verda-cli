@@ -38,14 +38,25 @@ func NewCmdMb(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 		Long: cmdutil.LongDesc(`
 			Create a new S3 bucket. The URI must be a bucket-only URI
 			(s3://bucket) with no key component.
+
+			Run with no argument on a terminal to be prompted for the name.
 		`),
 		Example: cmdutil.Examples(`
 			# Create a new bucket
 			verda s3 mb s3://my-new-bucket
+
+			# Prompt for the name interactively
+			verda s3 mb
 		`),
-		Args: cobra.ExactArgs(1),
+		// 0 args on a TTY prompts for the name; an explicit s3://bucket runs
+		// directly. --agent/non-TTY with no arg errors or shows help.
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runMb(cmd, f, ioStreams, args[0])
+			arg, err := resolveNewBucketArg(cmd, f, args)
+			if err != nil || arg == "" {
+				return err
+			}
+			return runMb(cmd, f, ioStreams, arg)
 		},
 	}
 

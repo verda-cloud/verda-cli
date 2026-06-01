@@ -106,17 +106,11 @@ func runRb(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, o
 
 	// Interactive confirmation (TTY path).
 	if !opts.Yes && !f.AgentMode() {
-		warnStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Bold(true)
-		_, _ = fmt.Fprintf(ioStreams.ErrOut, "\n  %s\n",
-			warnStyle.Render(fmt.Sprintf("This will permanently delete bucket %q", uri.Bucket)))
-		if opts.Force {
-			_, _ = fmt.Fprintf(ioStreams.ErrOut, "  %s\n",
-				warnStyle.Render("...and ALL objects it contains"))
+		proceed, cerr := confirmRbDeletion(ctx, f, ioStreams, uri.Bucket, opts.Force)
+		if cerr != nil {
+			return cerr
 		}
-		_, _ = fmt.Fprintln(ioStreams.ErrOut)
-
-		confirmed, confirmErr := f.Prompter().Confirm(ctx, fmt.Sprintf("Delete bucket %q?", uri.Bucket))
-		if confirmErr != nil || !confirmed {
+		if !proceed {
 			_, _ = fmt.Fprintln(ioStreams.ErrOut, "Canceled.")
 			return nil
 		}
@@ -156,6 +150,29 @@ func runRb(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, o
 	return nil
 }
 
+// confirmRbDeletion renders the red destructive warning and asks the user to
+// confirm. proceed is false on a "no" answer; a clean cancel (Esc/Ctrl+C)
+// returns (false, nil); a real prompter failure propagates.
+func confirmRbDeletion(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, bucket string, force bool) (proceed bool, err error) {
+	warnStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Bold(true)
+	_, _ = fmt.Fprintf(ioStreams.ErrOut, "\n  %s\n",
+		warnStyle.Render(fmt.Sprintf("This will permanently delete bucket %q", bucket)))
+	if force {
+		_, _ = fmt.Fprintf(ioStreams.ErrOut, "  %s\n",
+			warnStyle.Render("...and ALL objects it contains"))
+	}
+	_, _ = fmt.Fprintln(ioStreams.ErrOut)
+
+	confirmed, cerr := f.Prompter().Confirm(ctx, fmt.Sprintf("Delete bucket %q?", bucket))
+	if cerr != nil {
+		if cmdutil.IsPromptCancel(cerr) {
+			return false, nil
+		}
+		return false, cerr
+	}
+	return confirmed, nil
+}
+
 // emptyBucket paginates through all objects in a bucket and deletes them in
 // batches of up to maxDeleteBatch. Returns the total number of objects deleted.
 func emptyBucket(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client API, bucket string) (int, error) {
@@ -182,6 +199,13 @@ func emptyBucket(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStr
 		}
 		cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(),
 			fmt.Sprintf("DeleteObjects response: batch of %d", len(batch)), out)
+		// Quiet=true suppresses the success list but still reports per-object
+		// failures; fail fast so the deleted count stays accurate and the user
+		// learns why (the subsequent DeleteBucket would otherwise fail opaquely).
+		if len(out.Errors) > 0 {
+			return fmt.Errorf("could not delete %s: %s",
+				aws.ToString(out.Errors[0].Key), aws.ToString(out.Errors[0].Message))
+		}
 		_, _ = fmt.Fprintf(ioStreams.ErrOut, "Emptied batch of %d objects\n", len(batch))
 		deleted += len(batch)
 		batch = batch[:0]

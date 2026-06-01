@@ -69,10 +69,27 @@ func NewCmdMv(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 
 			# Preview a recursive move
 			verda s3 mv s3://my-bucket/logs/ ./logs --recursive --dryrun
+
+			# Move/rename an object interactively (S3 -> S3)
+			verda s3 mv
 		`),
-		Args: cobra.ExactArgs(2),
+		// 2 args = direct move. On a TTY, fewer args (none, or a single s3:// URI)
+		// launch the S3->S3 move/rename wizard. Local moves still need both args.
+		Args: cobra.MaximumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runMv(cmd, f, ioStreams, opts, args[0], args[1])
+			if len(args) == 2 {
+				return runMv(cmd, f, ioStreams, opts, args[0], args[1])
+			}
+			if f.AgentMode() {
+				return cmdutil.NewMissingFlagsError([]string{"<src>", "<dst>"})
+			}
+			if !interactiveTTY(f) {
+				return cmd.Help()
+			}
+			if len(args) == 1 && !IsS3URI(args[0]) {
+				return cmdutil.UsageErrorf(cmd, "mv requires a source and destination: verda s3 mv <src> <dst>")
+			}
+			return runMoveWizard(cmd, f, ioStreams, opts, args)
 		},
 	}
 

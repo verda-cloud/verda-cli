@@ -89,8 +89,8 @@ func runUploadWizard(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IO
 
 		case stepBucket:
 			bucket, err = selectBucketOrCreate(ctx, f, ioStreams, client)
-			if back, exit, real := classifyNav(err, sourceFromArg); real != nil {
-				return real
+			if back, exit, fatal := classifyNav(err, sourceFromArg); fatal != nil {
+				return fatal
 			} else if exit {
 				return nil
 			} else if back {
@@ -105,8 +105,8 @@ func runUploadWizard(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IO
 				suggested = filepath.Base(source)
 			}
 			prefix, err = selectUploadLocation(ctx, f, ioStreams, client, bucket, suggested)
-			if back, exit, real := classifyNav(err, false); real != nil {
-				return real
+			if back, exit, fatal := classifyNav(err, false); fatal != nil {
+				return fatal
 			} else if exit {
 				return nil
 			} else if back {
@@ -116,43 +116,56 @@ func runUploadWizard(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IO
 			step = stepConfirm
 
 		case stepConfirm:
-			dstURI := URI{Bucket: bucket, Key: prefix}
-			opts.Recursive = isDir
-			destDisplay := dstURI.String()
-			if !strings.HasSuffix(destDisplay, "/") {
-				destDisplay += "/"
-			}
-			preview := "verda s3 cp " + source + " " + destDisplay
-			if isDir {
-				preview += " --recursive"
-			}
-			_, _ = fmt.Fprintf(ioStreams.ErrOut, "\n  Will run:  %s\n\n", preview)
-
-			confirmed, cerr := f.Prompter().Confirm(ctx, "Proceed with upload? (esc to go back)", tui.WithConfirmDefault(true))
+			back, cerr := confirmAndRunUpload(ctx, cmd, f, ioStreams, source, isDir, URI{Bucket: bucket, Key: prefix}, opts)
 			if cerr != nil {
-				if cmdutil.IsPromptBack(cerr) {
-					step = stepLocation
-					continue
-				}
-				if cmdutil.IsPromptInterrupt(cerr) {
-					return nil
-				}
 				return cerr
 			}
-			if !confirmed {
-				_, _ = fmt.Fprintln(ioStreams.ErrOut, "Canceled.")
-				return nil
+			if back {
+				step = stepLocation
+				continue
 			}
-			return runUpload(ctx, cmd, f, ioStreams, source, dstURI, opts)
+			return nil
 		}
 	}
+}
+
+// confirmAndRunUpload previews the planned cp, confirms (default Yes), and runs
+// the upload. back=true means Esc -> return to the folder step; Ctrl+C or "no"
+// is a clean exit (back=false, err=nil).
+func confirmAndRunUpload(ctx context.Context, cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, source string, isDir bool, dstURI URI, opts *cpOptions) (back bool, err error) {
+	opts.Recursive = isDir
+	destDisplay := dstURI.String()
+	if !strings.HasSuffix(destDisplay, "/") {
+		destDisplay += "/"
+	}
+	preview := "verda s3 cp " + source + " " + destDisplay
+	if isDir {
+		preview += " --recursive"
+	}
+	_, _ = fmt.Fprintf(ioStreams.ErrOut, "\n  Will run:  %s\n\n", preview)
+
+	confirmed, cerr := f.Prompter().Confirm(ctx, "Proceed with upload? (esc to go back)", tui.WithConfirmDefault(true))
+	if cerr != nil {
+		if cmdutil.IsPromptBack(cerr) {
+			return true, nil
+		}
+		if cmdutil.IsPromptInterrupt(cerr) {
+			return false, nil
+		}
+		return false, cerr
+	}
+	if !confirmed {
+		_, _ = fmt.Fprintln(ioStreams.ErrOut, "Canceled.")
+		return false, nil
+	}
+	return false, runUpload(ctx, cmd, f, ioStreams, source, dstURI, opts)
 }
 
 // classifyNav maps a picker's returned error into back/exit/real outcomes.
 // Esc (IsPromptBack) is a step-back unless this is the first interactive step,
 // in which case it exits; Ctrl+C (IsPromptInterrupt) always exits. A non-prompt
 // error is "real" and propagates. A nil error means advance.
-func classifyNav(err error, firstStep bool) (back, exit bool, real error) {
+func classifyNav(err error, firstStep bool) (back, exit bool, fatal error) {
 	switch {
 	case err == nil:
 		return false, false, nil
@@ -172,7 +185,7 @@ func classifyNav(err error, firstStep bool) (back, exit bool, real error) {
 // else a prompt) and whether it is a directory. The path must exist; a bad
 // explicit arg errors, a bad typed path re-prompts. On Esc/Ctrl+C it returns the
 // raw prompter error; on empty input it returns ("", false, nil).
-func resolveUploadSource(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, args []string) (string, bool, error) {
+func resolveUploadSource(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, args []string) (srcPath string, isDir bool, err error) {
 	if len(args) == 1 {
 		info, err := os.Stat(args[0])
 		if err != nil {
@@ -273,7 +286,8 @@ func selectUploadLocation(ctx context.Context, f cmdutil.Factory, ioStreams cmdu
 	}
 
 	for {
-		labels := []string{uploadBucketRootLabel}
+		labels := make([]string, 0, len(payload.CommonPrefixes)+2)
+		labels = append(labels, uploadBucketRootLabel)
 		labels = append(labels, payload.CommonPrefixes...)
 		labels = append(labels, uploadNewFolderLabel)
 

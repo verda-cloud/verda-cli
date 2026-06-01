@@ -163,16 +163,22 @@ func deleteCheckpoint(identity string) error {
 	return nil
 }
 
-// gcCheckpoints prunes checkpoint files whose modtime is older than maxAge.
-// A zero maxAge falls back to checkpointMaxAge. Errors on individual files are
-// swallowed (best-effort cleanup); a missing directory is a no-op.
+// gcCheckpoints prunes stale upload checkpoint and lock files (both live under
+// ~/.verda/s3-uploads). A zero maxAge falls back to checkpointMaxAge.
 func gcCheckpoints(maxAge time.Duration) error {
-	if maxAge <= 0 {
-		maxAge = checkpointMaxAge
-	}
 	dir, err := checkpointDir()
 	if err != nil {
 		return err
+	}
+	return gcStaleFiles(dir, maxAge)
+}
+
+// gcStaleFiles removes files in dir whose modtime is older than maxAge (a zero
+// maxAge falls back to checkpointMaxAge). Errors on individual files are
+// swallowed (best-effort cleanup); a missing directory is a no-op.
+func gcStaleFiles(dir string, maxAge time.Duration) error {
+	if maxAge <= 0 {
+		maxAge = checkpointMaxAge
 	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {

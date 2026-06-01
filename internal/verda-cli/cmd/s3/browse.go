@@ -16,9 +16,12 @@ package s3
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -38,6 +41,7 @@ const (
 	rowFolder
 	rowObject
 	rowDownloadMulti
+	rowDeleteMulti
 )
 
 type browseRow struct {
@@ -52,6 +56,11 @@ type browseRow struct {
 // ListObjectsV2 delimiter level at a time) and offers per-object actions
 // (download / info / delete). Esc ascends one level; Ctrl+C exits.
 func runLsBrowser(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client API) error {
+	// Best-effort prune of stale download checkpoints + shared lock files so
+	// download-only users (who never hit the upload-path GC) don't accumulate them.
+	_ = gcDownloadCheckpoints(0)
+	_ = gcCheckpoints(0)
+
 	cur := URI{} // empty Bucket == root (the bucket list)
 	for {
 		if cur.Bucket == "" {
@@ -77,7 +86,7 @@ func runLsBrowser(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOSt
 
 // browseBuckets shows the bucket list. Returns (chosen bucket, exit, err);
 // exit is true when the user chose Exit / Ctrl+C / Esc at the root.
-func browseBuckets(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client API) (string, bool, error) {
+func browseBuckets(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client API) (bucket string, exit bool, err error) {
 	out, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading buckets...", func() (*s3.ListBucketsOutput, error) {
 		return client.ListBuckets(ctx, &s3.ListBucketsInput{})
 	})
@@ -145,12 +154,20 @@ func browseLevel(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStr
 	case rowFolder:
 		cur.Key = row.value
 	case rowDownloadMulti:
-		if err := browseDownloadMulti(ctx, f, ioStreams, client, *cur, payload); err != nil {
+		exit, err := browseDownloadMulti(ctx, f, ioStreams, client, *cur, payload)
+		if err != nil {
 			return false, err
 		}
+		if exit {
+			return false, nil
+		}
 	case rowObject:
-		if err := objectActionMenu(ctx, f, ioStreams, client, URI{Bucket: cur.Bucket, Key: row.value}, row.size); err != nil {
+		exit, err := objectActionMenu(ctx, f, ioStreams, client, URI{Bucket: cur.Bucket, Key: row.value}, row.size)
+		if err != nil {
 			return false, err
+		}
+		if exit {
+			return false, nil
 		}
 	}
 	return true, nil
@@ -216,7 +233,8 @@ func relName(prefix, full string) string {
 }
 
 // objectActionMenu presents the per-object actions (Download / Info / Delete).
-func objectActionMenu(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client API, obj URI, size int64) error {
+// Returns exit=true when the user chose to leave the browser after the action.
+func objectActionMenu(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client API, obj URI, size int64) (bool, error) {
 	name := path.Base(obj.Key)
 	const (
 		actDownload = iota
@@ -228,39 +246,49 @@ func objectActionMenu(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.
 	idx, err := f.Prompter().Select(ctx, fmt.Sprintf("%s (%s)", name, humanBytes(size)), labels, tui.WithShowHints(true))
 	if err != nil {
 		if cmdutil.IsPromptCancel(err) {
-			return nil
+			return false, nil
 		}
-		return err
+		return false, err
 	}
 	switch idx {
 	case actDownload:
 		return browseDownload(ctx, f, ioStreams, client, obj)
 	case actInfo:
-		return browseInfo(ctx, f, ioStreams, client, obj)
+		return false, browseInfo(ctx, f, ioStreams, client, obj)
 	case actDelete:
-		return browseDelete(ctx, f, ioStreams, client, obj)
+		return false, browseDelete(ctx, f, ioStreams, client, obj)
 	default:
-		return nil
+		return false, nil
 	}
 }
 
-// browseDownload downloads one object to ./<basename> via the resumable
-// downloader, so re-selecting Download on an interrupted object resumes from
-// its .part file.
-func browseDownload(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client API, obj URI) error {
-	local := filepath.Base(obj.Key)
+// browseDownload downloads one object to the user's Downloads folder via the
+// resumable downloader, so re-selecting Download on an interrupted object
+// resumes from its .part file. Pauses on a Back/Exit gate after completion so
+// the summary stays on screen instead of snapping back to the list.
+func browseDownload(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client API, obj URI) (bool, error) {
+	dir, derr := defaultDownloadDir()
+	if derr != nil {
+		_, _ = fmt.Fprintf(ioStreams.ErrOut, "  note: %v — saving to the current directory\n", derr)
+	}
+	local := resolveLocalDest(dir, filepath.Base(obj.Key), obj.Bucket, obj.Key, map[string]bool{})
+	announceRename(ioStreams, obj.Key, local)
 	n, rate, err := downloadToLocal(ctx, f, ioStreams, client, obj, local, 0, defaultConcurrency, false, false)
 	if err != nil {
-		return err
+		return false, err
 	}
 	_, _ = fmt.Fprintf(ioStreams.Out, "✓ downloaded %s -> %s (%s)%s\n", obj.String(), absOrSelf(local), humanBytes(n), rate)
-	return nil
+	return cmdutil.PromptBackOrExit(ctx, f.Prompter())
 }
 
 // browseDownloadMulti multi-selects objects at the current level and downloads
-// the ticked set to the cwd. Objects only (folders are not selectable in v1);
-// non-destructive, so no confirmation.
-func browseDownloadMulti(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client API, cur URI, payload objectsPayload) error {
+// the ticked set to the user's Downloads folder. Selection is scoped to ONE
+// folder by construction — only the current level's direct objects are listed,
+// subfolders are non-selectable drill-in entries — so the picked set never spans
+// folders. Each file is placed via resolveLocalDest so an existing local file of
+// the same name is renamed rather than overwritten. Non-destructive, so no
+// confirmation. Pauses on a Back/Exit gate after the summary so it stays on screen.
+func browseDownloadMulti(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client API, cur URI, payload objectsPayload) (bool, error) {
 	var objs []objectEntry
 	var labels []string
 	for i := range payload.Objects {
@@ -273,33 +301,98 @@ func browseDownloadMulti(ctx context.Context, f cmdutil.Factory, ioStreams cmdut
 	}
 	if len(objs) == 0 {
 		_, _ = fmt.Fprintln(ioStreams.ErrOut, "No files to download at this level.")
-		return nil
+		return false, nil
 	}
 
 	idxs, err := f.Prompter().MultiSelect(ctx, "Select files to download (space to toggle)", labels, tui.WithMultiSelectShowHints(true))
 	if err != nil {
 		if cmdutil.IsPromptCancel(err) {
-			return nil
+			return false, nil
 		}
-		return err
+		return false, err
 	}
 	if len(idxs) == 0 {
 		_, _ = fmt.Fprintln(ioStreams.ErrOut, "Nothing selected.")
-		return nil
+		return false, nil
 	}
 
+	dir, derr := defaultDownloadDir()
+	if derr != nil {
+		_, _ = fmt.Fprintf(ioStreams.ErrOut, "  note: %v — saving to the current directory\n", derr)
+	}
+	used := map[string]bool{}
 	var total int64
 	for _, ix := range idxs {
 		obj := URI{Bucket: cur.Bucket, Key: objs[ix].Key}
-		n, rate, derr := downloadToLocal(ctx, f, ioStreams, client, obj, filepath.Base(obj.Key), 0, defaultConcurrency, false, false)
-		if derr != nil {
-			return fmt.Errorf("downloading %s: %w", obj.String(), derr)
+		local := resolveLocalDest(dir, filepath.Base(obj.Key), obj.Bucket, obj.Key, used)
+		announceRename(ioStreams, obj.Key, local)
+		n, rate, dlErr := downloadToLocal(ctx, f, ioStreams, client, obj, local, 0, defaultConcurrency, false, false)
+		if dlErr != nil {
+			return false, fmt.Errorf("downloading %s: %w", obj.String(), dlErr)
 		}
 		total += n
-		_, _ = fmt.Fprintf(ioStreams.Out, "✓ downloaded %s -> %s (%s)%s\n", obj.String(), absOrSelf(filepath.Base(obj.Key)), humanBytes(n), rate)
+		_, _ = fmt.Fprintf(ioStreams.Out, "✓ downloaded %s -> %s (%s)%s\n", obj.String(), absOrSelf(local), humanBytes(n), rate)
 	}
-	_, _ = fmt.Fprintf(ioStreams.Out, "Downloaded %d file(s), %s total\n", len(idxs), humanBytes(total))
-	return nil
+	_, _ = fmt.Fprintf(ioStreams.Out, "Downloaded %d file(s), %s total -> %s\n", len(idxs), humanBytes(total), absOrSelf(dir))
+	return cmdutil.PromptBackOrExit(ctx, f.Prompter())
+}
+
+// defaultDownloadDir returns the user's Downloads folder (created if needed) for
+// interactive browser downloads. On failure it returns "." (the current
+// directory) plus a non-nil reason so the caller can tell the user where the
+// file actually landed. cp uses its explicit destination argument instead.
+func defaultDownloadDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return ".", errors.New("could not resolve your home directory")
+	}
+	dir := filepath.Join(home, "Downloads")
+	if mkErr := os.MkdirAll(dir, 0o750); mkErr != nil {
+		return ".", fmt.Errorf("could not use %s: %w", dir, mkErr)
+	}
+	return dir, nil
+}
+
+// resolveLocalDest picks the local path for downloading obj into dir without
+// clobbering an unrelated local file, while still allowing a genuine resume.
+// It returns dir/<base> when that name is free OR is an in-progress resume of
+// THIS object (its .part + checkpoint match); otherwise it appends "-2", "-3", …
+// before the extension until it finds a name that is neither an existing file
+// nor a foreign .part. used tracks names already handed out in the same batch.
+func resolveLocalDest(dir, base, bucket, key string, used map[string]bool) string {
+	ext := filepath.Ext(base)
+	stem := strings.TrimSuffix(base, ext)
+	for i := 0; ; i++ {
+		name := base
+		if i > 0 {
+			name = stem + "-" + strconv.Itoa(i+1) + ext
+		}
+		if used[name] {
+			continue
+		}
+		full := filepath.Join(dir, name)
+		if fileExists(full + ".part") {
+			if hasResumableDownload(full, bucket, key) {
+				used[name] = true
+				return full // our interrupted download → resume into it
+			}
+			continue // a foreign partial download owns this name → don't clobber
+		}
+		if fileExists(full) {
+			continue // unrelated completed file → don't overwrite
+		}
+		used[name] = true
+		return full
+	}
+}
+
+// announceRename notes when resolveLocalDest had to pick a non-default filename
+// to avoid overwriting an existing local file. A resume (name unchanged) is
+// silent; the downloader prints its own "Resuming…" line.
+func announceRename(ioStreams cmdutil.IOStreams, key, local string) {
+	if want := path.Base(key); filepath.Base(local) != want {
+		_, _ = fmt.Fprintf(ioStreams.ErrOut, "  %s already exists locally — saving as %s\n", want, filepath.Base(local))
+	}
 }
 
 // browseInfo prints object metadata via HeadObject.
