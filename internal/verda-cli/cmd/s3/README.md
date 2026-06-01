@@ -94,6 +94,12 @@ verda s3 cp s3://my-bucket/models/model.safetensors ./model.safetensors
 verda s3 cp s3://my-bucket/models/model.safetensors ./model.safetensors --no-resume
 ```
 
+Resume reuses the **same part size** that the interrupted run used. Passing a
+different `--part-size` on the resume (or changing the file) is detected and the
+transfer restarts cleanly rather than mixing incompatible part boundaries. Part
+sizes accept binary (`MiB`, `GiB`) and the loose `MB`/`M` forms — all treated as
+binary (`1MB` = 1048576 bytes).
+
 How it works:
 
 - Resume state lives locally: uploads under `~/.verda/s3-uploads/` (+ the
@@ -108,7 +114,16 @@ How it works:
   aborted (`verda s3 abort-uploads`).
 - Interactive downloads from the `verda s3 ls` browser (per-object **Download**
   or the **Download files here…** multi-select) use the same resumable path —
-  re-selecting Download on an interrupted object resumes from its `.part`.
+  re-selecting Download on an interrupted object resumes from its `.part`. They
+  save to your **Downloads folder** (`~/Downloads`, created if missing; falls
+  back to the current directory if the home dir can't be resolved) and pause on a
+  *Back to list / Exit* summary so the result stays on screen. `cp` keeps writing
+  to the explicit destination you pass.
+  - **No silent overwrites:** if a file of the same name already exists locally,
+    the download is saved as `name-2.ext`, `name-3.ext`, … instead of clobbering
+    it. A genuine resume of the *same* object keeps its original name (so its
+    `.part` is continued). Multi-select is scoped to a single folder, so a batch
+    never spans folders.
 - Recursive (`--recursive`), `sync`, and `mv` transfers are not yet resumable
   per-file.
 
@@ -196,11 +211,30 @@ Switch with `--profile staging` on any command, or persist it with `verda auth u
 
 ## Interactive vs Non-Interactive
 
-Only `configure` has an interactive wizard. Every other subcommand is one-shot: it takes positional URIs + flags and either succeeds or returns a structured error.
+Every command works two ways: **non-interactively** with positional URIs + flags
+(scripts, `--agent`, pipes), and **interactively** with a TUI when you omit the
+target on a terminal. The interactive path triggers only when stdout is a TTY,
+not in `--agent` mode, and the output format is the default `table`; otherwise an
+omitted target returns the command help (or a structured error in `--agent`).
+
+| Command | Interactive trigger (on a TTY) | Flow |
+|---------|--------------------------------|------|
+| `configure` | any of `--access-key`/`--secret-key`/`--endpoint` missing | credential wizard |
+| `ls` | no argument | folder browser (drill in, per-object actions, multi-download) |
+| `cp` | no destination (and not a bare `s3://` download) | upload wizard (source → bucket → folder → confirm) |
+| `mb` | no argument | prompts for the new bucket name |
+| `rb` | no argument | bucket picker, then the destructive confirm |
+| `rm` | no argument | folder browser; tick files at a level to delete (red confirm + preview) |
+| `mv` | no args, or a single `s3://` source | S3→S3 move/rename wizard (source → dest bucket → dest key → confirm) |
+
+Notes:
 
 - **`configure` wizard**: triggers when any of `--access-key`, `--secret-key`, `--endpoint` is missing. Supply all three (plus optionally `--profile`, `--region`, `--credentials-file`) to skip the wizard entirely.
-- **Destructive prompts** (`rb`, `rm`): an interactive `prompter.Confirm()` warns before deletion unless `--yes` is passed. `cp`, `mv`, `sync`, `sync --delete` do not prompt (AWS convention — the verb itself is the commitment).
-- **Agent mode** (`--agent`): disables every interactive prompt, implies `--output json`, and requires `--yes` for any destructive operation. Without `--yes`, destructive subcommands return `cmdutil.AgentError{Code: "CONFIRMATION_REQUIRED"}` so calling agents know exactly what to add.
+- **Destructive prompts** (`rb`, `rm`): an interactive `prompter.Confirm()` with a red warning + preview runs before deletion unless `--yes` is passed — in both the flag and TUI paths. `cp`, `mv`, `sync`, `sync --delete` do not prompt (AWS convention — the verb itself is the commitment), though the interactive `mv` wizard adds a final confirm.
+- **`mv` interactive scope**: the wizard covers S3→S3 moves/renames only; local↔S3 moves still require both explicit arguments (a local path can't be picked in the TUI).
+- **`rm` interactive scope**: multi-select is scoped to one folder level; drill into subfolders to delete within them, or use `rm <prefix> --recursive` for bulk deletes across a whole prefix.
+- **Navigation**: `Esc` steps back (ascends a folder / returns to the previous wizard step), `Ctrl+C` exits immediately — never a confirmation dialog on either.
+- **Agent mode** (`--agent`): disables every interactive prompt, implies `--output json`, and requires `--yes` for any destructive operation. Without `--yes`, destructive subcommands return `cmdutil.AgentError{Code: "CONFIRMATION_REQUIRED"}` so calling agents know exactly what to add. With no target, bucket/object-targeting commands return a `MISSING_REQUIRED_FLAGS` error rather than prompting.
 
 ## Architecture Notes
 

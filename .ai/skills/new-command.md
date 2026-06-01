@@ -112,19 +112,69 @@ if err != nil {
 
 ### 6. Interactive + Non-Interactive
 
-Commands should support both modes:
+Commands MUST support both modes:
 - **Flags** for scripting/CI (non-interactive)
-- **Prompter** for interactive use when flags are missing
+- **Prompter** TUI for interactive use when the target is omitted on a terminal
+
+**Implicit trigger.** Omitting the positional target on a TTY launches the
+interactive flow; everything else stays one-shot. Gate it exactly like this:
 
 ```go
-name := opts.Name
-if name == "" {
-    name, err = prompter.TextInput(ctx, "Item name")
-    if err != nil {
-        return nil // User cancelled (Esc/Ctrl+C)
+if len(args) >= wantArgs {            // explicit args -> run directly
+    return run(cmd, f, ioStreams, opts, args...)
+}
+if f.AgentMode() {                    // agents get a structured error, never a prompt
+    return cmdutil.NewMissingFlagsError([]string{"s3://bucket/key"})
+}
+if !interactiveTTY(f) {               // non-TTY or json/yaml output -> help, no silent prompt
+    return cmd.Help()
+}
+return runInteractive(cmd, f, ioStreams, opts, args)
+```
+
+`interactiveTTY(f)` == `IsStdoutTerminal() && !AgentMode() && OutputFormat() == "table"`.
+
+**The hint bar is mandatory on every direct `Select` / `MultiSelect`.** Pass
+`tui.WithShowHints(true)` (or `tui.WithMultiSelectShowHints(true)`) so the user
+always sees the standard control legend:
+
+```
+↑/↓ navigate · type to filter · enter select · esc back · ctrl+c exit
+```
+
+(Wizard-engine step Loaders are the only exception — the composite renders its
+own hint bar, so double-rendering is a bug.)
+
+**Esc = soft back, Ctrl+C = hard exit — always. Never a confirmation dialog on
+either.** Classify the prompter error; never bare-`return nil`:
+
+```go
+idx, err := f.Prompter().Select(ctx, "Pick one", labels, tui.WithShowHints(true))
+if err != nil {
+    if cmdutil.IsPromptCancel(err) {  // Esc OR Ctrl+C — flow doesn't care which
+        return nil
     }
+    return err                        // a real I/O failure MUST propagate
 }
 ```
+
+Use `cmdutil.IsPromptInterrupt(err)` (Ctrl+C) and `cmdutil.IsPromptBack(err)`
+(Esc) when the two must differ — e.g. a "Back to list / Exit" gate, or a wizard
+where Esc steps back one prompt while Ctrl+C exits the whole flow.
+
+**Multi-step wizards.** Model each prompt as its own step walked by an index
+into a steps slice: Esc decrements the index (–1 on the first step ends the
+flow = exit), Ctrl+C exits, success advances. Print a `Step N of M · Title`
+header and a one-time intro banner so the user knows the plan. See
+`cmd/s3/move_wizard.go` (`runMoveWizard` + `classifyNav`/`navIdx`) for the
+reference pattern.
+
+> **Pitfall that breaks Esc=back:** a shared picker that swallows cancellation
+> into `("", nil)` (i.e. `if IsPromptCancel(err) { return "", nil }`) is fine for
+> a top-level command, but inside a wizard it destroys back-navigation — the
+> wizard can no longer tell Esc (go back) from Ctrl+C (exit) and Esc ends up
+> exiting the whole flow. Wizard-facing pickers MUST return the **raw** prompter
+> error so the step loop can classify it.
 
 ### 7. Output Conventions
 
@@ -144,11 +194,21 @@ Delete and dangerous actions MUST confirm:
 
 ```go
 confirmed, err := prompter.Confirm(ctx, fmt.Sprintf("Delete %s?", name))
-if err != nil || !confirmed {
-    _, _ = fmt.Fprintln(ioStreams.ErrOut, "Cancelled.")
+if err != nil {
+    if cmdutil.IsPromptCancel(err) {        // Esc/Ctrl+C = clean cancel
+        _, _ = fmt.Fprintln(ioStreams.ErrOut, "Canceled.")
+        return nil
+    }
+    return err                              // real I/O failure must propagate
+}
+if !confirmed {
+    _, _ = fmt.Fprintln(ioStreams.ErrOut, "Canceled.")
     return nil
 }
 ```
+
+(Note American spelling: `Canceled`. In `--agent` mode require `--yes` and never
+prompt; without it, return `cmdutil.NewConfirmationRequiredError(<verb>)`.)
 
 For dangerous actions, add warning styling:
 

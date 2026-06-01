@@ -34,6 +34,14 @@ All commands: `--agent -o json` (except `verda ssh` and `verda auth show`).
 | "estimate", "how much will it cost" | `cost estimate` |
 | "connect", "SSH in", "remote access" | Tell user to run `verda ssh <host>` themselves (interactive) |
 | "login", "authenticate", "credentials" | `auth login` (user runs manually) |
+| "bucket", "S3", "object storage", "list buckets" | `s3 ls` |
+| "upload", "put file in bucket" | `s3 cp ./file s3://bucket/key` |
+| "download", "get file from bucket" | `s3 cp s3://bucket/key ./file` |
+| "sync", "mirror folder to/from bucket" | `s3 sync <src> <dst>` |
+| "delete object", "remove from bucket" | `s3 rm s3://bucket/key --yes` |
+| "make bucket", "create bucket" / "remove bucket" | `s3 mb` / `s3 rb --yes` |
+| "share link", "presigned URL", "temporary link" | `s3 presign s3://bucket/key` |
+| "set up S3", "configure object storage" | `s3 configure` (user runs manually — interactive) |
 
 ## Discovery
 
@@ -131,6 +139,31 @@ Hostname patterns: `{random}` → random words, `{location}` → location code
 | `verda volume action <id>` | Actions: detach, rename, resize, clone, delete |
 | `verda volume trash -o json` | Recoverable within 96 hours |
 
+## Object Storage (S3)
+
+Separate credentials from the main API (keys prefixed `verda_s3_`). Set up with
+`verda s3 configure` (interactive — user runs it). Check status first:
+
+| Command | Key Flags | Output Fields |
+|---------|-----------|---------------|
+| `verda s3 show` | `--profile` | Text key:value (NOT JSON): `s3_configured: false` only when unset; otherwise `access_key_loaded`, `secret_key_loaded`, `endpoint`, `region`. Configured ⇔ `access_key_loaded: true` |
+| `verda s3 ls -o json` | — (lists buckets) | `buckets[]`: `name`, `created_at` |
+| `verda s3 ls s3://bucket[/prefix] -o json` | `--recursive`, `--human-readable`, `--summarize` | `objects[]`: `key`, `size`, `modified`; `common_prefixes[]` |
+| `verda s3 cp <src> <dst> -o json` | `--recursive`, `--include`, `--exclude`, `--content-type`, `--part-size`, `--concurrency`, `--no-resume`, `--dryrun` | `transfers[]`: `source`, `destination`, `bytes`, `status`; `summary` |
+| `verda s3 mv <src> <dst> -o json` | same as `cp` (minus resume flags) | same as `cp` (`status: "moved"`) |
+| `verda s3 rm s3://bucket/key -o json` | `--recursive`, `--include`, `--exclude`, `--dryrun`, **`--yes`** | `deleted[]`, `errors[]`, `dryrun` |
+| `verda s3 sync <src> <dst> -o json` | `--delete`, `--exact-timestamps`, `--include`, `--exclude`, `--dryrun` | `transfers[]`, `deleted[]`, `summary` |
+| `verda s3 mb s3://bucket -o json` | — | `bucket`, `created` |
+| `verda s3 rb s3://bucket -o json` | `--force` (empty first), **`--yes`** | `bucket`, `removed`, `objects_deleted` |
+| `verda s3 presign s3://bucket/key -o json` | `--expires-in` (e.g. `15m`, `24h`; default `1h`) | `url`, `expires_at` (table mode prints the bare URL to stdout) |
+
+Rules:
+- **`src`/`dst`**: at least one must be an `s3://bucket/key` URI; the other may be a local path (upload/download) or another `s3://` URI (server-side copy).
+- **Destructive** (`rm`, `rb`): require `--yes` in `--agent` mode, else `CONFIRMATION_REQUIRED`. `cp`/`mv`/`sync` never prompt — the verb is the commitment.
+- **`--dryrun`** previews `rm`/`cp`/`mv`/`sync` (esp. recursive + `sync --delete`) with no changes — prefer it before bulk operations.
+- **Part size** accepts `MiB`/`GiB` (and loose `MB`/`M`, treated as binary). Large single-file `cp` uploads/downloads are multipart, parallel, and resumable (re-run the same command); `--no-resume` forces a fresh transfer.
+- **`configure`** is interactive (tell the user to run it); everything else takes `--agent -o json`.
+
 ## Spot VMs
 
 - Add `--is-spot` and `--os-volume-on-spot-discontinue keep_detached` to create command
@@ -160,3 +193,5 @@ Hostname patterns: `{random}` → random words, `{location}` → location code
 | volume ID | `volume list` | `id` |
 | VM ID / hostname | `vm list` | `id`, `hostname` |
 | template name | `template list` | `name` |
+| bucket name | `s3 ls` | `buckets[].name` |
+| object key | `s3 ls s3://bucket` | `objects[].key` |

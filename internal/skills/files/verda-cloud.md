@@ -1,6 +1,6 @@
 ---
 name: verda-cloud
-description: Use when the user mentions Verda Cloud, GPU/CPU VMs, cloud instances, deploying servers, ML training infrastructure, cloud costs/billing, SSH into remote machines, or verda CLI commands.
+description: Use when the user mentions Verda Cloud, GPU/CPU VMs, cloud instances, deploying servers, ML training infrastructure, cloud costs/billing, SSH into remote machines, object storage / S3 buckets, uploading or downloading files, or verda CLI commands.
 ---
 
 # Verda Cloud
@@ -14,7 +14,7 @@ description: Use when the user mentions Verda Cloud, GPU/CPU VMs, cloud instance
 **Example:** `verda --agent instance-types --gpu -o json`
 
 **NEVER do these:**
-- NEVER run `verda` without `--agent -o json` (except `verda ssh` which is interactive)
+- NEVER run `verda` without `--agent -o json` (except `verda ssh` and `verda s3 configure`, which are interactive — tell the user to run those)
 - NEVER guess commands — consult the verda-reference skill or run `verda <cmd> --help`
 - NEVER create resources without checking cost first
 - NEVER delete/shutdown without explicit user confirmation
@@ -35,7 +35,8 @@ description: Use when the user mentions Verda Cloud, GPU/CPU VMs, cloud instance
 | **Manage** | "start", "stop", "delete", "SSH" | Find VM first, then act |
 | **VM Info** | "my VMs", "instances", "what's running", "what's offline" | `verda --agent vm list -o json` (add `--status` to filter). Use `vm describe <id>` for a specific VM |
 | **Cost** | "balance", "burn rate", "spending", "how much" | `verda --agent cost balance -o json` and/or `cost running -o json` |
-| **Storage** | "volumes", "disks", "storage" | `verda --agent volume list -o json` |
+| **Storage** | "volumes", "disks", "block storage" | `verda --agent volume list -o json` |
+| **Object Storage** | "bucket", "S3", "object storage", "upload a file", "download a file" | `verda --agent s3 ls -o json` (needs `s3 configure` first — see below) |
 
 ### Explore — Use Specific Commands, Not `status`
 
@@ -74,6 +75,33 @@ Otherwise walk this chain. **ALWAYS** steps must run even if user specified valu
      [--is-spot] [--os-volume-size 50] --wait --wait-timeout 2m -o json
    ```
 10. **Verify** — `verda --agent vm describe <id> -o json`. Tell user: `verda ssh <hostname>` (do NOT run it)
+
+## Object Storage (S3)
+
+S3-compatible object storage. **Separate credentials** from the main API —
+keys are prefixed `verda_s3_` and set up by `verda s3 configure` (interactive,
+user-only — like `auth login`; never run it yourself, never handle the keys).
+
+1. **Check setup first:** `verda s3 show` (prints text, not JSON). If it shows `s3_configured: false` (or `access_key_loaded: false`), tell the user to run `verda s3 configure` (do NOT run it). Configured ⇔ `access_key_loaded: true`.
+2. **Then operate** (all support `--agent -o json`):
+
+| Question / intent | Command |
+|-------------------|---------|
+| List buckets | `verda --agent s3 ls -o json` |
+| List a bucket's contents | `verda --agent s3 ls s3://bucket -o json` (add `--recursive`) |
+| Upload a file | `verda --agent s3 cp ./file s3://bucket/key -o json` |
+| Download a file | `verda --agent s3 cp s3://bucket/key ./file -o json` |
+| Copy / move within S3 | `verda --agent s3 cp\|mv s3://b/a s3://b/c -o json` |
+| Mirror a directory | `verda --agent s3 sync ./dir s3://bucket/prefix/ -o json` |
+| Delete object(s) | `verda --agent s3 rm s3://bucket/key --yes -o json` |
+| Make / remove a bucket | `verda --agent s3 mb\|rb s3://bucket -o json` (`rb` needs `--yes`) |
+| Time-limited share URL | `verda --agent s3 presign s3://bucket/key -o json` |
+
+**Destructive (`rm`, `rb`):** require `--yes` in agent mode, else they return
+`CONFIRMATION_REQUIRED`. `cp`/`mv`/`sync` don't prompt — confirm intent with the
+user before bulk/`--recursive`/`--delete` operations. Always offer `--dryrun`
+first for recursive deletes and `sync --delete`. See the verda-reference skill
+for flags and output fields.
 
 ## Error Recovery
 
