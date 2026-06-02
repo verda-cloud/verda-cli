@@ -54,7 +54,7 @@ func promptAddSSHKey(ctx context.Context, prompter tui.Prompter, client *verda.C
 	sourceIdx, err := prompter.Select(ctx, "Public key source", []string{
 		"Load from file",
 		"Paste content",
-	})
+	}, tui.WithShowHints(true))
 	if err != nil {
 		return nil, nil //nolint:nilerr // User canceled.
 	}
@@ -127,7 +127,7 @@ func promptSSHKeyFilePath(ctx context.Context, prompter tui.Prompter) (string, e
 	copy(labels, pubFiles)
 	labels[len(pubFiles)] = "Enter path manually..."
 
-	idx, err := prompter.Select(ctx, "Select public key file", labels)
+	idx, err := prompter.Select(ctx, "Select public key file", labels, tui.WithShowHints(true))
 	if err != nil {
 		return "", err
 	}
@@ -208,7 +208,7 @@ func promptAddStartupScript(ctx context.Context, prompter tui.Prompter, client *
 	sourceIdx, err := prompter.Select(ctx, "Script source", []string{
 		"Load from file",
 		"Paste content",
-	})
+	}, tui.WithShowHints(true))
 	if err != nil {
 		return nil, nil //nolint:nilerr // User canceled or left input blank.
 	}
@@ -227,7 +227,7 @@ func promptAddStartupScript(ctx context.Context, prompter tui.Prompter, client *
 		}
 		content = string(data)
 	case 1: // Paste content
-		content, err = prompter.Editor(ctx, "Script content (Ctrl+D to finish)",
+		content, err = prompter.Editor(ctx, "Script content",
 			tui.WithEditorDefault("#!/bin/bash\n\n# Your startup script here\n"),
 			tui.WithFileExt(".sh"))
 		if err != nil {
@@ -343,7 +343,7 @@ func promptAttachExisting(ctx context.Context, prompter tui.Prompter, status tui
 	}
 	labels = append(labels, "← Back")
 
-	idx, err := prompter.Select(ctx, "Select volume to attach", labels)
+	idx, err := prompter.Select(ctx, "Select volume to attach", labels, tui.WithShowHints(true))
 	if err != nil {
 		return "", nil //nolint:nilerr // User canceled or left input blank.
 	}
