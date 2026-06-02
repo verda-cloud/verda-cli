@@ -82,7 +82,8 @@ func configureStepProfile(opts *configureOptions) wizard.Step {
 		Prompt:      wizard.SelectPrompt,
 		Required:    true,
 		Loader: func(_ context.Context, _ tui.Prompter, _ tui.Status, _ *wizard.Store) ([]wizard.Choice, error) {
-			path, err := resolveCredentialsFile("")
+			// List the same file the save writes to (must honor --credentials-file).
+			path, err := resolveCredentialsFile(opts.CredentialsFile)
 			if err != nil {
 				return nil, err
 			}

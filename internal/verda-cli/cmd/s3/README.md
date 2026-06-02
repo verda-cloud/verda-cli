@@ -211,7 +211,7 @@ Profiles work across both API and S3 credentials. Create a second profile via:
 ```bash
 verda s3 configure --profile staging
 ```
-Switch with `--profile staging` on any command, or persist it with `verda auth use staging`.
+`configure` and `show` take a local `--profile`. The other commands (`ls`/`cp`/`rm`/…) have no local `--profile` flag — select a profile with the global `--auth.profile staging`, `VERDA_PROFILE=staging`, or persist it with `verda auth use staging`.
 
 ## Interactive vs Non-Interactive
 
@@ -272,7 +272,7 @@ Business logic:
 
 Wizard flow (`configure`):
 
-1. Profile — **pick an existing profile** (each tagged "S3 configured" / "no S3 credentials yet") **or "+ Create new profile…"**. The selection defaults to the active profile (`--profile` / `VERDA_PROFILE` / `verda auth use`).
+1. Profile — **pick an existing profile** (each tagged "S3 configured" / "no S3 credentials yet") **or "+ Create new profile…"**. The selection defaults to the active profile (`--auth.profile` / `VERDA_PROFILE` / `verda auth use`).
 2. New profile name — only when "Create new" was chosen.
 3. S3 access key ID
 4. S3 secret access key (password prompt)
@@ -281,4 +281,4 @@ Wizard flow (`configure`):
 
 Steps are skipped individually when the corresponding flag is already set — so `verda s3 configure --access-key X --endpoint Y` only prompts for the secret and region, and `--profile staging` skips the profile picker entirely (targeting `[staging]`).
 
-> Note: `configure` writes to the profile you pick/name here; it does **not** auto-follow the active profile the way the read commands (`ls`/`cp`/…) do. The picker defaulting to the active profile keeps the two aligned, but if you create credentials for a non-active profile, pass `--profile` to the read commands or `verda auth use <name>` to switch.
+> Note: `configure` writes to the profile you pick/name here; it does **not** auto-follow the active profile the way the read commands (`ls`/`cp`/…) do. The picker defaulting to the active profile keeps the two aligned, but if you create credentials for a non-active profile, select it on the read commands with `--auth.profile <name>` / `VERDA_PROFILE`, or `verda auth use <name>` to switch.

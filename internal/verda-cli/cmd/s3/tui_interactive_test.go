@@ -120,11 +120,17 @@ func TestRmBrowser_DrillInMultiDelete(t *testing.T) {
 
 type mvWizardFake struct {
 	API
-	buckets   []string
-	objects   []string
-	copiedSrc string
-	copiedDst string
-	deleted   string
+	buckets       []string
+	objects       []string
+	copiedSrc     string
+	copiedDst     string
+	deleted       string
+	createdBucket string
+}
+
+func (m *mvWizardFake) CreateBucket(ctx context.Context, in *s3.CreateBucketInput, opts ...func(*s3.Options)) (*s3.CreateBucketOutput, error) {
+	m.createdBucket = aws.ToString(in.Bucket)
+	return &s3.CreateBucketOutput{}, nil
 }
 
 func (m *mvWizardFake) ListBuckets(ctx context.Context, in *s3.ListBucketsInput, opts ...func(*s3.Options)) (*s3.ListBucketsOutput, error) {
@@ -204,6 +210,76 @@ func TestFinalizeMove_S3ToS3(t *testing.T) {
 	}
 	if !strings.Contains(fake.copiedSrc, "src") || !strings.Contains(fake.copiedSrc, "a.txt") {
 		t.Errorf("copy source = %q, want it to reference src/a.txt", fake.copiedSrc)
+	}
+}
+
+// TestMoveStepNewDestBucket_ResetterClears guards the High bug: when the
+// new-bucket step is skipped (an existing dest bucket was picked, possibly after
+// backing out of "create new"), its Resetter must drop the typed name, or
+// finalizeMove would create + move to the wrong bucket.
+func TestMoveStepNewDestBucket_ResetterClears(t *testing.T) {
+	t.Parallel()
+	st := &moveWizardState{dstBucket: "dst", newDstBucket: "typed-but-abandoned"}
+	moveStepNewDestBucket(st).Resetter()
+	if st.newDstBucket != "" {
+		t.Errorf("newDstBucket = %q, want empty after skip", st.newDstBucket)
+	}
+}
+
+// TestBuildMoveFlow_BackOutOfCreateBucket exercises the same bug end-to-end:
+// choose "+ Create new bucket", type a name, Esc back to the bucket step, then
+// pick an existing bucket. The final state must target the existing bucket with
+// no stale new-bucket name.
+func TestBuildMoveFlow_BackOutOfCreateBucket(t *testing.T) {
+	// no t.Parallel — prompter/fake state
+	fake := &mvWizardFake{buckets: []string{"src", "dst"}, objects: []string{"a.txt"}}
+	f := cmdutil.NewTestFactory(tuitest.New())
+	st := &moveWizardState{}
+
+	engine := wizard.NewEngine(nil, nil,
+		wizard.WithOutput(io.Discard),
+		wizard.WithTestResults(
+			wizard.SelectResult(0),           // source bucket: src
+			wizard.SelectResult(0),           // source object: a.txt
+			wizard.SelectResult(2),           // dest bucket: + Create new (idx 2 of src,dst,+create)
+			wizard.TextResult("new-a"),       // new bucket name
+			wizard.BackResult(),              // dest key -> back to new-bucket
+			wizard.BackResult(),              // new-bucket -> back to dest bucket
+			wizard.SelectResult(1),           // dest bucket: dst (existing)
+			wizard.TextResult("renamed.txt"), // dest key
+		),
+	)
+	if err := engine.Run(context.Background(), buildMoveFlow(f, fake, st)); err != nil {
+		t.Fatalf("engine Run: %v", err)
+	}
+	if st.dstBucket != "dst" || st.newDstBucket != "" {
+		t.Errorf("state = {dstBucket:%q newDstBucket:%q}, want dst / empty", st.dstBucket, st.newDstBucket)
+	}
+}
+
+// TestFinalizeMove_CreatesNewBucket covers the create-new destination path:
+// confirm → CreateBucket → CopyObject into it → delete source.
+func TestFinalizeMove_CreatesNewBucket(t *testing.T) {
+	// no t.Parallel — clientBuilder/prompter state
+	fake := &mvWizardFake{}
+	restore := withFakeClient(fake)
+	defer restore()
+
+	f := cmdutil.NewTestFactory(tuitest.New().AddConfirm(true))
+	cmd := NewCmdMv(f, ioBufs())
+	st := &moveWizardState{srcBucket: "src", srcKey: "a.txt", newDstBucket: "fresh", dstKey: "a.txt"}
+
+	if err := finalizeMove(context.Background(), cmd, f, ioBufs(), fake, &cpOptions{}, st); err != nil {
+		t.Fatalf("finalizeMove: %v", err)
+	}
+	if fake.createdBucket != "fresh" {
+		t.Errorf("created bucket = %q, want fresh", fake.createdBucket)
+	}
+	if fake.copiedDst != "fresh/a.txt" {
+		t.Errorf("copy dest = %q, want fresh/a.txt", fake.copiedDst)
+	}
+	if fake.deleted != "src/a.txt" {
+		t.Errorf("source deleted = %q, want src/a.txt", fake.deleted)
 	}
 }
 
