@@ -27,9 +27,9 @@ import (
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/options"
 )
 
-// DefaultEndpoint is the bundled Verda S3 endpoint used when the user has not
-// configured one explicitly. Update when the production URL is confirmed.
-const DefaultEndpoint = "https://s3.verda.cloud"
+// DefaultEndpoint is the bundled Verda S3 endpoint — the configure wizard's
+// pre-filled default and the fallback when no endpoint is set.
+const DefaultEndpoint = "https://objects.fin-03.verda.storage"
 
 // API is the minimal subset of the AWS S3 client used by this package.
 // It exists to allow tests to inject fake clients without depending on

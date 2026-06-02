@@ -174,6 +174,9 @@ func configureStepEndpoint(opts *configureOptions) wizard.Step {
 		Description: "S3 endpoint URL",
 		Prompt:      wizard.TextInputPrompt,
 		Required:    true,
+		// Pre-fill the production endpoint; the user accepts it with Enter or
+		// types their own region's URL.
+		Default: func(_ map[string]any) any { return DefaultEndpoint },
 		Validate: func(v any) error {
 			s := strings.TrimSpace(v.(string))
 			if s == "" {

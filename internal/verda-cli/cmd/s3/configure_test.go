@@ -15,12 +15,43 @@
 package s3
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"gopkg.in/ini.v1"
+
+	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
+
+// TestConfigureFlagMode_DefaultsEndpointAndRegion verifies that supplying only
+// the keys runs non-interactively and fills in the default endpoint + region.
+func TestConfigureFlagMode_DefaultsEndpointAndRegion(t *testing.T) {
+	// No t.Parallel: t.Setenv.
+	withTempVerdaHome(t)
+	path := filepath.Join(t.TempDir(), "credentials")
+	t.Setenv("VERDA_SHARED_CREDENTIALS_FILE", path)
+
+	f := cmdutil.NewTestFactory(nil)
+	cmd := NewCmdConfigure(f, cmdutil.IOStreams{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"--access-key", "AKIA", "--secret-key", "secret"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("configure: %v", err)
+	}
+
+	cfg, err := ini.Load(path)
+	if err != nil {
+		t.Fatalf("load credentials: %v", err)
+	}
+	sec := cfg.Section("default")
+	if got := sec.Key("verda_s3_endpoint").String(); got != DefaultEndpoint {
+		t.Errorf("endpoint = %q, want default %q", got, DefaultEndpoint)
+	}
+	if got := sec.Key("verda_s3_region").String(); got != defaultRegion {
+		t.Errorf("region = %q, want default %q", got, defaultRegion)
+	}
+}
 
 func TestResolveCredentialsFileUsesEnv(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "credentials")
