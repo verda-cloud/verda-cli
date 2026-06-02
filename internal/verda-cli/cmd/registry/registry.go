@@ -23,10 +23,10 @@ import (
 // NewCmdRegistry creates the parent `verda registry` command.
 func NewCmdRegistry(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:     "registry",
-		Aliases: []string{"vccr", "vcr"},
-		Short:   "Manage the Verda Cloud Container Registry (vccr.io)",
-		Hidden:  true, // pre-GA; also gated in cmd/cmd.go via VERDA_REGISTRY_ENABLED
+		Use:         "registry",
+		Aliases:     []string{"vccr", "vcr"},
+		Short:       "Manage the Verda Cloud Container Registry (vccr.io)",
+		Annotations: map[string]string{cmdutil.TagAnnotation: "beta"},
 		Long: cmdutil.LongDesc(`
 			Manage Verda Container Registry (vccr.io) credentials, browse
 			repositories, push local Docker images, and copy images between

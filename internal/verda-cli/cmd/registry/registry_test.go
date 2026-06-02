@@ -30,8 +30,11 @@ func TestNewCmdRegistry_BasicWiring(t *testing.T) {
 	if cmd.Use != "registry" {
 		t.Fatalf("Use = %q, want %q", cmd.Use, "registry")
 	}
-	if !cmd.Hidden {
-		t.Errorf("command should be Hidden pre-GA")
+	if cmd.Hidden {
+		t.Errorf("command should be visible in help (beta, no longer pre-GA gated)")
+	}
+	if got := cmd.Annotations[cmdutil.TagAnnotation]; got != "beta" {
+		t.Errorf("TagAnnotation = %q, want %q (renders as \"registry (beta)\" in help)", got, "beta")
 	}
 	if !sliceContains(cmd.Aliases, "vccr") {
 		t.Errorf("alias \"vccr\" missing; got %v", cmd.Aliases)

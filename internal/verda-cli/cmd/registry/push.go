@@ -19,11 +19,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/spf13/cobra"
+	"github.com/verda-cloud/verdagostack/pkg/tui"
 
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 
@@ -85,7 +88,6 @@ type pushPayload struct {
 // worker pool but has no effect yet.
 func NewCmdPush(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 	opts := &pushOptions{
-		Profile:   defaultProfileName,
 		Source:    string(SourceAuto),
 		ImageJobs: 1,
 		Retries:   5,
@@ -140,7 +142,7 @@ func NewCmdPush(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 	}
 
 	flags := cmd.Flags()
-	flags.StringVar(&opts.Profile, "profile", opts.Profile, "Credentials profile name")
+	flags.StringVar(&opts.Profile, "profile", opts.Profile, "Credentials profile name (default: active profile)")
 	flags.StringVar(&opts.CredentialsFile, "credentials-file", "", "Path to credentials file")
 	flags.StringVar(&opts.Repo, "repo", "", "Override destination repository name (single-image only)")
 	flags.StringVar(&opts.Tag, "tag", "", "Override destination tag (single-image only)")
@@ -167,7 +169,7 @@ func runPush(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams,
 	}
 
 	if len(args) == 0 {
-		picked, proceed, err := resolveZeroArgs(cmd.Context(), f, ioStreams, creds)
+		picked, proceed, err := resolveZeroArgs(cmd.Context(), f, ioStreams, creds, opts)
 		if err != nil {
 			return err
 		}
@@ -591,6 +593,7 @@ func resolveZeroArgs(
 	f cmdutil.Factory,
 	ioStreams cmdutil.IOStreams,
 	creds *options.RegistryCredentials,
+	opts *pushOptions,
 ) (refs []string, proceed bool, err error) {
 	if !isInteractivePush(f, ioStreams.ErrOut) {
 		return nil, false, &cmdutil.AgentError{
@@ -602,7 +605,7 @@ func resolveZeroArgs(
 			ExitCode: cmdutil.ExitBadArgs,
 		}
 	}
-	return listAndPickImages(ctx, f, ioStreams, creds)
+	return listAndPickImages(ctx, f, ioStreams, creds, opts)
 }
 
 // listAndPickImages is the zero-arg interactive flow. It pings the
@@ -619,16 +622,18 @@ func listAndPickImages(
 	f cmdutil.Factory,
 	ioStreams cmdutil.IOStreams,
 	creds *options.RegistryCredentials,
+	opts *pushOptions,
 ) (refs []string, proceed bool, err error) {
 	lister, lerr := daemonListerBuilder()
 	if lerr != nil {
-		return nil, false, interactiveNoImageSourceError(lerr)
+		// No daemon to enumerate — offer a file source instead of dead-ending.
+		return pushFileSourceFallback(ctx, f, ioStreams, opts)
 	}
 
 	pingCtx, pingCancel := context.WithTimeout(ctx, daemonPingTimeout)
 	defer pingCancel()
 	if perr := lister.Ping(pingCtx); perr != nil {
-		return nil, false, interactiveNoImageSourceError(perr)
+		return pushFileSourceFallback(ctx, f, ioStreams, opts)
 	}
 
 	listCtx, listCancel := context.WithTimeout(ctx, f.Options().Timeout)
@@ -695,22 +700,142 @@ func runPickerTUI(
 	return refs, true
 }
 
-// interactiveNoImageSourceError is the zero-arg picker counterpart to
-// daemonUnreachableError. The message lives here rather than in
-// source.go so the friendly "pass image refs" hint lines up with the
-// zero-arg flow (where --source isn't the only fix available).
-func interactiveNoImageSourceError(underlying error) error {
-	return &cmdutil.AgentError{
-		Code: kindRegistryNoImageSource,
-		Message: fmt.Sprintf(
-			"Docker daemon not reachable (%s); "+
-				"pass image references as arguments (e.g. `verda registry push my-app:v1`) "+
-				"or use --source oci|tar with a path",
-			underlying.Error(),
-		),
-		Details: map[string]any{
-			"daemon_error": underlying.Error(),
-		},
-		ExitCode: cmdutil.ExitAPI,
+// pushFileSourceFallback runs when a zero-arg interactive push can't reach the
+// Docker daemon. Instead of dead-ending, it guides the user to push from a
+// local OCI layout or image tarball: pick the source type, the path, and a
+// destination repo/tag (a path can't carry one, so the repo is pre-filled from
+// the path's basename and editable). It sets opts.Source/Repo/Tag and returns
+// the path as the single "ref" the normal push pipeline consumes. A cancel at
+// any prompt returns (nil, false, nil) → the caller exits 0 quietly.
+//
+//nolint:gocyclo // Interactive step machine with per-step back/exit navigation — inherently complex.
+func pushFileSourceFallback(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *pushOptions) (refs []string, proceed bool, err error) {
+	prompter := f.Prompter()
+
+	const (
+		stepSource = iota
+		stepPath
+		stepRepo
+		stepTag
+	)
+	var (
+		srcType ImageSource
+		label   string
+		path    string
+		repo    string
+	)
+	step := stepSource
+	for {
+		switch step {
+		case stepSource:
+			idx, serr := prompter.Select(ctx,
+				"Docker daemon not reachable — push from a file instead",
+				[]string{"OCI layout (directory)", "Image tarball (.tar file)", "Cancel"},
+				tui.WithShowHints(true))
+			if serr != nil {
+				// First step: Esc and Ctrl+C both exit cleanly (nothing to go
+				// back to). A real I/O error propagates.
+				if cmdutil.IsPromptCancel(serr) {
+					return nil, false, nil
+				}
+				return nil, false, serr
+			}
+			switch idx {
+			case 0:
+				srcType, label = SourceOCI, "OCI layout directory"
+			case 1:
+				srcType, label = SourceTar, "image tarball (.tar)"
+			default:
+				return nil, false, nil // Cancel
+			}
+			step = stepPath
+
+		case stepPath:
+			p, perr := prompter.TextInput(ctx, "Path to the "+label)
+			if back, exit, fatal := classifyWizardNav(perr, false); fatal != nil {
+				return nil, false, fatal
+			} else if exit {
+				return nil, false, nil
+			} else if back {
+				step = stepSource
+				continue
+			}
+			p = strings.TrimSpace(p)
+			if p == "" {
+				step = stepSource // empty → back to the source choice
+				continue
+			}
+			if _, statErr := os.Stat(p); statErr != nil {
+				_, _ = fmt.Fprintf(ioStreams.ErrOut, "  %v — try again.\n", statErr)
+				continue // re-prompt the path
+			}
+			path = p
+			step = stepRepo
+
+		case stepRepo:
+			r, rerr := prompter.TextInput(ctx, "Destination repository (under your VCR project)",
+				tui.WithDefault(defaultRepoFromPath(path)))
+			if back, exit, fatal := classifyWizardNav(rerr, false); fatal != nil {
+				return nil, false, fatal
+			} else if exit {
+				return nil, false, nil
+			} else if back {
+				step = stepPath
+				continue
+			}
+			r = strings.TrimSpace(r)
+			if r == "" {
+				r = defaultRepoFromPath(path)
+			}
+			if r == "" {
+				_, _ = fmt.Fprintln(ioStreams.ErrOut, "  repository cannot be empty — try again.")
+				continue
+			}
+			if r == "." || r == ".." {
+				// These would reach ggcr's repository parser and fail with a
+				// cryptic "can only contain …" error; reject up front.
+				_, _ = fmt.Fprintln(ioStreams.ErrOut, "  repository name cannot be \".\" or \"..\" — try again.")
+				continue
+			}
+			repo = r
+			step = stepTag
+
+		case stepTag:
+			tg, terr := prompter.TextInput(ctx, "Tag", tui.WithDefault(defaultTag))
+			if back, exit, fatal := classifyWizardNav(terr, false); fatal != nil {
+				return nil, false, fatal
+			} else if exit {
+				return nil, false, nil
+			} else if back {
+				step = stepRepo
+				continue
+			}
+			tg = strings.TrimSpace(tg)
+			if tg == "" {
+				tg = defaultTag
+			}
+			opts.Source = string(srcType)
+			opts.Repo = repo
+			opts.Tag = tg
+			return []string{path}, true, nil
+		}
 	}
+}
+
+// defaultRepoFromPath derives a sensible destination repository from a source
+// path: the basename with a known image-archive extension stripped
+// (./build/my-app.tar → "my-app", ./layout/ → "layout").
+func defaultRepoFromPath(p string) string {
+	base := filepath.Base(strings.TrimRight(p, "/"))
+	// "." (from "." or "/") and ".." (from "../") aren't usable repo names —
+	// return "" so the prompt re-asks rather than pre-filling garbage.
+	if base == "." || base == ".." {
+		return ""
+	}
+	for _, ext := range []string{".tar.gz", ".tgz", ".tar", ".oci"} {
+		if strings.HasSuffix(base, ext) {
+			return strings.TrimSuffix(base, ext)
+		}
+	}
+	return base
 }

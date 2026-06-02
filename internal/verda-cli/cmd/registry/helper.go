@@ -66,26 +66,31 @@ func buildHarborLister(creds *options.RegistryCredentials, cfg RetryConfig) Repo
 	return harborListerBuilder(creds, cfg)
 }
 
-// loadCredsFromFactory loads registry credentials for the current
-// profile, applying the s3-style fallback to the default profile name
-// when Profile is empty.
-//
-// Registry commands are exempt from Options.Complete() (see
-// cmd/cmd.go skipCredentialResolution), so AuthOptions.Profile is never
-// auto-resolved. Without the fallback, an unset profile would make
-// ini.v1 load the synthetic DEFAULT section instead of the user's
-// [default] section, surfacing a spurious "not configured" error right
-// after a successful `verda registry configure`.
-func loadCredsFromFactory(f cmdutil.Factory, profileOverride, fileOverride string) (*options.RegistryCredentials, error) {
-	profile := profileOverride
-	if profile == "" {
-		if opts := f.Options(); opts != nil && opts.AuthOptions != nil {
-			profile = opts.AuthOptions.Profile
-		}
-	}
-	if profile == "" {
-		profile = defaultProfileName
-	}
+// loadCredsFromFactory loads registry credentials for the resolved profile
+// (see resolveProfile).
+func loadCredsFromFactory(_ cmdutil.Factory, profileOverride, fileOverride string) (*options.RegistryCredentials, error) {
+	profile := resolveProfile(profileOverride)
 	path := credentialsFilePath(fileOverride)
 	return options.LoadRegistryCredentialsForProfile(path, profile)
+}
+
+// resolveProfile picks the credentials profile a registry command acts on:
+// an explicit --profile flag wins, else the CLI's active profile (VERDA_PROFILE
+// or auth.profile in the config), else "default".
+//
+// Registry commands are in skipCredentialResolution, so — unlike `verda vm` —
+// they don't inherit the active profile from options.Complete(). Resolving it
+// here keeps `registry ls/tags/push/...` consistent with `registry configure`
+// and the rest of the CLI: a user who ran `verda auth use <profile>` (or set
+// VERDA_PROFILE) gets that profile for registry too. Idempotent — resolving an
+// already-explicit profile returns it unchanged.
+//
+// The "default" fallback also avoids ini.v1 loading its synthetic DEFAULT
+// section for a blank profile, which would surface a spurious "not configured"
+// error right after a successful `verda registry configure`.
+func resolveProfile(flagProfile string) string {
+	if p := options.ActiveProfile(flagProfile); p != "" {
+		return p
+	}
+	return defaultProfileName
 }

@@ -26,6 +26,7 @@ import (
 
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/options"
+	tuitest "github.com/verda-cloud/verdagostack/pkg/tui/testing"
 )
 
 // runTagsForTest exercises the real flag-parsing path so tests match
@@ -409,6 +410,58 @@ func (r *tagsOnlyRegistry) Head(ctx context.Context, ref string) (*v1.Descriptor
 		return r.headFn(ctx, ref)
 	}
 	return nil, errors.New("head not implemented")
+}
+
+// TestTags_Interactive_PicksTagPrintsPullRef: on a terminal, `tags <repo>`
+// presents the filterable tag picker (reusing ls's runTagPicker); selecting a
+// tag prints its full pull reference and exits. Non-TTY callers (the other
+// tags tests) still get the table.
+func TestTags_Interactive_PicksTagPrintsPullRef(t *testing.T) {
+	fake := &tagsOnlyRegistry{
+		tagsFn: func(_ context.Context, _ string) ([]string, error) {
+			return []string{"v1", "v2"}, nil
+		},
+		headFn: func(_ context.Context, _ string) (*v1.Descriptor, error) {
+			return &v1.Descriptor{Size: 1024}, nil
+		},
+	}
+	orig := clientBuilder
+	clientBuilder = func(_ *options.RegistryCredentials, _ RetryConfig) Registry { return fake }
+	t.Cleanup(func() { clientBuilder = orig })
+
+	writeLsCredsFile(t, healthyVCRCredsBody("vccr.io", "proj"))
+	withForcedTTY(t, true)
+
+	// Pick the first tag (v1) → prints its pull reference and exits.
+	f := cmdutil.NewTestFactory(tuitest.New().AddSelect(0))
+	streams, out, _ := newLsStreams()
+
+	if err := runTagsForTest(t, f, streams, "my-app"); err != nil {
+		t.Fatalf("tags (interactive): %v", err)
+	}
+	if got := out.String(); !strings.Contains(got, "vccr.io/proj/my-app:v1") {
+		t.Errorf("expected pull reference on stdout, got:\n%s", got)
+	}
+	// The picker is used, not the table.
+	if strings.Contains(out.String(), "DIGEST") {
+		t.Errorf("expected the picker (no table), got:\n%s", out.String())
+	}
+}
+
+// TestTags_NoArg_FriendlyError: bare `tags` (no repo) returns a helpful
+// message pointing at `tags <repo>` / `ls`, not cobra's terse arg error.
+func TestTags_NoArg_FriendlyError(t *testing.T) {
+	writeLsCredsFile(t, healthyVCRCredsBody("vccr.io", "proj"))
+	f := cmdutil.NewTestFactory(nil)
+	streams, _, _ := newLsStreams()
+
+	err := runTagsForTest(t, f, streams /* no repo */)
+	if err == nil {
+		t.Fatal("expected an error for bare `tags`")
+	}
+	if !strings.Contains(err.Error(), "needs a repository") {
+		t.Errorf("expected a friendly 'needs a repository' message, got: %v", err)
+	}
 }
 
 // TestTags_NetworkError: Tags returns a connection-refused error; the

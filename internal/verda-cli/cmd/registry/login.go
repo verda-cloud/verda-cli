@@ -28,14 +28,14 @@ import (
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/options"
 )
 
-// loginOptions bundles the flag state for `verda registry login`.
+// loginOptions bundles the flag state for `verda registry configure-docker`.
 type loginOptions struct {
 	Profile         string
 	CredentialsFile string
 	DockerConfig    string
 }
 
-// NewCmdLogin creates the `verda registry login` command.
+// NewCmdLogin creates the `verda registry configure-docker` command.
 //
 // login writes the active registry credentials into ~/.docker/config.json
 // so third-party tools (docker pull, docker-compose, helm pull oci://,
@@ -43,13 +43,12 @@ type loginOptions struct {
 // registry — it is a pure file-merge. `configure` is for storing Verda's
 // own credentials; `login` is for interop.
 func NewCmdLogin(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
-	opts := &loginOptions{
-		Profile: defaultProfileName,
-	}
+	opts := &loginOptions{}
 
 	cmd := &cobra.Command{
-		Use:   "login",
-		Short: "Write VCR credentials into ~/.docker/config.json",
+		Use:     "configure-docker",
+		Aliases: []string{"login"},
+		Short:   "Set up Docker/compose/helm to pull from VCR (writes ~/.docker/config.json)",
 		Long: cmdutil.LongDesc(`
 			Write the active Verda Container Registry credentials into the Docker
 			config file so third-party tools (docker pull, docker-compose,
@@ -65,13 +64,13 @@ func NewCmdLogin(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command 
 		`),
 		Example: cmdutil.Examples(`
 			# Write the default profile into ~/.docker/config.json
-			verda registry login
+			verda registry configure-docker
 
 			# Use a specific profile
-			verda registry login --profile staging
+			verda registry configure-docker --profile staging
 
 			# Write to a non-default Docker config file
-			verda registry login --config /tmp/docker/config.json
+			verda registry configure-docker --config /tmp/docker/config.json
 		`),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -80,7 +79,7 @@ func NewCmdLogin(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command 
 	}
 
 	flags := cmd.Flags()
-	flags.StringVar(&opts.Profile, "profile", opts.Profile, "Credentials profile to read")
+	flags.StringVar(&opts.Profile, "profile", opts.Profile, "Credentials profile to read (default: active profile)")
 	flags.StringVar(&opts.CredentialsFile, "credentials-file", "", "Path to the shared Verda credentials file")
 	flags.StringVar(&opts.DockerConfig, "config", "", "Path to the Docker config file (default ~/.docker/config.json)")
 

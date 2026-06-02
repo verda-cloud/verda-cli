@@ -2,7 +2,7 @@
 
 Manage Verda Container Registry (VCR, `vccr.io`) credentials, browse repositories, push local Docker images, and copy images between registries. Credentials are stored separately from the main API credentials under `verda_registry_` prefixed keys in the shared profile system.
 
-> **Pre-release.** The `registry` command tree is gated behind `VERDA_REGISTRY_ENABLED=1` and hidden from `verda --help`. Without the env var, `verda registry ...` returns "unknown command". When the feature ships GA, delete `registryEnabled()` in `internal/verda-cli/cmd/cmd.go`, drop the gate in `NewRootCommand`, and remove `Hidden: true` from `internal/verda-cli/cmd/registry/registry.go`.
+> **Beta.** The `registry` command tree is enabled by default and listed in `verda --help` as `registry … (beta)`. No env var is required. One flag is still inert pending follow-up: `push --no-mount` (accepted, prints a notice, no effect).
 
 ## Commands
 
@@ -10,9 +10,9 @@ Manage Verda Container Registry (VCR, `vccr.io`) credentials, browse repositorie
 |---------|---------|
 | `verda registry configure` | Save VCR credentials (paste `docker login` from the web UI, flags, or wizard) |
 | `verda registry show` | Print credential status + expiry (no secrets) |
-| `verda registry login` | Write `~/.docker/config.json` for `docker pull` / compose / helm / nerdctl |
+| `verda registry configure-docker` (alias `login`) | Write `~/.docker/config.json` for `docker pull` / compose / helm / nerdctl |
 | `verda registry ls` | List repositories in the active Verda project |
-| `verda registry tags <repo>` | List tags in a repository plus per-tag digest + size |
+| `verda registry tags <repo>` | List tags in a repository (interactive picker → pull URL on a TTY; table with digest + size when piped / `-o json`) |
 | `verda registry push [image...]` | Push local images (daemon / OCI layout / tarball); zero-arg launches interactive picker |
 | `verda registry copy <src> [<dst>]` (alias `cp`) | Copy an image between registries |
 | `verda registry delete [<target>]` (aliases `del`, `rm`) | Delete a repository or a single image (tag / digest); zero-arg launches interactive flow |
@@ -23,13 +23,15 @@ The parent command also accepts the alias `vcr`, so `verda vcr ls` works identic
 
 `--profile`, `--credentials-file`, `--debug`, `--agent`, `-o json`/`yaml`, `--timeout`.
 
+**Profile selection.** With no `--profile`, registry commands use the **active profile** — the one set by `verda auth use <name>` (`auth.profile` in `~/.verda/config.yaml`) or `VERDA_PROFILE` — falling back to `default`. So after `verda auth use production`, `verda registry ls`/`configure`/… all operate on the `production` profile without repeating `--profile`. An explicit `--profile X` always overrides.
+
 ## Quick start
 
 ### 1. Create credentials in the web UI, then configure the CLI
 
 ```bash
 # Paste the full docker login command the UI prints
-VERDA_REGISTRY_ENABLED=1 verda registry configure \
+verda registry configure \
   --paste "docker login -u vcr-<project-id>+<cred-name> -p <secret> vccr.io"
 ```
 
@@ -38,7 +40,7 @@ Or run without flags on a TTY to drive the interactive wizard, which asks for th
 ### 2. Verify
 
 ```bash
-VERDA_REGISTRY_ENABLED=1 verda registry show
+verda registry show
 # registry_configured: true
 # expires_at:          2026-05-20T00:00:00Z
 # days_remaining:      30
@@ -48,10 +50,13 @@ VERDA_REGISTRY_ENABLED=1 verda registry show
 
 ```bash
 # From the Docker daemon
-VERDA_REGISTRY_ENABLED=1 verda registry push my-app:v1.0.0
+verda registry push my-app:v1.0.0
 
-# Or launch the interactive picker (no positional args) on a TTY
-VERDA_REGISTRY_ENABLED=1 verda registry push
+# Or launch the interactive picker (no positional args) on a TTY.
+# Daemon running  → pick from your local images.
+# Daemon NOT running → fall back to a guided prompt: choose an OCI layout or
+#                      tarball, give a path + destination repo/tag.
+verda registry push
 ```
 
 ### 4. List repositories and tags
@@ -59,48 +64,53 @@ VERDA_REGISTRY_ENABLED=1 verda registry push
 ```bash
 # Every repository in the active project, then pick one to see its image list
 # (digest / tags / size / push / pull — the same view Harbor's web UI shows)
-VERDA_REGISTRY_ENABLED=1 verda registry ls
+verda registry ls
 
 # Scriptable (piping suppresses the picker; JSON/YAML do too)
-VERDA_REGISTRY_ENABLED=1 verda registry ls | less
-VERDA_REGISTRY_ENABLED=1 verda registry ls -o json
+verda registry ls | less
+verda registry ls -o json
 
 # Tags inside one repository (digest + size per tag)
-VERDA_REGISTRY_ENABLED=1 verda registry tags my-app
+verda registry tags my-app
 ```
 
 ### 5. Copy from another registry
 
 ```bash
+# Interactive wizard: prompts for source → access → scope → destination → confirm
+verda registry copy
+
 # Copy a public image from Docker Hub to VCR, preserving repo/tag
-VERDA_REGISTRY_ENABLED=1 verda registry copy docker.io/library/nginx:1.25
+verda registry copy docker.io/library/nginx:1.25
 
 # Copy every tag
-VERDA_REGISTRY_ENABLED=1 verda registry copy docker.io/library/nginx --all-tags
+verda registry copy docker.io/library/nginx --all-tags
 
 # Copy to a custom destination
-VERDA_REGISTRY_ENABLED=1 verda registry copy gcr.io/my-project/app:v1 my-app:prod
+verda registry copy gcr.io/my-project/app:v1 my-app:prod
 ```
+
+On a terminal, running `copy` with **no arguments** launches a wizard that mirrors `s3 cp`'s flow: enter the **source** image (validated), pick **source access** (public via `docker login` / anonymous / username+password), choose **scope** (just this tag / all tags), confirm the **destination** (pre-filled with the synthesized `vccr.io/<project>/<repo>:<tag>`), then review a `Will run: verda registry copy …` preview before it executes. Esc steps back a question; Ctrl+C exits. Scripts / `--agent` / `-o json` must pass `<src>` explicitly.
 
 ### 6. Delete a repository or image
 
 ```bash
 # Delete a single image (by tag or digest)
-VERDA_REGISTRY_ENABLED=1 verda registry delete my-app:v1.2.3
-VERDA_REGISTRY_ENABLED=1 verda registry delete my-app@sha256:abcdef...
+verda registry delete my-app:v1.2.3
+verda registry delete my-app@sha256:abcdef...
 
 # Delete an entire repository (all artifacts + tags)
-VERDA_REGISTRY_ENABLED=1 verda registry delete my-app --yes
+verda registry delete my-app --yes
 
 # Zero-arg: interactive picker + multi-select (Space/Ctrl+A/Enter)
-VERDA_REGISTRY_ENABLED=1 verda registry delete
+verda registry delete
 ```
 
 ## Configuration
 
 ### Where the values come from
 
-The web UI's "Registry credentials created" dialog shows three fields. Map them to `configure` flags:
+In the Verda dashboard: **select your project** (skipped automatically if you only have one) → **Credentials** → **Create credentials** → Provider **Verda**, enter a name and an expiry (Label, in days) → **Create credentials**. The dialog that appears shows three fields. Map them to `configure` flags:
 
 | Web UI field | CLI flag |
 |---|---|
@@ -135,14 +145,18 @@ When `--endpoint` is omitted, the CLI prints a one-line `Using registry endpoint
 
 `--expires-in <days>` overrides the 30-day default expiry. `--profile <name>` writes to a named profile section.
 
+Re-running `configure` against a profile that already holds registry credentials **replaces** them. On a terminal you're asked to confirm first (`Profile "x" already has registry credentials … Replace them?`); declining writes nothing. In agent mode and non-interactive (piped) runs the replace proceeds without a prompt — rotation is the explicit intent — and a one-line `Replacing existing registry credentials in profile "x".` note is printed to stderr (non-agent) so it isn't silent. Other keys in the profile (S3, API) and other profiles are never touched.
+
 > **Credentials are write-once from the user's side.** Verda's API never returns the secret again — only the credential name. If the secret is lost, delete + recreate the credential in the web UI and re-run `configure`. The CLI cannot fetch the secret on your behalf.
 
-## Login (docker config merge)
+## Configure Docker (docker config merge)
+
+> Named `configure-docker` (alias `login`, mirroring `docker login` / `gcloud auth configure-docker`). It does **not** contact the registry — it's a local merge into `~/.docker/config.json`.
 
 ```bash
-verda registry login                           # merge default profile into ~/.docker/config.json
-verda registry login --profile staging         # merge a non-default profile
-verda registry login --config /tmp/dc.json     # write to a non-default docker config path
+verda registry configure-docker                           # merge default profile into ~/.docker/config.json
+verda registry configure-docker --profile staging         # merge a non-default profile
+verda registry configure-docker --config /tmp/dc.json     # write to a non-default docker config path
 ```
 
 `login` is a **local file merge** — it never talks to the registry. Existing entries for other registries and unknown top-level keys (`credsStore`, `credHelpers`, `HttpHeaders`, `psFormat`, ...) are preserved verbatim.
@@ -164,7 +178,15 @@ verda registry tags my-app --all
 verda registry tags vccr.io/my-project/my-app   # fully qualified form works too
 ```
 
-On a terminal, `ls` prints one row per repository and lets you pick one; selecting a row fetches that repo's per-artifact detail and renders an image-list card (**DIGEST**, **TAGS**, **SIZE**, **PUSHED**, **PULLED**) — the same view Harbor's UI shows when you expand a repository row. Pick "Exit" (or press Ctrl-C at the picker) to quit.
+On a terminal, `ls` prints one row per repository and lets you pick one. Selecting a repository opens an **action menu**:
+
+- **Get pull URL** — a filterable, newest-first **tag picker**; pick a tag (type to filter) and `ls` prints that tag's full, copy-pasteable pull reference (`vccr.io/<project>/<repo>:<tag>`, or `@<digest>` for untagged artifacts) and exits — getting the URL is the goal.
+- **Delete image(s)…** — the same multi-select + confirmation flow as `verda registry delete` (space to mark, Ctrl+A to select all, a red "cannot be undone" confirm). Interactive only.
+- **← Back** to the repository list. Esc backs up one level; Ctrl+C quits.
+
+To go straight to a known repo's tags, use `verda registry tags <repo>` — it opens the **same tag picker** on a terminal, or prints a detailed per-tag table (digest / size) when piped or with `-o json`.
+
+If your credential can list repositories but not their *artifacts* (a Harbor 403 — some credentials lack the project image-permission), `ls` falls back to the Docker v2 tag list (the same one `verda registry tags` reads) so the **Get pull URL** tag picker still works — just without sizes/dates, and without the **Delete** action (delete goes through the same denied Harbor API). If even the v2 tag list is denied, it shows just the repository pull reference (`vccr.io/<project>/<repo>`, which you can still `docker pull`).
 
 When `ls` is piped or redirected, or when `-o json` / `-o yaml` is set, the picker is suppressed and a single deterministic document is emitted instead. This is what scripts and CI should rely on.
 
@@ -264,7 +286,7 @@ No extra flags — this is the default path:
 ```bash
 echo "$GITHUB_PAT" | docker login ghcr.io -u USERNAME --password-stdin
 
-VERDA_REGISTRY_ENABLED=1 verda registry copy \
+verda registry copy \
   ghcr.io/acme/private-app:v1 \
   acme/private-app:v1
 ```
@@ -274,7 +296,7 @@ VERDA_REGISTRY_ENABLED=1 verda registry copy \
 The secret **must** come via stdin; passing it as a flag is not supported:
 
 ```bash
-echo "$SRC_PASSWORD" | VERDA_REGISTRY_ENABLED=1 verda registry copy \
+echo "$SRC_PASSWORD" | verda registry copy \
   private.example.com/team/app:v1 \
   --src-auth basic \
   --src-username jdoe \
@@ -431,7 +453,7 @@ The artifact-count / digest / removed-tags fields come from a best-effort pre-de
 `--profile`, `--credentials-file`.
 
 ### `tags`
-`--profile`, `--credentials-file`, `--limit`, `--all`.
+`--profile`, `--credentials-file`, `--limit`, `--all`. On a terminal `tags <repo>` is an interactive filterable picker (type to filter; select a tag → prints its pull reference and exits — the same picker `ls`'s drill-down uses); piped / `-o json` / `--agent` print the per-tag table instead. **Bare `tags`** (no repo) returns a usage error pointing at `tags <repo>` / `ls` — `tags` is tag-centric; browsing repositories interactively is `ls`'s job.
 
 ### `push`
 `--profile`, `--credentials-file`, `--repo`, `--tag`, `--source` (`auto|daemon|oci|tar`), `--jobs`, `--image-jobs`, `--retries`, `--progress` (`auto|plain|json|none`), `--no-mount` (currently a no-op; prints a notice).
@@ -471,9 +493,8 @@ Bubbletea output always goes to **stderr** so stdout stays clean for scripted co
 
 ## Environment
 
-- `VERDA_REGISTRY_ENABLED=1` -- **required** to register any `registry` subcommand (pre-release gate)
 - `VERDA_REGISTRY_CREDENTIALS_FILE` -- override the default credentials file path (`~/.verda/credentials`); useful in tests and CI
-- `DOCKER_CONFIG` -- honoured by `verda registry login` when `--config` is not passed
+- `DOCKER_CONFIG` -- honoured by `verda registry configure-docker` when `--config` is not passed
 - `DOCKER_HOST` -- honoured by the daemon source in `push --source daemon` and `--source auto`
 
 ## Multiple profiles
@@ -488,7 +509,7 @@ Switch per-command with `--profile staging` or persist it with `verda auth use s
 
 ## Interactive vs Non-Interactive
 
-- `configure` has an interactive bubbletea wizard that drives the `--paste` flow plus expiry + docker-config options. Supply `--paste` or `--username/--password-stdin/--endpoint` to skip the wizard entirely.
+- `configure` has an interactive bubbletea wizard: pick or create a profile (each annotated with whether it already holds registry credentials), then choose how you have the credential — **paste** the full `docker login` command, or **enter the credential name + secret** separately (matching the web UI's two copy options). The manual path doesn't ask for a host: the project id is parsed from the credential name and the base is `vccr.io` (or the profile's saved host). Then expiry + docker-config. Supply `--paste` or `--username/--password-stdin` to skip the wizard entirely.
 - `push` with zero positional args launches an interactive daemon-image picker when stderr is a TTY and `--agent` is off. Under `--agent` or a non-TTY, zero-arg push returns a structured "interactive push requires a TTY" error.
 - `copy` prompts for overwrite confirmation when the destination tag already exists. Pass `--overwrite` / `--yes` to skip the prompt, or run under `--agent` to force the caller to make the decision (agent mode returns `CONFIRMATION_REQUIRED` rather than auto-confirming).
 - `delete` with zero positional args on a TTY launches the interactive repo picker + sub-menu + multi-select image flow (Space to toggle, Ctrl+A to select all, Enter to confirm). With a positional target, it shows a one-shot confirmation dialog; `--yes` skips it. Under `--agent`, `--yes` is mandatory — missing it returns `CONFIRMATION_REQUIRED`.

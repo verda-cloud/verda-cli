@@ -17,6 +17,7 @@ package registry
 import (
 	"context"
 	"io"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -34,10 +35,14 @@ func TestBuildConfigureFlow_Structure(t *testing.T) {
 	if flow == nil {
 		t.Fatal("buildConfigureFlow returned nil")
 	}
-	if len(flow.Steps) != 3 {
-		t.Fatalf("flow has %d steps, want 3", len(flow.Steps))
+	if len(flow.Steps) != 8 {
+		t.Fatalf("flow has %d steps, want 8", len(flow.Steps))
 	}
-	wantNames := []string{"paste", "expires-in", "docker-config"}
+	wantNames := []string{
+		"profile", "new-profile-name", "input-mode",
+		"paste", "username", "secret",
+		"expires-in", "docker-config",
+	}
 	for i, want := range wantNames {
 		if flow.Steps[i].Name != want {
 			t.Errorf("step %d: got %q, want %q", i, flow.Steps[i].Name, want)
@@ -50,7 +55,7 @@ func TestBuildConfigureFlow_PasteValidator(t *testing.T) {
 
 	opts := &configureOptions{ExpiresInDays: defaultExpiresInDays}
 	flow := buildConfigureFlow(opts)
-	paste := flow.Steps[0]
+	paste := flow.Steps[3]
 
 	if paste.Validate == nil {
 		t.Fatal("paste step has no Validate func")
@@ -78,7 +83,7 @@ func TestBuildConfigureFlow_ExpiresInValidator(t *testing.T) {
 
 	opts := &configureOptions{ExpiresInDays: defaultExpiresInDays}
 	flow := buildConfigureFlow(opts)
-	step := flow.Steps[1]
+	step := flow.Steps[6]
 
 	if step.Validate == nil {
 		t.Fatal("expires-in step has no Validate func")
@@ -116,7 +121,7 @@ func TestBuildConfigureFlow_DockerConfigDefaultsYes(t *testing.T) {
 
 	opts := &configureOptions{ExpiresInDays: defaultExpiresInDays}
 	flow := buildConfigureFlow(opts)
-	step := flow.Steps[2]
+	step := flow.Steps[7]
 
 	if step.Default == nil {
 		t.Fatal("docker-config step has no Default func")
@@ -130,11 +135,13 @@ func TestBuildConfigureFlow_DockerConfigDefaultsYes(t *testing.T) {
 	}
 }
 
-// TestBuildConfigureFlow_HappyPath drives the full 3-step flow through the
-// wizard engine in test mode and asserts opts is populated as the flag-path
-// expects. Mirrors s3/wizard_test.go TestBuildConfigureFlowHappyPath.
+// TestBuildConfigureFlow_HappyPath drives the full flow through the wizard
+// engine in test mode and asserts opts is populated as the flag-path expects.
+// Mirrors s3/wizard_test.go TestBuildConfigureFlowHappyPath, including the
+// profile picker → new-name steps.
 func TestBuildConfigureFlow_HappyPath(t *testing.T) {
-	t.Parallel()
+	// No t.Parallel: t.Setenv isolates the credentials file the profile Loader reads.
+	t.Setenv("VERDA_REGISTRY_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "credentials"))
 
 	opts := &configureOptions{
 		Profile:       defaultProfileName,
@@ -144,6 +151,9 @@ func TestBuildConfigureFlow_HappyPath(t *testing.T) {
 	engine := wizard.NewEngine(nil, nil,
 		wizard.WithOutput(io.Discard),
 		wizard.WithTestResults(
+			wizard.SelectResult(0),       // profile: empty file → only "+ Create new profile…"
+			wizard.TextResult("staging"), // new profile name
+			wizard.SelectResult(0),       // input-mode: paste (index 0)
 			wizard.TextResult("docker login -u vcr-abc+cli -p s3cret vccr.io"), // paste
 			wizard.TextResult("7"),     // expires-in
 			wizard.ConfirmResult(true), // docker-config
@@ -154,6 +164,9 @@ func TestBuildConfigureFlow_HappyPath(t *testing.T) {
 		t.Fatalf("wizard Run failed: %v", err)
 	}
 
+	if opts.Profile != "staging" {
+		t.Errorf("Profile = %q, want %q", opts.Profile, "staging")
+	}
 	if opts.Username != "vcr-abc+cli" {
 		t.Errorf("Username = %q, want %q", opts.Username, "vcr-abc+cli")
 	}
@@ -168,5 +181,76 @@ func TestBuildConfigureFlow_HappyPath(t *testing.T) {
 	}
 	if !opts.DockerConfig {
 		t.Error("DockerConfig = false, want true")
+	}
+}
+
+// TestBuildConfigureFlow_PresetProfileSkipsPicker verifies a --profile flag
+// (opts.Profile != default) pre-sets the profile and skips both the picker and
+// the new-name step, so only paste / expires-in / docker-config prompt.
+func TestBuildConfigureFlow_PresetProfileSkipsPicker(t *testing.T) {
+	// No t.Parallel: t.Setenv isolates the credentials file the profile Loader reads.
+	t.Setenv("VERDA_REGISTRY_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "credentials"))
+
+	opts := &configureOptions{Profile: "prod", ExpiresInDays: defaultExpiresInDays}
+	flow := buildConfigureFlow(opts)
+	engine := wizard.NewEngine(nil, nil,
+		wizard.WithOutput(io.Discard),
+		wizard.WithTestResults(
+			wizard.SelectResult(0), // input-mode: paste
+			wizard.TextResult("docker login -u vcr-abc+cli -p s3cret vccr.io"), // paste
+			wizard.TextResult("0"),      // expires-in (no expiry)
+			wizard.ConfirmResult(false), // docker-config
+		),
+	)
+
+	if err := engine.Run(context.Background(), flow); err != nil {
+		t.Fatalf("wizard Run failed: %v", err)
+	}
+	if opts.Profile != "prod" {
+		t.Errorf("Profile = %q, want %q (preset, picker skipped)", opts.Profile, "prod")
+	}
+	if opts.Username != "vcr-abc+cli" {
+		t.Errorf("Username = %q, want %q", opts.Username, "vcr-abc+cli")
+	}
+}
+
+// TestBuildConfigureFlow_ManualEntry drives the "Enter credential name +
+// secret" path: input-mode=manual skips the paste step and prompts for the
+// credential name and secret instead. The endpoint is NOT prompted — it's
+// derived later in resolveRegistryInputs — so opts.Paste stays empty and the
+// name/secret land on opts.
+func TestBuildConfigureFlow_ManualEntry(t *testing.T) {
+	// No t.Parallel: t.Setenv isolates the credentials file the profile Loader reads.
+	t.Setenv("VERDA_REGISTRY_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "credentials"))
+
+	opts := &configureOptions{Profile: defaultProfileName, ExpiresInDays: defaultExpiresInDays}
+	flow := buildConfigureFlow(opts)
+	engine := wizard.NewEngine(nil, nil,
+		wizard.WithOutput(io.Discard),
+		wizard.WithTestResults(
+			wizard.SelectResult(0),           // profile: create new
+			wizard.TextResult("prod"),        // new profile name
+			wizard.SelectResult(1),           // input-mode: manual (index 1)
+			wizard.TextResult("vcr-abc+cli"), // username
+			wizard.TextResult("s3cret"),      // secret
+			wizard.TextResult("30"),          // expires-in
+			wizard.ConfirmResult(false),      // docker-config
+		),
+	)
+
+	if err := engine.Run(context.Background(), flow); err != nil {
+		t.Fatalf("wizard Run failed: %v", err)
+	}
+	if opts.Profile != "prod" {
+		t.Errorf("Profile = %q, want %q", opts.Profile, "prod")
+	}
+	if opts.Username != "vcr-abc+cli" {
+		t.Errorf("Username = %q, want %q", opts.Username, "vcr-abc+cli")
+	}
+	if opts.Secret != "s3cret" {
+		t.Errorf("Secret = %q, want %q", opts.Secret, "s3cret")
+	}
+	if opts.Paste != "" {
+		t.Errorf("Paste = %q, want empty (manual mode skips the paste step)", opts.Paste)
 	}
 }
