@@ -599,7 +599,7 @@ func TestConfigure_DockerConfigFlagWritesDockerConfig(t *testing.T) {
 		t.Fatalf("run: %v", err)
 	}
 
-	data, err := os.ReadFile(filepath.Join(dockerDir, "config.json"))
+	data, err := os.ReadFile(filepath.Join(dockerDir, "config.json")) //nolint:gosec // G304: reads from the test's own temp dir
 	if err != nil {
 		t.Fatalf("docker config not written: %v", err)
 	}
