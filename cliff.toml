@@ -32,4 +32,5 @@ topo_order = false
 sort_commits = "oldest"
 commit_parsers = [
     { message = "^chore\\(release\\)", skip = true },
+    { message = "^chore\\(changelog\\)", skip = true },
 ]

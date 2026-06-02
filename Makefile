@@ -1,6 +1,6 @@
 OUTPUT_DIR ?= bin
 
-.PHONY: all build clean lint lint.fix security test test.integration test-s3-integration fmt changelog hooks.install pre-commit help
+.PHONY: all build clean lint lint.fix security test test.integration test-s3-integration fmt changelog changelog.unreleased hooks.install pre-commit help
 
 ## Build -------------------------------------------------------------------
 
@@ -48,6 +48,9 @@ ifndef VERSION
 	$(error VERSION is required. Usage: make changelog VERSION=v1.0.0)
 endif
 	@git-cliff --tag $(VERSION) -o CHANGELOG.md
+
+changelog.unreleased: ## Regenerate CHANGELOG.md with pending commits under [Unreleased]
+	@git-cliff -o CHANGELOG.md
 
 ## Git Hooks ---------------------------------------------------------------
 

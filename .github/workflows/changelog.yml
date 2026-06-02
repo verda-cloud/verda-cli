@@ -1,0 +1,45 @@
+name: Update Changelog
+
+# Keeps the [Unreleased] section of CHANGELOG.md current as work lands on main.
+# A release (release.yml) later promotes [Unreleased] -> [vX.Y.Z] via --tag.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+# Serialize so two quick merges can't race on pushing CHANGELOG.md back to main.
+concurrency:
+  group: changelog-main
+  cancel-in-progress: false
+
+jobs:
+  changelog:
+    name: Update Changelog
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          token: ${{ secrets.RELEASE_TOKEN }}
+          fetch-depth: 0
+
+      - name: Install git-cliff
+        run: pip install git-cliff
+
+      - name: Regenerate unreleased changelog
+        run: make changelog.unreleased
+
+      - name: Commit if changed
+        run: |
+          if git diff --quiet -- CHANGELOG.md; then
+            echo "CHANGELOG.md already up to date"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md
+          # [skip ci] stops this push from re-triggering the workflow (loop guard).
+          git commit -m "chore(changelog): update unreleased [skip ci]"
+          git push origin HEAD:main
