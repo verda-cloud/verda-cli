@@ -162,19 +162,63 @@ Use `cmdutil.IsPromptInterrupt(err)` (Ctrl+C) and `cmdutil.IsPromptBack(err)`
 (Esc) when the two must differ — e.g. a "Back to list / Exit" gate, or a wizard
 where Esc steps back one prompt while Ctrl+C exits the whole flow.
 
-**Multi-step wizards.** Model each prompt as its own step walked by an index
-into a steps slice: Esc decrements the index (–1 on the first step ends the
-flow = exit), Ctrl+C exits, success advances. Print a `Step N of M · Title`
-header and a one-time intro banner so the user knows the plan. See
-`cmd/s3/move_wizard.go` (`runMoveWizard` + `classifyNav`/`navIdx`) for the
-reference pattern.
+**Multi-step wizards — ALWAYS use the shared wizard engine.** Do NOT hand-roll a
+step loop. Every multi-step interactive flow goes through
+`github.com/verda-cloud/verdagostack/pkg/tui/wizard` so they all share one look
+(progress bar + hint bar), Esc=back, and Ctrl+C handling. Reference flows:
+`cmd/s3/wizard.go` (`buildConfigureFlow`), `cmd/s3/move_wizard.go`
+(`buildMoveFlow`), `cmd/vm/wizard.go`.
 
-> **Pitfall that breaks Esc=back:** a shared picker that swallows cancellation
-> into `("", nil)` (i.e. `if IsPromptCancel(err) { return "", nil }`) is fine for
-> a top-level command, but inside a wizard it destroys back-navigation — the
-> wizard can no longer tell Esc (go back) from Ctrl+C (exit) and Esc ends up
-> exiting the whole flow. Wizard-facing pickers MUST return the **raw** prompter
-> error so the step loop can classify it.
+Shape of a flow:
+
+```go
+engine := wizard.NewEngine(f.Prompter(), f.Status(),
+    wizard.WithOutput(ioStreams.ErrOut), wizard.WithExitConfirmation())
+if err := engine.Run(ctx, flow); err != nil {
+    return err // Ctrl+C returns an error here — propagate it, like configure/vm/mv
+}
+// Final action (save / preview+confirm / execute) happens AFTER Run — the engine
+// has no confirm prompt. See finalizeMove / configure's RunE.
+```
+
+```go
+flow := &wizard.Flow{
+    Name: "s3-move",
+    Layout: []wizard.ViewDef{
+        {ID: "progress", View: wizard.NewProgressView(wizard.WithProgressPercent())},
+        {ID: "hints", View: wizard.NewHintBarView(wizard.WithHintStyle(bubbletea.HintStyle()))},
+    },
+    Steps: []wizard.Step{ /* ... */ },
+}
+```
+
+Per-step rules:
+- Each `Step` binds to a variable via `Setter`/`Value`/`IsSet`/`Resetter`. `IsSet()==true` (e.g. a `--flag` was passed) makes the engine **skip** the step and propagate `Value()` into the collected map.
+- `SelectPrompt` with a `Loader` for dynamic lists. A Loader may read earlier steps from `store.Collected()["<name>"]`; declare `DependsOn: []string{"<name>"}` so it re-runs when that input changes (e.g. mv's source-object list depends on the chosen source bucket).
+- `Default(collected)` is applied **only for non-required empty values**. A `Required` step re-prompts on empty and never sees the default — so to pre-fill an optional value (e.g. dest key defaults to source key) make the step `Required: false` + `Default`.
+
+> **Gotcha that bit us twice — conditional steps + `Resetter`:** a step skipped via
+> `ShouldSkip` has its `Resetter` **called by the engine**. If that step shares a
+> bound variable with another step — the "+ Create new X…" pattern, where a Select
+> writes the existing choice and a conditional name step writes a new one into the
+> *same* variable — its `Resetter` MUST be a **no-op**, or skipping it (an existing
+> choice was picked) clobbers the selection back to the default. The owning Select
+> step keeps the real `Resetter`.
+
+> **"+ Create new…" pattern:** the Select offers a sentinel choice
+> (`"\x00new-…"` — a NUL byte can't be a real bucket/profile name, so no collision).
+> The Select's `Setter` must **guard against writing the sentinel** into the bound
+> variable (`if s != newSentinel { x = s }`); a separate `ShouldSkip`-gated
+> `TextInputPrompt` step collects the new name. See `configureStepProfile` +
+> `configureStepNewProfileName`, and `moveStepDestBucket` + `moveStepNewDestBucket`.
+
+**Testing wizards:** drive the flow with a test engine, not the tuitest prompter
+mock (the engine builds its own prompt models). Use
+`wizard.NewEngine(nil, nil, wizard.WithOutput(io.Discard), wizard.WithTestResults(
+wizard.SelectResult(i), wizard.TextResult(s), …))` and assert the bound state
+after `engine.Run`. Test the post-`Run` action (save/confirm/execute) separately
+with the tuitest prompter. See `TestBuildConfigureFlowHappyPath`,
+`TestBuildMoveFlow_CollectsSelections`, `TestFinalizeMove_S3ToS3`.
 
 ### 7. Output Conventions
 
