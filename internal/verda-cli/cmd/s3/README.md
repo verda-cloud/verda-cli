@@ -19,17 +19,21 @@ AWS-CLI-style object storage commands for Verda's S3-compatible endpoint. Uses a
 
 ## Configuration
 
-Interactive wizard (prompts for access key, secret key, endpoint, region):
+First create an access key in the Verda dashboard: **log in → select your
+project → Project management → Credentials → Object Storage Access Keys.**
+
+Interactive wizard — the endpoint and region come pre-filled with defaults
+(`https://objects.fin-03.verda.storage`, `us-east-1`), so you normally just pick
+a profile and paste the access key + secret:
 ```bash
 verda s3 configure
 ```
 
-Non-interactive:
+Non-interactive (endpoint defaults if omitted; pass `--endpoint` for another region):
 ```bash
 verda s3 configure \
   --access-key AKIA... \
-  --secret-key ... \
-  --endpoint https://objects.lab.verda.storage
+  --secret-key ...
 ```
 
 Show the active configuration (no secrets are printed):
@@ -229,7 +233,7 @@ omitted target returns the command help (or a structured error in `--agent`).
 
 Notes:
 
-- **`configure` wizard**: triggers when any of `--access-key`, `--secret-key`, `--endpoint` is missing. Supply all three (plus optionally `--profile`, `--region`, `--credentials-file`) to skip the wizard entirely.
+- **`configure` wizard**: triggers when `--access-key` or `--secret-key` is missing. Endpoint and region default (so `configure --access-key X --secret-key Y` is fully non-interactive); pass `--endpoint`/`--region`/`--profile`/`--credentials-file` to override.
 - **Destructive prompts** (`rb`, `rm`): an interactive `prompter.Confirm()` with a red warning + preview runs before deletion unless `--yes` is passed — in both the flag and TUI paths. `cp`, `mv`, `sync`, `sync --delete` do not prompt (AWS convention — the verb itself is the commitment), though the interactive `mv` wizard adds a final confirm.
 - **`mv` interactive scope**: the wizard covers S3→S3 moves/renames only; local↔S3 moves still require both explicit arguments (a local path can't be picked in the TUI).
 - **`rm` interactive scope**: multi-select is scoped to one folder level; drill into subfolders to delete within them, or use `rm <prefix> --recursive` for bulk deletes across a whole prefix.
@@ -268,10 +272,13 @@ Business logic:
 
 Wizard flow (`configure`):
 
-1. Profile name (default `default`)
-2. S3 access key ID (masked)
-3. S3 secret access key (password prompt)
-4. S3 endpoint URL (must start with `http://` or `https://`)
-5. S3 region (default `us-east-1`)
+1. Profile — **pick an existing profile** (each tagged "S3 configured" / "no S3 credentials yet") **or "+ Create new profile…"**. The selection defaults to the active profile (`--profile` / `VERDA_PROFILE` / `verda auth use`).
+2. New profile name — only when "Create new" was chosen.
+3. S3 access key ID
+4. S3 secret access key (password prompt)
+5. S3 endpoint URL (pre-filled with `https://objects.fin-03.verda.storage`; must start with `http://`/`https://`)
+6. S3 region (default `us-east-1`)
 
-All five steps are skipped individually when the corresponding flag is already set — so `verda s3 configure --access-key X --endpoint Y` only prompts for the secret and region.
+Steps are skipped individually when the corresponding flag is already set — so `verda s3 configure --access-key X --endpoint Y` only prompts for the secret and region, and `--profile staging` skips the profile picker entirely (targeting `[staging]`).
+
+> Note: `configure` writes to the profile you pick/name here; it does **not** auto-follow the active profile the way the read commands (`ls`/`cp`/…) do. The picker defaulting to the active profile keeps the two aligned, but if you create credentials for a non-active profile, pass `--profile` to the read commands or `verda auth use <name>` to switch.

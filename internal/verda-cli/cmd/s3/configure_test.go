@@ -15,12 +15,43 @@
 package s3
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"gopkg.in/ini.v1"
+
+	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
+
+// TestConfigureFlagMode_DefaultsEndpointAndRegion verifies that supplying only
+// the keys runs non-interactively and fills in the default endpoint + region.
+func TestConfigureFlagMode_DefaultsEndpointAndRegion(t *testing.T) {
+	// No t.Parallel: t.Setenv.
+	withTempVerdaHome(t)
+	path := filepath.Join(t.TempDir(), "credentials")
+	t.Setenv("VERDA_SHARED_CREDENTIALS_FILE", path)
+
+	f := cmdutil.NewTestFactory(nil)
+	cmd := NewCmdConfigure(f, cmdutil.IOStreams{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"--access-key", "AKIA", "--secret-key", "secret"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("configure: %v", err)
+	}
+
+	cfg, err := ini.Load(path)
+	if err != nil {
+		t.Fatalf("load credentials: %v", err)
+	}
+	sec := cfg.Section("default")
+	if got := sec.Key("verda_s3_endpoint").String(); got != DefaultEndpoint {
+		t.Errorf("endpoint = %q, want default %q", got, DefaultEndpoint)
+	}
+	if got := sec.Key("verda_s3_region").String(); got != defaultRegion {
+		t.Errorf("region = %q, want default %q", got, defaultRegion)
+	}
+}
 
 func TestResolveCredentialsFileUsesEnv(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "credentials")
@@ -44,6 +75,44 @@ func TestResolveCredentialsFileExplicit(t *testing.T) {
 	}
 	if got != "/custom/path" {
 		t.Fatalf("got %q, want %q", got, "/custom/path")
+	}
+}
+
+func TestProfileChoices(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "credentials")
+	content := `[default]
+verda_s3_access_key = AKIA
+verda_s3_secret_key = secret
+verda_s3_endpoint = https://objects.example.storage
+
+[production]
+verda_client_id = api-only
+`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	choices := profileChoices(path)
+	if len(choices) != 3 {
+		t.Fatalf("choices = %d, want 3 (default, production, create-new): %+v", len(choices), choices)
+	}
+	if choices[0].Value != "default" || choices[0].Description != "S3 configured" {
+		t.Errorf("choice[0] = %+v, want default / S3 configured", choices[0])
+	}
+	if choices[1].Value != "production" || choices[1].Description != "no S3 credentials yet" {
+		t.Errorf("choice[1] = %+v, want production / no S3 credentials yet", choices[1])
+	}
+	if choices[2].Value != newProfileSentinel {
+		t.Errorf("last choice = %+v, want the create-new sentinel", choices[2])
+	}
+}
+
+func TestProfileChoices_NoFile(t *testing.T) {
+	t.Parallel()
+	choices := profileChoices(filepath.Join(t.TempDir(), "does-not-exist"))
+	if len(choices) != 1 || choices[0].Value != newProfileSentinel {
+		t.Errorf("with no credentials file, want only the create-new choice, got %+v", choices)
 	}
 }
 

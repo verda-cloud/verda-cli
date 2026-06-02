@@ -51,6 +51,11 @@ func NewCmdConfigure(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Comm
 		Long: cmdutil.LongDesc(`
 			Save S3 object storage credentials to the shared credentials file.
 
+			Create an access key first in the Verda dashboard: log in, select your
+			project, then open Project management → Credentials → Object Storage
+			Access Keys. The endpoint and region are pre-filled with sensible
+			defaults, so you usually only need to paste the access key and secret.
+
 			S3 credentials are stored alongside API credentials using verda_s3_
 			prefixed keys. Profile switching (--profile) works across both.
 
@@ -76,7 +81,10 @@ func NewCmdConfigure(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Comm
 		`),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if strings.TrimSpace(opts.AccessKey) == "" || strings.TrimSpace(opts.SecretKey) == "" || strings.TrimSpace(opts.Endpoint) == "" {
+			// Only the keys gate the wizard — endpoint/region have defaults, so
+			// `configure --access-key X --secret-key Y` is fully non-interactive.
+			if strings.TrimSpace(opts.AccessKey) == "" || strings.TrimSpace(opts.SecretKey) == "" {
+				printConfigureIntro(ioStreams)
 				flow := buildConfigureFlow(opts)
 				engine := wizard.NewEngine(f.Prompter(), f.Status(), wizard.WithOutput(ioStreams.ErrOut), wizard.WithExitConfirmation())
 				if err := engine.Run(cmd.Context(), flow); err != nil {
@@ -90,8 +98,9 @@ func NewCmdConfigure(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Comm
 			if strings.TrimSpace(opts.SecretKey) == "" {
 				return cmdutil.UsageErrorf(cmd, "--secret-key is required")
 			}
+			// Endpoint defaults when omitted (e.g. flag mode without --endpoint).
 			if strings.TrimSpace(opts.Endpoint) == "" {
-				return cmdutil.UsageErrorf(cmd, "--endpoint is required")
+				opts.Endpoint = DefaultEndpoint
 			}
 
 			path, err := resolveCredentialsFile(opts.CredentialsFile)
@@ -146,4 +155,12 @@ func NewCmdConfigure(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Comm
 	flags.StringVar(&opts.Region, "region", opts.Region, "S3 region")
 
 	return cmd
+}
+
+// printConfigureIntro reminds the user where to obtain the access key before the
+// wizard prompts for it.
+func printConfigureIntro(ioStreams cmdutil.IOStreams) {
+	_, _ = fmt.Fprintln(ioStreams.ErrOut, "\n  Create an Object Storage Access Key in the Verda dashboard first:")
+	_, _ = fmt.Fprintln(ioStreams.ErrOut, "    log in → select your project → Project management → Credentials → Object Storage Access Keys")
+	_, _ = fmt.Fprintln(ioStreams.ErrOut)
 }
