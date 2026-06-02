@@ -28,28 +28,28 @@ fi
 
 # deb (Ubuntu)
 run_test "deb/ubuntu" docker run --rm -v "${PWD}/${DIST_DIR}:/dist:ro" ubuntu:24.04 sh -c '
-  dpkg -i /dist/verda_*_linux_amd64.deb && verda version
+  dpkg -i /dist/verda_*_linux_amd64.deb && verda --version
 '
 
 # rpm (Fedora)
 run_test "rpm/fedora" docker run --rm -v "${PWD}/${DIST_DIR}:/dist:ro" fedora:41 sh -c '
-  rpm -i /dist/verda_*_linux_amd64.rpm && verda version
+  rpm -i /dist/verda_*_linux_amd64.rpm && verda --version
 '
 
 # apk (Alpine)
 run_test "apk/alpine" docker run --rm -v "${PWD}/${DIST_DIR}:/dist:ro" alpine:3.20 sh -c '
-  apk add --allow-untrusted /dist/verda_*_linux_amd64.apk && verda version
+  apk add --allow-untrusted /dist/verda_*_linux_amd64.apk && verda --version
 '
 
 # tar.gz binary
 run_test "tar.gz/binary" docker run --rm -v "${PWD}/${DIST_DIR}:/dist:ro" ubuntu:24.04 sh -c '
-  tar xzf /dist/verda_*_linux_amd64.tar.gz -C /usr/local/bin && verda version
+  tar xzf /dist/verda_*_linux_amd64.tar.gz -C /usr/local/bin && verda --version
 '
 
 # Homebrew (only works after a real release)
 if [ "${TEST_HOMEBREW:-}" = "1" ]; then
   run_test "homebrew" docker run --rm homebrew/brew sh -c '
-    brew tap verda-cloud/tap && brew install verda && verda version
+    brew tap verda-cloud/tap && brew install verda && verda --version
   '
 fi
 
