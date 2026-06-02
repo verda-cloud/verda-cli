@@ -1,6 +1,10 @@
 # Changelog
 
 
+## [v1.7.1] - 2026-06-02
+- [`24c701a`] Fix(docs): use `verda --version`, not the non-existent `verda version`
+- [`a577165`] Fix(vm): restore hint bar on wizard's self-prompting pickers
+
 ## [v1.7.0] - 2026-06-02
 - [`312698c`] Feat/s3 commands
 - [`216f8d8`] Feat/container registry command
