@@ -49,8 +49,11 @@ jobs:
         run: |
           # Full changelog for CHANGELOG.md (committed to repo)
           make changelog VERSION=${{ github.event.inputs.version }}
-          # Release notes for this version only (passed to goreleaser)
-          git-cliff --tag ${{ github.event.inputs.version }} --latest --strip header -o RELEASE_NOTES.md
+          # Release notes for this version only (passed to goreleaser).
+          # --unreleased (not --latest): the tag is created in a later step, so these
+          # commits aren't tagged yet. --latest would select the previous tag (v1.7.0),
+          # which is the bug this fixes. --tag labels the unreleased section with VERSION.
+          git-cliff --unreleased --tag ${{ github.event.inputs.version }} --strip header -o RELEASE_NOTES.md
 
       - name: Commit changelog and tag release
         run: |
