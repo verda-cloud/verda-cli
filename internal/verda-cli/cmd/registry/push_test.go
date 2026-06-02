@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -30,6 +32,7 @@ import (
 
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/options"
+	tuitest "github.com/verda-cloud/verdagostack/pkg/tui/testing"
 )
 
 // ---------- push test helpers ----------
@@ -632,8 +635,9 @@ func TestPush_InteractiveMode_NonTTYErrors(t *testing.T) {
 	}
 }
 
-// TestPush_InteractiveMode_NoDaemon: zero args + TTY + daemon ping
-// fails → registry_no_image_source error. Picker never invoked.
+// TestPush_InteractiveMode_NoDaemon: zero args + TTY + daemon ping fails →
+// instead of erroring, push offers the file-source fallback. Canceling it exits
+// cleanly (no error, nothing pushed) and the daemon image picker never runs.
 func TestPush_InteractiveMode_NoDaemon(t *testing.T) {
 	writeLsCredsFile(t, healthyPushCredsBody("vccr.io", "proj"))
 
@@ -649,22 +653,12 @@ func TestPush_InteractiveMode_NoDaemon(t *testing.T) {
 		return nil, false
 	})
 
-	f := cmdutil.NewTestFactory(nil)
+	// Fallback source picker → "Cancel" (index 2): clean exit, nothing pushed.
+	f := cmdutil.NewTestFactory(tuitest.New().AddSelect(2))
 	streams, _, _ := newLsStreams()
 
-	err := runPushForTest(t, f, streams)
-	if err == nil {
-		t.Fatal("expected registry_no_image_source error when daemon unreachable")
-	}
-	var ae *cmdutil.AgentError
-	if !errors.As(err, &ae) {
-		t.Fatalf("expected *AgentError, got %T (%v)", err, err)
-	}
-	if ae.Code != kindRegistryNoImageSource {
-		t.Errorf("Code = %q, want %q", ae.Code, kindRegistryNoImageSource)
-	}
-	if !strings.Contains(ae.Message, "Docker daemon not reachable") {
-		t.Errorf("expected friendly daemon message, got: %v", ae.Message)
+	if err := runPushForTest(t, f, streams); err != nil {
+		t.Fatalf("canceling the file-source fallback should exit cleanly, got: %v", err)
 	}
 	if daemon.pingHits == 0 {
 		t.Error("expected Ping to be attempted")
@@ -673,7 +667,85 @@ func TestPush_InteractiveMode_NoDaemon(t *testing.T) {
 		t.Errorf("List should NOT be called when Ping fails, got %d call(s)", daemon.listHits)
 	}
 	if pickerHits != 0 {
-		t.Errorf("picker should NOT be invoked when daemon unreachable, got %d call(s)", pickerHits)
+		t.Errorf("daemon image picker should NOT run when daemon unreachable, got %d call(s)", pickerHits)
+	}
+	if len(fake.loadCalls) != 0 {
+		t.Errorf("nothing should be loaded/pushed on cancel, got %+v", fake.loadCalls)
+	}
+}
+
+// TestPushFileSourceFallback_Tarball drives the no-daemon fallback to
+// completion: pick "tarball", give an existing path, accept the derived repo,
+// type a tag. It sets opts.Source/Repo/Tag and returns the path as the ref.
+func TestPushFileSourceFallback_Tarball(t *testing.T) {
+	dir := t.TempDir()
+	tarPath := filepath.Join(dir, "my-app.tar")
+	if err := os.WriteFile(tarPath, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	mock := tuitest.New().
+		AddSelect(1).          // Image tarball
+		AddTextInput(tarPath). // path
+		AddTextInput("").      // repo: accept the derived default
+		AddTextInput("v9")     // tag
+	f := cmdutil.NewTestFactory(mock)
+	streams, _, _ := newLsStreams()
+	opts := &pushOptions{Source: string(SourceAuto)}
+
+	refs, proceed, err := pushFileSourceFallback(context.Background(), f, streams, opts)
+	if err != nil || !proceed {
+		t.Fatalf("fallback = (%v, %v, %v), want (refs, true, nil)", refs, proceed, err)
+	}
+	if len(refs) != 1 || refs[0] != tarPath {
+		t.Errorf("refs = %v, want [%s]", refs, tarPath)
+	}
+	if opts.Source != string(SourceTar) {
+		t.Errorf("opts.Source = %q, want %q", opts.Source, SourceTar)
+	}
+	if opts.Repo != "my-app" {
+		t.Errorf("opts.Repo = %q, want my-app (derived from basename)", opts.Repo)
+	}
+	if opts.Tag != "v9" {
+		t.Errorf("opts.Tag = %q, want v9", opts.Tag)
+	}
+}
+
+// TestDefaultRepoFromPath: basename with archive extensions stripped, and the
+// "." / ".." sentinels (from ".", "/", "../") map to "" so the repo prompt
+// re-asks instead of pre-filling an unusable name.
+func TestDefaultRepoFromPath(t *testing.T) {
+	t.Parallel()
+	cases := map[string]string{
+		"./build/my-app.tar": "my-app",
+		"my-app.tar.gz":      "my-app",
+		"layout/":            "layout",
+		"./my-app":           "my-app",
+		".":                  "",
+		"/":                  "",
+		"../":                "",
+		"..":                 "",
+	}
+	for in, want := range cases {
+		if got := defaultRepoFromPath(in); got != want {
+			t.Errorf("defaultRepoFromPath(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// TestPushFileSourceFallback_Cancel: choosing "Cancel" returns (nil, false,
+// nil) and leaves opts untouched.
+func TestPushFileSourceFallback_Cancel(t *testing.T) {
+	f := cmdutil.NewTestFactory(tuitest.New().AddSelect(2)) // Cancel
+	streams, _, _ := newLsStreams()
+	opts := &pushOptions{Source: string(SourceAuto)}
+
+	refs, proceed, err := pushFileSourceFallback(context.Background(), f, streams, opts)
+	if refs != nil || proceed || err != nil {
+		t.Fatalf("fallback = (%v, %v, %v), want (nil, false, nil)", refs, proceed, err)
+	}
+	if opts.Source != string(SourceAuto) {
+		t.Errorf("opts.Source = %q, want unchanged (auto)", opts.Source)
 	}
 }
 

@@ -20,22 +20,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func TestRegistryEnabled_EnvVar(t *testing.T) {
-	for _, tc := range []struct {
-		val  string
-		want bool
-	}{
-		{"1", true}, {"true", true}, {"0", false}, {"", false}, {"yes", false},
-	} {
-		t.Run(tc.val, func(t *testing.T) {
-			t.Setenv("VERDA_REGISTRY_ENABLED", tc.val)
-			if got := registryEnabled(); got != tc.want {
-				t.Fatalf("registryEnabled()=%v, want %v", got, tc.want)
-			}
-		})
-	}
-}
-
 func TestSkipCredentialResolution_RegistryChildren(t *testing.T) {
 	parent := &cobra.Command{Use: "registry"}
 	child := &cobra.Command{Use: "configure"}

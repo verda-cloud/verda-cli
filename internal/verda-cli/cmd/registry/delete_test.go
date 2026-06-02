@@ -458,6 +458,40 @@ func TestDelete_Interactive_ImageBatch(t *testing.T) {
 	}
 }
 
+// TestDelete_Interactive_AccessDeniedExits: when the image-delete flow hits a
+// permission wall (Harbor 403), the interactive loop surfaces the actionable
+// error once and exits, instead of bouncing the user back to the repo picker
+// to retry-and-re-fail.
+func TestDelete_Interactive_AccessDeniedExits(t *testing.T) {
+	writeLsCredsFile(t, validLsCredsBody("vccr.io", "abc"))
+	lister := &fakeLister{
+		repos: sampleRepos(),
+		artifactsErr: &cmdutil.AgentError{
+			Code:    kindRegistryAccessDenied,
+			Message: "denied",
+		},
+	}
+	withFakeHarborLister(t, lister)
+	withForcedTTY(t, true)
+
+	// pick repo 0 -> menu "Delete image(s)" (0) -> ListArtifacts 403 -> exit.
+	mock := tuitest.New().AddSelect(0).AddSelect(0)
+	f := cmdutil.NewTestFactory(mock)
+	streams, _, _ := newLsStreams()
+
+	err := runDeleteForTest(t, f, streams)
+	if err == nil {
+		t.Fatal("expected access_denied to propagate and exit, got nil")
+	}
+	var ae *cmdutil.AgentError
+	if !errors.As(err, &ae) || ae.Code != kindRegistryAccessDenied {
+		t.Errorf("error = %v, want registry_access_denied", err)
+	}
+	if len(lister.deletedArtifacts) != 0 {
+		t.Errorf("nothing should have been deleted, got %+v", lister.deletedArtifacts)
+	}
+}
+
 // TestDelete_Interactive_ImageBatch_SelectAll mirrors the user pressing
 // Ctrl+A inside the MultiSelect: every artifact is queued for delete in
 // a single batch. tuitest's AddMultiSelect([]int{0,1,2,...}) emulates

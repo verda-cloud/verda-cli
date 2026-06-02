@@ -221,6 +221,33 @@ func TestCopy_SrcAuthAnonymous(t *testing.T) {
 	}
 }
 
+// TestCopy_SrcAuthBasic_MissingUsernameDoesNotDrainStdin: --src-auth basic
+// without --src-username errors on the username BEFORE reading stdin, so a
+// piped one-shot secret isn't consumed (the user can re-run without re-piping).
+func TestCopy_SrcAuthBasic_MissingUsernameDoesNotDrainStdin(t *testing.T) {
+	writeCopyCredsFile(t, "vccr.io", "proj")
+
+	in := bytes.NewBufferString("s3cret-token\n")
+	streams := cmdutil.IOStreams{In: in, Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}
+
+	f := cmdutil.NewTestFactory(nil)
+	err := runCopyForTest(t, f, streams,
+		"docker.io/library/nginx:1.25",
+		"--src-auth", "basic",
+		"--src-password-stdin", // username omitted on purpose
+	)
+	if err == nil {
+		t.Fatal("expected an error when --src-username is missing")
+	}
+	if !strings.Contains(err.Error(), "requires --src-username") {
+		t.Errorf("error = %v, want it to mention 'requires --src-username'", err)
+	}
+	// The secret on stdin must be intact — the username check fires first.
+	if in.Len() == 0 {
+		t.Error("stdin was drained before the --src-username check; the piped secret is lost")
+	}
+}
+
 // TestCopy_SrcAuthBasic: --src-auth basic + --src-username + secret on
 // stdin builds an authn.AuthConfig with those values and uses it on the
 // source side. We verify this by pointing the source at a tiny server

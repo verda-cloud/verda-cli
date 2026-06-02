@@ -135,14 +135,12 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) (*cobra.Command, *clioptions.Op
 		images.NewCmdImages(f, ioStreams),
 		instancetypes.NewCmdInstanceTypes(f, ioStreams),
 		locations.NewCmdLocations(f, ioStreams),
+		registry.NewCmdRegistry(f, ioStreams),
 		s3.NewCmdS3(f, ioStreams),
 		sshkey.NewCmdSSHKey(f, ioStreams),
 		startupscript.NewCmdStartupScript(f, ioStreams),
 		template.NewCmdTemplate(f, ioStreams),
 		volume.NewCmdVolume(f, ioStreams),
-	}
-	if registryEnabled() {
-		resourceCmds = append(resourceCmds, registry.NewCmdRegistry(f, ioStreams))
 	}
 
 	groups := cmdutil.CommandGroups{
@@ -203,12 +201,6 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) (*cobra.Command, *clioptions.Op
 	cmdutil.SetUsageTemplate(cmd, groups)
 
 	return cmd, opts
-}
-
-// registryEnabled hides the registry subtree unless VERDA_REGISTRY_ENABLED is 1/true (pre-GA).
-func registryEnabled() bool {
-	v := os.Getenv("VERDA_REGISTRY_ENABLED")
-	return v == "1" || v == "true"
 }
 
 // serverlessEnabled gates the container + batchjob subtrees behind

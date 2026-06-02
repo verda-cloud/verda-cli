@@ -26,8 +26,20 @@ import (
 	"go.yaml.in/yaml/v3"
 
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
+	"github.com/verda-cloud/verda-cli/internal/verda-cli/options"
 	tuitest "github.com/verda-cloud/verdagostack/pkg/tui/testing"
 )
+
+// withFakeRegistryTags swaps clientBuilder so the ggcr Registry's Tags returns
+// the given function — used to drive the access-denied v2-tag fallback in ls.
+func withFakeRegistryTags(t *testing.T, tagsFn func(ctx context.Context, repo string) ([]string, error)) {
+	t.Helper()
+	orig := clientBuilder
+	clientBuilder = func(_ *options.RegistryCredentials, _ RetryConfig) Registry {
+		return &tagsOnlyRegistry{tagsFn: tagsFn}
+	}
+	t.Cleanup(func() { clientBuilder = orig })
+}
 
 // runLsForTest exercises the real flag-parsing path so tests match
 // production argv behavior.
@@ -297,9 +309,9 @@ func TestLs_Interactive_DrillsIntoArtifacts(t *testing.T) {
 	withFakeHarborLister(t, lister)
 	withForcedTTY(t, true)
 
-	// Two selects: pick the first repo (library/hello-world after sort),
-	// then pick Exit (index 2 == len(repos)).
-	mock := tuitest.New().AddSelect(0).AddSelect(2)
+	// repo 0 -> action "Get pull URL" (0) -> tag "latest" (0): prints the URL
+	// and exits (picking a tag is the terminal action).
+	mock := tuitest.New().AddSelect(0).AddSelect(0).AddSelect(0)
 	f := cmdutil.NewTestFactory(mock)
 	streams, out, errOut := newLsStreams()
 
@@ -311,18 +323,9 @@ func TestLs_Interactive_DrillsIntoArtifacts(t *testing.T) {
 			lister.gotArtifactRepo, "library/hello-world")
 	}
 
-	got := out.String()
-	for _, want := range []string{
-		"library/hello-world",
-		"DIGEST", "TAGS", "SIZE", "PUSHED", "PULLED",
-		"sha256:d1a8d0a4eeb6",
-		"latest",
-		"3.92 KiB",
-		"2026-04-22 13:40:05",
-	} {
-		if !strings.Contains(got, want) {
-			t.Errorf("drill-down output missing %q:\n%s", want, got)
-		}
+	// Selecting the "latest" tag prints its full, copy-pasteable pull ref.
+	if got := out.String(); !strings.Contains(got, "vccr.io/abc/library/hello-world:latest") {
+		t.Errorf("expected the tag's pull reference on stdout, got:\n%s", got)
 	}
 
 	// The header summary ("N repository(ies) in project X") goes to
@@ -333,9 +336,8 @@ func TestLs_Interactive_DrillsIntoArtifacts(t *testing.T) {
 	}
 }
 
-// TestLs_Interactive_UntaggedArtifact verifies the renderer surfaces
-// <untagged> for an artifact with an empty tag list (common for
-// dangling referrer manifests and SBOM artifacts).
+// TestLs_Interactive_UntaggedArtifact verifies an artifact with no tags is
+// pickable as an "<untagged>" row that resolves to an @digest pull reference.
 func TestLs_Interactive_UntaggedArtifact(t *testing.T) {
 	writeLsCredsFile(t, validLsCredsBody("vccr.io", "abc"))
 	lister := &fakeLister{
@@ -350,15 +352,18 @@ func TestLs_Interactive_UntaggedArtifact(t *testing.T) {
 	withFakeHarborLister(t, lister)
 	withForcedTTY(t, true)
 
-	mock := tuitest.New().AddSelect(0).AddSelect(1) // pick repo then Exit.
+	// repo 0 -> action "Get pull URL" (0) -> untagged row (0): prints the
+	// @digest reference and exits.
+	mock := tuitest.New().AddSelect(0).AddSelect(0).AddSelect(0)
 	f := cmdutil.NewTestFactory(mock)
 	streams, out, _ := newLsStreams()
 
 	if err := runLsForTest(t, f, streams); err != nil {
 		t.Fatalf("ls: %v", err)
 	}
-	if got := out.String(); !strings.Contains(got, "<untagged>") {
-		t.Errorf("expected <untagged> marker, got:\n%s", got)
+	// Untagged artifacts resolve to an @digest reference.
+	if got := out.String(); !strings.Contains(got, "vccr.io/abc/library/hello-world@sha256:deadbeef") {
+		t.Errorf("expected @digest pull reference, got:\n%s", got)
 	}
 }
 
@@ -388,6 +393,119 @@ func TestLs_Interactive_ArtifactsErrorStaysInLoop(t *testing.T) {
 	// No image table should have been printed for the failed repo.
 	if strings.Contains(out.String(), "DIGEST") {
 		t.Errorf("expected no artifact table on failure, got:\n%s", out.String())
+	}
+}
+
+// TestLs_Interactive_ArtifactsAccessDeniedShowsPullPath: when the credential
+// can list repositories but not view artifacts (Harbor 403), selecting a repo
+// shows its copy-pasteable pull reference (not the tag list, which is denied,
+// and not a confusing full-table dump) and keeps the picker open.
+func TestLs_Interactive_ArtifactsAccessDeniedShowsPullPath(t *testing.T) {
+	writeLsCredsFile(t, validLsCredsBody("vccr.io", "abc"))
+	lister := &fakeLister{
+		repos: sampleRepos(),
+		artifactsErr: &cmdutil.AgentError{
+			Code:    kindRegistryAccessDenied,
+			Message: "denied",
+		},
+	}
+	withFakeHarborLister(t, lister)
+	// v2 tag list is ALSO denied here → degrade to just the repo pull path.
+	withFakeRegistryTags(t, func(_ context.Context, _ string) ([]string, error) {
+		return nil, errors.New("denied")
+	})
+	withForcedTTY(t, true)
+
+	// Pick repo 0 -> denied -> pull path + Back/Exit gate -> choose Exit (idx 1).
+	mock := tuitest.New().AddSelect(0).AddSelect(1)
+	f := cmdutil.NewTestFactory(mock)
+	streams, out, errOut := newLsStreams()
+
+	if err := runLsForTest(t, f, streams); err != nil {
+		t.Fatalf("ls: %v", err)
+	}
+	if !strings.Contains(errOut.String(), "pull permission") {
+		t.Errorf("expected the tags-unavailable note on ErrOut, got:\n%s", errOut.String())
+	}
+	// The copy-pasteable repository pull reference is on stdout.
+	if !strings.Contains(out.String(), "vccr.io/abc/library/hello-world") {
+		t.Errorf("expected the repository pull path on stdout, got:\n%s", out.String())
+	}
+	// No artifact table (that's what was denied) and no full repo-list dump.
+	if strings.Contains(out.String(), "DIGEST") || strings.Contains(out.String(), "REPOSITORY") {
+		t.Errorf("should not have printed an artifact card or the repo table, got:\n%s", out.String())
+	}
+}
+
+// TestLs_Interactive_ArtifactsAccessDenied_FallsBackToV2Tags: when Harbor's
+// artifact API is denied but the Docker v2 tag list works, the drill-down still
+// offers the tag picker → pull URL via the v2 fallback.
+func TestLs_Interactive_ArtifactsAccessDenied_FallsBackToV2Tags(t *testing.T) {
+	writeLsCredsFile(t, validLsCredsBody("vccr.io", "abc"))
+	lister := &fakeLister{
+		repos: sampleRepos(),
+		artifactsErr: &cmdutil.AgentError{
+			Code:    kindRegistryAccessDenied,
+			Message: "denied",
+		},
+	}
+	withFakeHarborLister(t, lister)
+	withFakeRegistryTags(t, func(_ context.Context, _ string) ([]string, error) {
+		return []string{"v1", "v2"}, nil
+	})
+	withForcedTTY(t, true)
+
+	// repo 0 -> v2 fallback tag picker -> pick "v1" (0): prints URL and exits.
+	mock := tuitest.New().AddSelect(0).AddSelect(0)
+	f := cmdutil.NewTestFactory(mock)
+	streams, out, errOut := newLsStreams()
+
+	if err := runLsForTest(t, f, streams); err != nil {
+		t.Fatalf("ls: %v", err)
+	}
+	if !strings.Contains(errOut.String(), "registry API") {
+		t.Errorf("expected the v2-fallback note on ErrOut, got:\n%s", errOut.String())
+	}
+	if !strings.Contains(out.String(), "vccr.io/abc/library/hello-world:v1") {
+		t.Errorf("expected the v1 pull reference on stdout, got:\n%s", out.String())
+	}
+}
+
+// TestLs_Interactive_DeleteImagesFromActionMenu verifies the repo action menu
+// can delete images: picking "Delete image(s)" runs the same multi-select +
+// confirm flow as `verda registry delete`, recording the deletion.
+func TestLs_Interactive_DeleteImagesFromActionMenu(t *testing.T) {
+	writeLsCredsFile(t, validLsCredsBody("vccr.io", "abc"))
+	lister := &fakeLister{
+		repos: sampleRepos(),
+		artifactsByRepo: map[string][]ArtifactInfo{
+			"library/hello-world": sampleArtifacts(),
+		},
+	}
+	withFakeHarborLister(t, lister)
+	withForcedTTY(t, true)
+
+	// repo 0 -> action "Delete image(s)" (1) -> multi-select artifact 0 ->
+	// confirm -> action menu "Back" (2) -> repo "Exit" (2).
+	mock := tuitest.New().
+		AddSelect(0).
+		AddSelect(1).
+		AddMultiSelect([]int{0}).
+		AddConfirm(true).
+		AddSelect(2).
+		AddSelect(2)
+	f := cmdutil.NewTestFactory(mock)
+	streams, _, _ := newLsStreams()
+
+	if err := runLsForTest(t, f, streams); err != nil {
+		t.Fatalf("ls: %v", err)
+	}
+	if len(lister.deletedArtifacts) != 1 {
+		t.Fatalf("expected 1 deleted artifact, got %d (%+v)",
+			len(lister.deletedArtifacts), lister.deletedArtifacts)
+	}
+	if lister.deletedArtifacts[0].Repo != "library/hello-world" {
+		t.Errorf("deleted from repo %q, want library/hello-world", lister.deletedArtifacts[0].Repo)
 	}
 }
 

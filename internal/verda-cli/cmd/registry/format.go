@@ -87,6 +87,29 @@ func isStructuredFormat(format string) bool {
 // Harbor's web UI phrasing so the CLI and UI read the same.
 const untaggedLabel = "<untagged>"
 
+// Interactive-picker glyphs mirror the s3 browser's iconography so the two
+// command trees read the same in interactive mode: 📦 a repository, 📄 an
+// image (artifact). See cmd/s3/browse.go for the originating convention.
+const (
+	repoGlyph     = "📦"
+	artifactGlyph = "📄"
+)
+
+// registryBreadcrumb renders an interactive picker title as a path rooted at
+// the registry host, mirroring s3's `s3://bucket/key` breadcrumb idiom. repo
+// is "" at the repository-list level. Falls back to the production host when
+// the saved endpoint is blank (legacy creds configured without an explicit
+// endpoint).
+func registryBreadcrumb(host, repo string) string {
+	if host == "" {
+		host = defaultRegistryEndpoint
+	}
+	if repo == "" {
+		return host + "/"
+	}
+	return host + "/" + repo
+}
+
 // formatMMSS renders a duration as MM:SS for durations under an hour and
 // HH:MM:SS once it reaches one hour. Negative durations clamp to "00:00".
 // Pure; no clock access.

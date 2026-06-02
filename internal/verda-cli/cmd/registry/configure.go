@@ -15,6 +15,7 @@
 package registry
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -51,6 +52,13 @@ type configureOptions struct {
 	ExpiresInDays   int
 	Paste           string
 	DockerConfig    bool
+
+	// Secret is populated only by the wizard's manual-entry path (the
+	// "Enter credential name + secret" mode). The flag path reads the secret
+	// from stdin instead, so it stays empty there. resolveRegistryInputs uses
+	// a non-empty Secret to distinguish the wizard-manual path from the
+	// --password-stdin path.
+	Secret string
 }
 
 // NewCmdConfigure creates the `verda registry configure` command.
@@ -61,7 +69,6 @@ type configureOptions struct {
 // input flags are supplied on a TTY.
 func NewCmdConfigure(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 	opts := &configureOptions{
-		Profile:       defaultProfileName,
 		ExpiresInDays: defaultExpiresInDays,
 	}
 
@@ -69,65 +76,31 @@ func NewCmdConfigure(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Comm
 		Use:   "configure",
 		Short: registryConfigureShort,
 		Long: cmdutil.LongDesc(`
-			Save Verda Container Registry credentials to the shared credentials
-			file. Credentials are stored alongside API and S3 keys using
-			verda_registry_ prefixed keys; existing keys in the same profile
-			section are preserved.
+			Save Verda Container Registry credentials to ~/.verda/credentials
+			(override with --credentials-file or VERDA_REGISTRY_CREDENTIALS_FILE).
+			Stored with verda_registry_ prefixed keys alongside API and S3 keys;
+			other keys in the profile are preserved.
 
-			Default file: ~/.verda/credentials
-			Override with --credentials-file or VERDA_REGISTRY_CREDENTIALS_FILE.
+			Three ways to provide credentials:
+			  • interactive — run with no flags on a terminal; the wizard guides you,
+			    including where to find the credential in the web UI.
+			  • --paste — paste the web UI's "Registry authentication command" (the
+			    docker login … line); the host is auto-detected.
+			  • --username + --password-stdin [--endpoint] — Docker-style; --endpoint
+			    defaults to the profile's saved host, else vccr.io.
 
-			Where to find the values
-			  The Verda web UI's "Registry credentials created" dialog shows:
-
-			    Full credentials name         → --username
-			    Secret                        → stdin (with --password-stdin)
-			    Registry authentication command → paste verbatim into --paste
-
-			  The third field is the only place the registry URL appears after
-			  you close the dialog, so the easiest path is to copy that whole
-			  string and use --paste. The URL looks like:
-
-			    docker login -u vcr-<project-id>+<name> -p <secret> <host>
-
-			  where <host> is ` + "`vccr.io`" + ` on production and a longer
-			  staging hostname on non-production deployments.
-
-			Two non-interactive input modes are supported:
-
-			  --paste   (recommended) Paste the full ` + "`docker login ...`" + `
-			            command the web UI prints. The host is extracted
-			            automatically.
-			  --username + --password-stdin [+ --endpoint]
-			            Classic Docker-style: username as a flag, secret on
-			            stdin. --endpoint defaults to the previously-saved
-			            endpoint for this profile, or ` + "`" + defaultRegistryEndpoint + "`" + ` on
-			            production. Staging/custom deployments must pass
-			            --endpoint explicitly the first time.
+			Find the credential in the web UI under: select project → Credentials →
+			Create credentials.
 		`),
 		Example: cmdutil.Examples(`
-			# Recommended: paste the full command from the web UI's
-			# "Registry authentication command" field
+			# Interactive wizard (recommended for first-time setup)
+			verda registry configure
+
+			# Paste the web UI's "Registry authentication command"
 			verda registry configure --paste "docker login -u vcr-abc+cli -p s3cret vccr.io"
 
-			# Production: --endpoint defaults to vccr.io, so only
-			# --username and the stdin secret are required
-			echo -n "$SECRET" | verda registry configure \
-			  --username vcr-abc+cli \
-			  --password-stdin
-
-			# Staging / custom: pass --endpoint explicitly the first time;
-			# subsequent rotations on the same profile reuse the saved host
-			echo -n "$SECRET" | verda registry configure \
-			  --username vcr-abc+cli \
-			  --password-stdin \
-			  --endpoint registry.staging.internal.datacrunch.io
-
-			# Different profile, custom expiry
-			verda registry configure \
-			  --profile staging \
-			  --paste "docker login -u vcr-u+n -p pw vccr.io" \
-			  --expires-in 7
+			# Username + secret on stdin (--endpoint defaults to vccr.io)
+			echo -n "$SECRET" | verda registry configure --username vcr-abc+cli --password-stdin
 		`),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -136,7 +109,7 @@ func NewCmdConfigure(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Comm
 	}
 
 	flags := cmd.Flags()
-	flags.StringVar(&opts.Profile, "profile", opts.Profile, "Credentials profile name")
+	flags.StringVar(&opts.Profile, "profile", opts.Profile, "Credentials profile name (default: active profile)")
 	flags.StringVar(&opts.CredentialsFile, "credentials-file", "", "Path to the shared credentials file")
 	flags.StringVar(&opts.Username, "username", "", "Registry username (vcr-<project-id>+<name>)")
 	flags.BoolVar(&opts.PasswordStdin, "password-stdin", false, "Read the registry secret from stdin")
@@ -145,7 +118,7 @@ func NewCmdConfigure(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Comm
 			"or \""+defaultRegistryEndpoint+"\" on production.")
 	flags.IntVar(&opts.ExpiresInDays, "expires-in", opts.ExpiresInDays, "Days from now until the credentials expire")
 	flags.StringVar(&opts.Paste, "paste", "", "Full `docker login ...` command to parse (alternative to --username/--password-stdin)")
-	flags.BoolVar(&opts.DockerConfig, "docker-config", false, "Also write ~/.docker/config.json (not yet implemented in this subcommand)")
+	flags.BoolVar(&opts.DockerConfig, "docker-config", false, "Also write ~/.docker/config.json (same merge as `verda registry configure-docker`)")
 
 	return cmd
 }
@@ -157,6 +130,9 @@ func runConfigure(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStr
 	// derived Username/Endpoint) and opts.ExpiresInDays / opts.DockerConfig
 	// before falling through to the flag-driven resolution path below.
 	if shouldRunConfigureWizard(f, opts) {
+		// The docker-login string lives several clicks deep in the web UI;
+		// tell the user exactly where to find it before the paste prompt.
+		printConfigureIntro(ioStreams)
 		flow := buildConfigureFlow(opts)
 		engine := wizard.NewEngine(f.Prompter(), f.Status(),
 			wizard.WithOutput(ioStreams.ErrOut), wizard.WithExitConfirmation())
@@ -165,19 +141,31 @@ func runConfigure(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStr
 		}
 	}
 
+	// Resolve the target profile now that the wizard (if any) has run: an
+	// explicit --profile or the picker's choice is already on opts.Profile;
+	// otherwise fall back to the active profile so configure writes where the
+	// read commands will look.
+	opts.Profile = resolveProfile(opts.Profile)
+
 	creds, err := resolveRegistryInputs(cmd, f, ioStreams, opts)
 	if err != nil {
 		return err
 	}
 
-	if opts.DockerConfig {
-		_, _ = fmt.Fprintln(ioStreams.ErrOut,
-			"TODO: --docker-config is accepted but not yet wired in `registry configure`; "+
-				"use `verda registry login` (Task 13) or the interactive wizard (Task 7) "+
-				"to also update ~/.docker/config.json.")
+	path := credentialsFilePath(opts.CredentialsFile)
+
+	// The registry secret is write-once (the API never returns it), so
+	// replacing a profile's existing credentials is irreversible. Confirm on a
+	// TTY; proceed (with a note) for scripted rotation.
+	proceed, err := confirmOverwriteIfConfigured(cmd.Context(), f, ioStreams, opts.Profile, path)
+	if err != nil {
+		return err
+	}
+	if !proceed {
+		_, _ = fmt.Fprintln(ioStreams.ErrOut, "Canceled.")
+		return nil
 	}
 
-	path := credentialsFilePath(opts.CredentialsFile)
 	if err := options.WriteRegistryCredentialsToProfile(path, opts.Profile, creds); err != nil {
 		return err
 	}
@@ -187,7 +175,91 @@ func runConfigure(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStr
 		_, _ = fmt.Fprintf(ioStreams.ErrOut, "Credentials expire at %s (in %d days)\n",
 			creds.ExpiresAt.Format(time.RFC3339), opts.ExpiresInDays)
 	}
+
+	if opts.DockerConfig {
+		writeDockerConfigForConfigure(ioStreams, creds)
+	}
 	return nil
+}
+
+// printConfigureIntro tells the user exactly where the docker-login string
+// lives in the Verda web UI before the wizard prompts for it. The path is
+// several clicks deep, so new users otherwise can't find the "Registry
+// authentication command" the paste step asks for. Mirrors s3's
+// printConfigureIntro. Goes to ErrOut so stdout stays clean.
+func printConfigureIntro(ioStreams cmdutil.IOStreams) {
+	w := ioStreams.ErrOut
+	_, _ = fmt.Fprintln(w, "\n  Create a Container Registry credential in the Verda dashboard first:")
+	_, _ = fmt.Fprintln(w, "    1. Open the dashboard and select your project (skipped if you have only one).")
+	_, _ = fmt.Fprintln(w, "    2. Go to Credentials → Create credentials.")
+	_, _ = fmt.Fprintln(w, "    3. Provider: Verda. Enter a name and an expiry (Label, in days),")
+	_, _ = fmt.Fprintln(w, "       then click \"Create credentials\".")
+	_, _ = fmt.Fprintln(w, "    4. In the dialog, copy either the full \"Registry authentication command\"")
+	_, _ = fmt.Fprintln(w, "       (the `docker login …` line) or the \"Full credentials name\" + \"Secret\".")
+	_, _ = fmt.Fprintln(w, "       The secret is shown only once.")
+	_, _ = fmt.Fprintln(w, "\n  The wizard will ask which of those you have.")
+	_, _ = fmt.Fprintln(w)
+}
+
+// confirmOverwriteIfConfigured guards the irreversible replace of a profile's
+// existing registry credentials. Returns (proceed, err):
+//
+//   - profile has no registry creds yet → (true, nil); no prompt.
+//   - interactive TTY                   → prompt to replace; decline → (false, nil).
+//   - agent / non-TTY                   → (true, nil); rotation is the explicit
+//     intent and scripts must not block. A non-agent run still emits a one-line
+//     "Replacing…" note so the overwrite isn't silent.
+//
+// A failed load is treated as "nothing to overwrite" (true, nil): the worst
+// case is we skip a warning, never that we block a legitimate first-time write.
+func confirmOverwriteIfConfigured(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, profile, path string) (bool, error) {
+	existing, err := options.LoadRegistryCredentialsForProfile(path, profile)
+	if err != nil || existing == nil || !existing.HasCredentials() {
+		return true, nil //nolint:nilerr // intentional: load failure = nothing to overwrite, proceed
+	}
+
+	detail := existing.Username
+	if !existing.ExpiresAt.IsZero() {
+		detail = fmt.Sprintf("%s, expires %s", existing.Username, existing.ExpiresAt.Format("2006-01-02"))
+	}
+
+	if f.AgentMode() || !isTerminalFn(ioStreams.Out) {
+		if !f.AgentMode() {
+			_, _ = fmt.Fprintf(ioStreams.ErrOut,
+				"Replacing existing registry credentials in profile %q (%s).\n", profile, detail)
+		}
+		return true, nil
+	}
+
+	confirmed, err := f.Prompter().Confirm(ctx,
+		fmt.Sprintf("Profile %q already has registry credentials (%s). Replace them?", profile, detail))
+	if err != nil {
+		if cmdutil.IsPromptCancel(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return confirmed, nil
+}
+
+// writeDockerConfigForConfigure honors the --docker-config flag (and the
+// wizard's "Also write ~/.docker/config.json?" step) by merging the just-saved
+// credentials into the Docker config via the same writer `registry configure-docker`
+// uses. A failure here is non-fatal: the Verda credentials are already saved,
+// so we warn and point at `registry configure-docker` for a retry rather than failing the
+// whole command.
+func writeDockerConfigForConfigure(ioStreams cmdutil.IOStreams, creds *options.RegistryCredentials) {
+	dockerPath, err := resolveDockerConfigPath("")
+	if err == nil {
+		err = writeDockerLogin(dockerPath, creds)
+	}
+	if err != nil {
+		_, _ = fmt.Fprintf(ioStreams.ErrOut,
+			"warning: could not write Docker config: %v\nRun `verda registry configure-docker` to retry.\n", err)
+		return
+	}
+	_, _ = fmt.Fprintf(ioStreams.ErrOut,
+		"Also wrote %s for use with docker pull / docker-compose / helm.\n", dockerPath)
 }
 
 // resolveRegistryInputs decides which non-interactive path to use (paste or
@@ -207,6 +279,28 @@ func resolveRegistryInputs(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdu
 			Secret:    parsed.Secret,
 			Endpoint:  parsed.Host,
 			ProjectID: parsed.ProjectID,
+			ExpiresAt: expiresAt,
+		}, nil
+
+	case strings.TrimSpace(opts.Username) != "" && opts.Secret != "":
+		// Wizard manual-entry path: the user typed the full credential name and
+		// secret (the secret never touches stdin). The web UI's name+secret
+		// fields don't carry a host, so derive it the same way the flag path
+		// does — the profile's saved endpoint, else the production base
+		// (vccr.io) — and parse the project id out of the credential name.
+		projectID, err := projectIDFromUsername(opts.Username)
+		if err != nil {
+			return nil, cmdutil.UsageErrorf(cmd, "%s", err.Error())
+		}
+		endpoint, source := resolveEndpointForFlags(opts)
+		if source != endpointSourceFlag && !f.AgentMode() {
+			_, _ = fmt.Fprintf(ioStreams.ErrOut, "Using registry endpoint %q (%s).\n", endpoint, source)
+		}
+		return &options.RegistryCredentials{
+			Username:  opts.Username,
+			Secret:    opts.Secret,
+			Endpoint:  endpoint,
+			ProjectID: projectID,
 			ExpiresAt: expiresAt,
 		}, nil
 

@@ -15,27 +15,49 @@
 package registry
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 
+	"github.com/verda-cloud/verdagostack/pkg/tui"
 	"github.com/verda-cloud/verdagostack/pkg/tui/bubbletea"
 	"github.com/verda-cloud/verdagostack/pkg/tui/wizard"
+
+	"github.com/verda-cloud/verda-cli/internal/verda-cli/options"
+)
+
+// newProfileSentinel is the Choice value for "create a new profile". A NUL
+// byte can't occur in an INI section name, so it never collides with a real
+// profile. Mirrors the s3 wizard's sentinel.
+const newProfileSentinel = "\x00new-profile"
+
+// Credential input modes offered by the wizard, matching the two ways the web
+// UI lets you copy a credential: the whole `docker login …` command, or the
+// "Full credential name" + "Secret" fields separately.
+const (
+	inputModePaste  = "paste"
+	inputModeManual = "manual"
 )
 
 // buildConfigureFlow builds the interactive wizard flow for registry
 // credential configuration.
 //
-//	paste → expires-in → docker-config
+//	profile (pick or create) → [new name] → input mode
+//	  ├─ paste:  paste docker-login command
+//	  └─ manual: username → secret
+//	→ expires-in → docker-config
 //
 // The paste step asks the user to paste the full `docker login ...` command
 // the Verda web UI prints when a credential is provisioned. Its validator
 // routes the string through parseDockerLogin so the user sees the parser's
-// diagnostic in-place and can try again without restarting the flow. On
-// success the parsed username/secret/host/project-id are written directly
-// onto opts so the existing flag-driven persistence code path in configure.go
-// handles the rest.
+// diagnostic in-place and can try again without restarting the flow. The
+// manual path mirrors the web UI's separate "Full credential name" + "Secret"
+// fields; the host isn't asked for because it's derived in configure.go (the
+// project id is parsed out of the credential name, the base is vccr.io / the
+// profile's saved host). Both paths populate opts so the flag-driven
+// resolution path in configure.go handles persistence.
 func buildConfigureFlow(opts *configureOptions) *wizard.Flow {
 	return &wizard.Flow{
 		Name: "registry-configure",
@@ -44,10 +66,177 @@ func buildConfigureFlow(opts *configureOptions) *wizard.Flow {
 			{ID: "hints", View: wizard.NewHintBarView(wizard.WithHintStyle(bubbletea.HintStyle()))},
 		},
 		Steps: []wizard.Step{
+			configureStepProfile(opts),
+			configureStepNewProfileName(opts),
+			configureStepInputMode(),
 			configureStepPaste(opts),
+			configureStepUsername(opts),
+			configureStepSecret(opts),
 			configureStepExpiresIn(opts),
 			configureStepDockerConfig(opts),
 		},
+	}
+}
+
+// configureStepInputMode asks whether the user has the full `docker login`
+// command (paste) or the credential name + secret separately (manual). The
+// chosen value is read by the paste / username / secret / endpoint steps'
+// ShouldSkip predicates via collected["input-mode"].
+func configureStepInputMode() wizard.Step {
+	return wizard.Step{
+		Name:        "input-mode",
+		Description: "How do you have the credential?",
+		Prompt:      wizard.SelectPrompt,
+		Required:    true,
+		Loader: func(_ context.Context, _ tui.Prompter, _ tui.Status, _ *wizard.Store) ([]wizard.Choice, error) {
+			return []wizard.Choice{
+				{Label: "Paste the docker login command (recommended)", Value: inputModePaste},
+				{Label: "Enter credential name + secret", Value: inputModeManual},
+			}, nil
+		},
+		Default:  func(_ map[string]any) any { return inputModePaste },
+		Setter:   func(any) {},
+		Resetter: func() {},
+		IsSet:    func() bool { return false },
+		Value:    func() any { return inputModePaste },
+	}
+}
+
+// configureStepUsername (manual path) prompts for the "Full credential name"
+// the web UI shows, validating the vcr-<project-id>+<name> shape so the user
+// sees a clear error before the flow moves on. Resetter is a no-op so that, in
+// paste mode where this step is skipped, it doesn't clobber the username the
+// paste step parsed onto opts.
+func configureStepUsername(opts *configureOptions) wizard.Step {
+	return wizard.Step{
+		Name:        "username",
+		Description: "Full credential name (vcr-<project-id>+<name>)",
+		Prompt:      wizard.TextInputPrompt,
+		Required:    true,
+		DependsOn:   []string{"input-mode"},
+		ShouldSkip: func(collected map[string]any) bool {
+			v, _ := collected["input-mode"].(string)
+			return v != inputModeManual
+		},
+		Validate: func(v any) error {
+			s := strings.TrimSpace(v.(string))
+			if s == "" {
+				return errors.New("credential name cannot be empty")
+			}
+			if _, err := projectIDFromUsername(s); err != nil {
+				return err
+			}
+			return nil
+		},
+		Setter:   func(v any) { opts.Username = strings.TrimSpace(v.(string)) },
+		Resetter: func() {},
+		IsSet:    func() bool { return false },
+		Value:    func() any { return opts.Username },
+	}
+}
+
+// configureStepSecret (manual path) prompts for the "Secret" field. Masked
+// input; the value is stored verbatim (not trimmed) since a secret may contain
+// surrounding whitespace. No-op Resetter for the same reason as username.
+func configureStepSecret(opts *configureOptions) wizard.Step {
+	return wizard.Step{
+		Name:        "secret",
+		Description: "Secret",
+		Prompt:      wizard.PasswordPrompt,
+		Required:    true,
+		DependsOn:   []string{"input-mode"},
+		ShouldSkip: func(collected map[string]any) bool {
+			v, _ := collected["input-mode"].(string)
+			return v != inputModeManual
+		},
+		Validate: func(v any) error {
+			if v.(string) == "" {
+				return errors.New("secret cannot be empty")
+			}
+			return nil
+		},
+		Setter:   func(v any) { opts.Secret = v.(string) },
+		Resetter: func() {},
+		IsSet:    func() bool { return false },
+		Value:    func() any { return opts.Secret },
+	}
+}
+
+// registryProfileChoices lists existing credential profiles (each tagged with
+// whether it already holds registry credentials) plus a trailing "create new"
+// option. Reading the file fails soft: on any error the user still gets the
+// create-new choice. Mirrors the s3 wizard's profileChoices.
+func registryProfileChoices(path string) []wizard.Choice {
+	profiles, _ := options.ListProfiles(path)
+	choices := make([]wizard.Choice, 0, len(profiles)+1)
+	for _, p := range profiles {
+		desc := "no registry credentials yet"
+		if creds, err := options.LoadRegistryCredentialsForProfile(path, p); err == nil && creds.HasCredentials() {
+			desc = "registry configured"
+		}
+		choices = append(choices, wizard.Choice{Label: p, Value: p, Description: desc})
+	}
+	return append(choices, wizard.Choice{Label: "+ Create new profile…", Value: newProfileSentinel})
+}
+
+// configureStepProfile lets the user pick an existing profile or create a new
+// one, defaulting the selection to the active profile. A --profile flag
+// (opts.Profile != default) pre-sets it and skips this step.
+func configureStepProfile(opts *configureOptions) wizard.Step {
+	return wizard.Step{
+		Name:        "profile",
+		Description: "Profile",
+		Prompt:      wizard.SelectPrompt,
+		Required:    true,
+		Loader: func(_ context.Context, _ tui.Prompter, _ tui.Status, _ *wizard.Store) ([]wizard.Choice, error) {
+			// List the same file the save writes to (must honor --credentials-file).
+			return registryProfileChoices(credentialsFilePath(opts.CredentialsFile)), nil
+		},
+		Default: func(_ map[string]any) any {
+			if p := options.ActiveProfile(""); p != "" {
+				return p
+			}
+			return defaultProfileName
+		},
+		// Sentinel ("create new") leaves opts.Profile alone; the new-name step
+		// sets it. Picking an existing profile sets it directly.
+		Setter: func(v any) {
+			if s, _ := v.(string); s != "" && s != newProfileSentinel {
+				opts.Profile = s
+			}
+		},
+		Resetter: func() { opts.Profile = defaultProfileName },
+		IsSet:    func() bool { return opts.Profile != "" && opts.Profile != defaultProfileName },
+		Value:    func() any { return opts.Profile },
+	}
+}
+
+// configureStepNewProfileName prompts for the name only when the user chose
+// "create new" in the profile step.
+func configureStepNewProfileName(opts *configureOptions) wizard.Step {
+	return wizard.Step{
+		Name:        "new-profile-name",
+		Description: "New profile name",
+		Prompt:      wizard.TextInputPrompt,
+		Required:    true,
+		DependsOn:   []string{"profile"},
+		ShouldSkip: func(collected map[string]any) bool {
+			v, _ := collected["profile"].(string)
+			return v != newProfileSentinel
+		},
+		Validate: func(v any) error {
+			if strings.TrimSpace(v.(string)) == "" {
+				return errors.New("profile name cannot be empty")
+			}
+			return nil
+		},
+		Setter: func(v any) { opts.Profile = strings.TrimSpace(v.(string)) },
+		// No-op: opts.Profile is owned by the profile step. Resetting it here
+		// (called when this step is skipped for an existing profile) would
+		// clobber the selected profile back to the default.
+		Resetter: func() {},
+		IsSet:    func() bool { return false },
+		Value:    func() any { return opts.Profile },
 	}
 }
 
@@ -65,6 +254,11 @@ func configureStepPaste(opts *configureOptions) wizard.Step {
 		Description: "Paste the 'Registry authentication command' from the Verda UI (docker login -u … -p … <host>)",
 		Prompt:      wizard.TextInputPrompt,
 		Required:    true,
+		DependsOn:   []string{"input-mode"},
+		ShouldSkip: func(collected map[string]any) bool {
+			v, _ := collected["input-mode"].(string)
+			return v == inputModeManual
+		},
 		Validate: func(v any) error {
 			s, _ := v.(string)
 			if strings.TrimSpace(s) == "" {
@@ -147,9 +341,8 @@ func configureStepExpiresIn(opts *configureOptions) wizard.Step {
 }
 
 // configureStepDockerConfig asks whether to also write ~/.docker/config.json.
-// The actual write happens in `verda registry login` (Task 13); for now we
-// only store the boolean and the RunE will print a notice so the user knows
-// they still need to run login to materialize the docker config.
+// When true, runConfigure performs the same merge `verda registry configure-docker` does
+// (via writeDockerLogin) right after saving the Verda credentials.
 func configureStepDockerConfig(opts *configureOptions) wizard.Step {
 	return wizard.Step{
 		Name:        "docker-config",

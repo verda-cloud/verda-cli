@@ -114,7 +114,6 @@ type copyPayload struct {
 // credentials, with the secret read from stdin.
 func NewCmdCopy(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 	opts := &copyOptions{
-		Profile:  defaultProfileName,
 		Retries:  5,
 		Progress: progressAuto,
 		SrcAuth:  srcAuthDockerConfig,
@@ -139,7 +138,7 @@ func NewCmdCopy(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 			and registered credential helpers by default. Pass
 			--src-auth anonymous to skip the keychain entirely or
 			--src-auth basic plus --src-username / --src-password-stdin
-			to supply explicit credentials.
+			to supply explicit credentials. Run with no arguments on a terminal to launch an interactive wizard that prompts for the source, access mode, scope (this tag / all tags), and destination, then runs the copy.
 		`),
 		Example: cmdutil.Examples(`
 			# Copy a public image from Docker Hub to VCR under the same repo/tag
@@ -156,14 +155,22 @@ func NewCmdCopy(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 			# JSON output for scripts
 			verda registry copy docker.io/library/nginx:1.25 -o json
 		`),
-		Args: cobra.RangeArgs(1, 2),
+		// 0 args on an interactive terminal launches the wizard; scripts /
+		// agent / json callers must pass <src> explicitly.
+		Args: cobra.MaximumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				if copyWizardEligible(f, ioStreams) {
+					return runCopyWizard(cmd, f, ioStreams, opts)
+				}
+				return cmdutil.UsageErrorf(cmd, "copy requires a source image: verda registry copy <src> [<dst>]")
+			}
 			return runCopy(cmd, f, ioStreams, opts, args)
 		},
 	}
 
 	flags := cmd.Flags()
-	flags.StringVar(&opts.Profile, "profile", opts.Profile, "Credentials profile name")
+	flags.StringVar(&opts.Profile, "profile", opts.Profile, "Credentials profile name (default: active profile)")
 	flags.StringVar(&opts.CredentialsFile, "credentials-file", "", "Path to credentials file")
 	flags.IntVar(&opts.Jobs, "jobs", 0, "Layer-level parallelism (0 = ggcr default)")
 	flags.IntVar(&opts.ImageJobs, "image-jobs", 0, "Image-level parallelism for --all-tags (0 = auto)")
@@ -207,11 +214,27 @@ func runCopy(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams,
 		}
 	}
 
-	srcAuth, err := buildSourceAuth(opts, ioStreams.In)
+	// Flag path: the --src-auth basic secret comes from stdin. The wizard
+	// supplies it from a prompt and calls runCopyResolved directly.
+	basicPassword, err := readBasicSourcePassword(opts, ioStreams.In)
+	if err != nil {
+		return err
+	}
+	srcAuth, err := buildSourceAuth(opts, basicPassword)
 	if err != nil {
 		return err
 	}
 
+	return runCopyResolved(cmd, f, ioStreams, opts, args, creds, srcRef, srcAuth)
+}
+
+// runCopyResolved runs a copy once the source reference and source-side
+// authenticator are resolved. Shared by the flag path (runCopy) and the
+// interactive wizard (runCopyWizard), so both get identical dry-run, overwrite,
+// --all-tags, progress, and structured-output behavior.
+//
+//nolint:gocritic // hugeParam: Ref is an immutable value type; contract uses value receivers uniformly (see refname.go).
+func runCopyResolved(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *copyOptions, args []string, creds *options.RegistryCredentials, srcRef Ref, srcAuth authn.Authenticator) error {
 	// --yes implies --overwrite — matches s3 rm/rb's pattern where --yes
 	// means "I've already decided." Keeping the two as separate flags lets
 	// a user say "overwrite yes, but also surface progress" without
@@ -490,11 +513,55 @@ func resolveCopyDestination(args []string, src Ref, creds *options.RegistryCrede
 	}, nil
 }
 
-// buildSourceAuth constructs the authn.Authenticator for the source side
-// based on --src-auth + associated flags. docker-config routes through
-// the swappable sourceKeychainBuilder so tests can assert which keychain
-// was selected without driving a real credential store.
-func buildSourceAuth(opts *copyOptions, stdin io.Reader) (authn.Authenticator, error) {
+// readBasicSourcePassword reads the --src-auth basic secret from stdin on the
+// flag path, enforcing the --src-password-stdin contract. Returns "" for
+// non-basic auth (the password is unused there); the wizard skips this and
+// supplies the password from a prompt instead.
+func readBasicSourcePassword(opts *copyOptions, stdin io.Reader) (string, error) {
+	if opts.SrcAuth != srcAuthBasic {
+		return "", nil
+	}
+	// Validate --src-username BEFORE touching stdin: otherwise a missing
+	// username drains the piped secret first and the user must re-pipe it
+	// (painful when it's a one-shot token from a subprocess).
+	if opts.SrcUsername == "" {
+		return "", &cmdutil.AgentError{
+			Code:     kindRegistryInvalidReference,
+			Message:  "--src-auth basic requires --src-username",
+			ExitCode: cmdutil.ExitBadArgs,
+		}
+	}
+	if !opts.SrcPasswordStdin {
+		return "", &cmdutil.AgentError{
+			Code:     kindRegistryInvalidReference,
+			Message:  "--src-auth basic requires --src-password-stdin (read from stdin)",
+			ExitCode: cmdutil.ExitBadArgs,
+		}
+	}
+	if stdin == nil {
+		return "", &cmdutil.AgentError{
+			Code:     kindRegistryInvalidReference,
+			Message:  "no stdin available to read --src-password-stdin",
+			ExitCode: cmdutil.ExitBadArgs,
+		}
+	}
+	pw, err := readSecretFromStdin(stdin)
+	if err != nil {
+		return "", &cmdutil.AgentError{
+			Code:     kindRegistryInvalidReference,
+			Message:  fmt.Sprintf("reading source password from stdin: %v", err),
+			ExitCode: cmdutil.ExitBadArgs,
+		}
+	}
+	return pw, nil
+}
+
+// buildSourceAuth constructs the authn.Authenticator for the source side based
+// on --src-auth. The basic secret is supplied by the caller (stdin on the flag
+// path, a prompt in the wizard). docker-config routes through the swappable
+// sourceKeychainBuilder so tests can assert which keychain was selected without
+// driving a real credential store.
+func buildSourceAuth(opts *copyOptions, basicPassword string) (authn.Authenticator, error) {
 	switch opts.SrcAuth {
 	case srcAuthAnonymous:
 		return authn.Anonymous, nil
@@ -507,38 +574,16 @@ func buildSourceAuth(opts *copyOptions, stdin io.Reader) (authn.Authenticator, e
 				ExitCode: cmdutil.ExitBadArgs,
 			}
 		}
-		if !opts.SrcPasswordStdin {
+		if basicPassword == "" {
 			return nil, &cmdutil.AgentError{
 				Code:     kindRegistryInvalidReference,
-				Message:  "--src-auth basic requires --src-password-stdin (read from stdin)",
-				ExitCode: cmdutil.ExitBadArgs,
-			}
-		}
-		if stdin == nil {
-			return nil, &cmdutil.AgentError{
-				Code:     kindRegistryInvalidReference,
-				Message:  "no stdin available to read --src-password-stdin",
-				ExitCode: cmdutil.ExitBadArgs,
-			}
-		}
-		pw, err := readSecretFromStdin(stdin)
-		if err != nil {
-			return nil, &cmdutil.AgentError{
-				Code:     kindRegistryInvalidReference,
-				Message:  fmt.Sprintf("reading source password from stdin: %v", err),
-				ExitCode: cmdutil.ExitBadArgs,
-			}
-		}
-		if pw == "" {
-			return nil, &cmdutil.AgentError{
-				Code:     kindRegistryInvalidReference,
-				Message:  "empty password on stdin for --src-password-stdin",
+				Message:  "empty source password for --src-auth basic",
 				ExitCode: cmdutil.ExitBadArgs,
 			}
 		}
 		return authn.FromConfig(authn.AuthConfig{
 			Username: opts.SrcUsername,
-			Password: pw,
+			Password: basicPassword,
 		}), nil
 
 	case srcAuthDockerConfig, "":

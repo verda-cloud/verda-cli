@@ -16,6 +16,7 @@ package registry
 
 import (
 	"bytes"
+	"encoding/base64"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,6 +26,7 @@ import (
 	"gopkg.in/ini.v1"
 
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
+	tuitest "github.com/verda-cloud/verdagostack/pkg/tui/testing"
 )
 
 // newTestStreams returns IOStreams backed by buffers, with `stdin` providing
@@ -362,6 +364,106 @@ verda_registry_project_id = abc
 	if !strings.Contains(errOut.String(), "saved in profile") {
 		t.Errorf("stderr should explain reuse of saved endpoint, got: %q", errOut.String())
 	}
+	// Non-TTY overwrite of an already-configured profile proceeds (rotation
+	// intent) but isn't silent — it notes the replace on stderr.
+	if !strings.Contains(errOut.String(), "Replacing existing registry credentials") {
+		t.Errorf("stderr should note the credential replace, got: %q", errOut.String())
+	}
+}
+
+// TestConfigure_OverwriteExistingProfile_TTYDeclineAborts: on a terminal,
+// configuring a profile that already has registry credentials prompts before
+// the irreversible replace. Declining writes nothing.
+func TestConfigure_OverwriteExistingProfile_TTYDeclineAborts(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "credentials")
+	t.Setenv("VERDA_REGISTRY_CREDENTIALS_FILE", path)
+	t.Setenv("VERDA_HOME", dir)
+
+	existing := `[default]
+verda_registry_username = vcr-abc+oldcli
+verda_registry_secret = oldsecret
+verda_registry_endpoint = vccr.io
+verda_registry_project_id = abc
+`
+	if err := os.WriteFile(path, []byte(existing), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	withForcedTTY(t, true)
+	mock := tuitest.New().AddConfirm(false) // decline the replace
+	f := cmdutil.NewTestFactory(mock)
+	streams, out, errOut := newTestStreams("")
+
+	err := runConfigureForTest(t, f, streams,
+		"--paste", "docker login -u vcr-abc+newcli -p newsecret vccr.io",
+	)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	cfg, err := ini.Load(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	// Old credentials must be intact — nothing was written.
+	if got := cfg.Section("default").Key("verda_registry_secret").String(); got != "oldsecret" {
+		t.Errorf("secret = %q, want oldsecret (declined overwrite)", got)
+	}
+	if got := cfg.Section("default").Key("verda_registry_username").String(); got != "vcr-abc+oldcli" {
+		t.Errorf("username = %q, want vcr-abc+oldcli (declined overwrite)", got)
+	}
+	if !strings.Contains(errOut.String(), "Canceled") {
+		t.Errorf("expected Canceled on stderr, got: %q", errOut.String())
+	}
+	if strings.Contains(out.String(), "saved to profile") {
+		t.Errorf("should not have reported a save; stdout: %q", out.String())
+	}
+}
+
+// TestConfigure_OverwriteExistingProfile_TTYConfirmReplaces: accepting the
+// prompt rotates the credentials in place.
+func TestConfigure_OverwriteExistingProfile_TTYConfirmReplaces(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "credentials")
+	t.Setenv("VERDA_REGISTRY_CREDENTIALS_FILE", path)
+	t.Setenv("VERDA_HOME", dir)
+
+	existing := `[default]
+verda_registry_username = vcr-abc+oldcli
+verda_registry_secret = oldsecret
+verda_registry_endpoint = vccr.io
+verda_registry_project_id = abc
+`
+	if err := os.WriteFile(path, []byte(existing), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	withForcedTTY(t, true)
+	mock := tuitest.New().AddConfirm(true) // accept the replace
+	f := cmdutil.NewTestFactory(mock)
+	streams, out, _ := newTestStreams("")
+
+	err := runConfigureForTest(t, f, streams,
+		"--paste", "docker login -u vcr-abc+newcli -p newsecret vccr.io",
+	)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	cfg, err := ini.Load(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if got := cfg.Section("default").Key("verda_registry_secret").String(); got != "newsecret" {
+		t.Errorf("secret = %q, want newsecret (confirmed overwrite)", got)
+	}
+	if got := cfg.Section("default").Key("verda_registry_username").String(); got != "vcr-abc+newcli" {
+		t.Errorf("username = %q, want vcr-abc+newcli (confirmed overwrite)", got)
+	}
+	if !strings.Contains(out.String(), "saved to profile") {
+		t.Errorf("expected save confirmation; stdout: %q", out.String())
+	}
 }
 
 // TestConfigure_UsernamePasswordStdin_FlagWinsOverSaved: an explicit
@@ -472,6 +574,149 @@ func TestConfigure_UsernamePasswordStdin_SuggestsPasteOnUsageError(t *testing.T)
 	}
 	if !strings.Contains(err.Error(), "--paste") {
 		t.Errorf("agent-mode usage error should mention --paste as an option, got: %v", err)
+	}
+}
+
+// TestConfigure_DockerConfigFlagWritesDockerConfig verifies that --docker-config
+// merges the just-saved credentials into ~/.docker/config.json (here redirected
+// via DOCKER_CONFIG) using the same writer `registry login` uses.
+func TestConfigure_DockerConfigFlagWritesDockerConfig(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "credentials")
+	t.Setenv("VERDA_REGISTRY_CREDENTIALS_FILE", path)
+	t.Setenv("VERDA_HOME", dir)
+	dockerDir := filepath.Join(dir, "docker")
+	t.Setenv("DOCKER_CONFIG", dockerDir)
+
+	f := cmdutil.NewTestFactory(nil)
+	streams, _, errOut := newTestStreams("")
+
+	err := runConfigureForTest(t, f, streams,
+		"--paste", "docker login -u vcr-abc+cli -p s3cret vccr.io",
+		"--docker-config",
+	)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dockerDir, "config.json")) //nolint:gosec // G304: reads from the test's own temp dir
+	if err != nil {
+		t.Fatalf("docker config not written: %v", err)
+	}
+	wantAuth := base64.StdEncoding.EncodeToString([]byte("vcr-abc+cli:s3cret"))
+	if !strings.Contains(string(data), wantAuth) {
+		t.Errorf("docker config missing base64 auth entry; got: %s", data)
+	}
+	if !strings.Contains(string(data), "vccr.io") {
+		t.Errorf("docker config missing registry host; got: %s", data)
+	}
+	if !strings.Contains(errOut.String(), "Also wrote") {
+		t.Errorf("expected docker-config confirmation on stderr, got: %q", errOut.String())
+	}
+}
+
+// TestResolveRegistryInputs_WizardManualPath: the wizard manual path provides
+// Username + Secret (no stdin, no endpoint). The endpoint is derived (vccr.io
+// base / saved host) and the project id is parsed from the credential name.
+func TestResolveRegistryInputs_WizardManualPath(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("VERDA_REGISTRY_CREDENTIALS_FILE", filepath.Join(dir, "credentials"))
+
+	f := cmdutil.NewTestFactory(nil)
+	streams, _, _ := newTestStreams("")
+	cmd := NewCmdConfigure(f, streams)
+
+	opts := &configureOptions{
+		Profile:       defaultProfileName,
+		Username:      "vcr-abc+cli",
+		Secret:        "s3cret",
+		ExpiresInDays: defaultExpiresInDays,
+	}
+	creds, err := resolveRegistryInputs(cmd, f, streams, opts)
+	if err != nil {
+		t.Fatalf("resolveRegistryInputs: %v", err)
+	}
+	if creds.Username != "vcr-abc+cli" {
+		t.Errorf("Username = %q, want vcr-abc+cli", creds.Username)
+	}
+	if creds.Secret != "s3cret" {
+		t.Errorf("Secret = %q, want s3cret", creds.Secret)
+	}
+	if creds.ProjectID != "abc" {
+		t.Errorf("ProjectID = %q, want abc (parsed from credential name)", creds.ProjectID)
+	}
+	if creds.Endpoint != defaultRegistryEndpoint {
+		t.Errorf("Endpoint = %q, want %q (production base)", creds.Endpoint, defaultRegistryEndpoint)
+	}
+}
+
+// TestResolveRegistryInputs_WizardManualPath_ReusesSavedEndpoint: when the
+// profile already has a saved host (e.g. staging), the manual path reuses it
+// rather than defaulting to vccr.io.
+func TestResolveRegistryInputs_WizardManualPath_ReusesSavedEndpoint(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "credentials")
+	t.Setenv("VERDA_REGISTRY_CREDENTIALS_FILE", path)
+
+	existing := `[default]
+verda_registry_endpoint = registry.staging.internal.datacrunch.io
+`
+	if err := os.WriteFile(path, []byte(existing), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	f := cmdutil.NewTestFactory(nil)
+	streams, _, _ := newTestStreams("")
+	cmd := NewCmdConfigure(f, streams)
+
+	opts := &configureOptions{
+		Profile:       defaultProfileName,
+		Username:      "vcr-abc+cli",
+		Secret:        "s3cret",
+		ExpiresInDays: defaultExpiresInDays,
+	}
+	creds, err := resolveRegistryInputs(cmd, f, streams, opts)
+	if err != nil {
+		t.Fatalf("resolveRegistryInputs: %v", err)
+	}
+	if creds.Endpoint != "registry.staging.internal.datacrunch.io" {
+		t.Errorf("Endpoint = %q, want the saved staging host", creds.Endpoint)
+	}
+}
+
+// TestConfigure_WritesToActiveProfile: with no --profile, configure writes to
+// the active profile (VERDA_PROFILE here), not the literal "default". This is
+// the write side of the active-profile fix; the read commands resolve the same
+// way via resolveProfile/loadCredsFromFactory.
+func TestConfigure_WritesToActiveProfile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "credentials")
+	t.Setenv("VERDA_REGISTRY_CREDENTIALS_FILE", path)
+	t.Setenv("VERDA_HOME", dir)
+	t.Setenv("VERDA_PROFILE", "production")
+
+	f := cmdutil.NewTestFactory(nil)
+	streams, out, _ := newTestStreams("")
+
+	err := runConfigureForTest(t, f, streams,
+		"--paste", "docker login -u vcr-abc+cli -p s3cret vccr.io",
+	)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	cfg, err := ini.Load(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if !cfg.Section("production").HasKey("verda_registry_username") {
+		t.Error("credentials should have been written to the active profile [production]")
+	}
+	if cfg.Section("default").HasKey("verda_registry_username") {
+		t.Error("credentials must NOT leak into [default] when the active profile is production")
+	}
+	if !strings.Contains(out.String(), `profile "production"`) {
+		t.Errorf("should report writing to the active profile, got: %q", out.String())
 	}
 }
 

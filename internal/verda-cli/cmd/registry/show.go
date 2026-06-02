@@ -67,7 +67,7 @@ func NewCmdShow(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 	}
 
 	flags := cmd.Flags()
-	flags.StringVar(&profile, "profile", defaultProfileName, "Credentials profile to show")
+	flags.StringVar(&profile, "profile", "", "Credentials profile to show (default: active profile)")
 	flags.StringVar(&credentialsFile, "credentials-file", "", "Path to the shared credentials file")
 
 	return cmd
@@ -76,11 +76,10 @@ func NewCmdShow(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 // runShow is the RunE body, split out for testability.
 func runShow(f cmdutil.Factory, ioStreams cmdutil.IOStreams, profile, credentialsFile string) error {
 	// Registry commands are in skipCredentialResolution, so AuthOptions.Profile
-	// is never resolved. Mirror the s3 convention and fall back to the default
-	// profile when --profile was explicitly set to an empty string.
-	if profile == "" {
-		profile = defaultProfileName
-	}
+	// is never resolved. Resolve the active profile here (explicit --profile >
+	// VERDA_PROFILE / auth.profile > "default") so `show` reports the same
+	// profile the other registry commands act on.
+	profile = resolveProfile(profile)
 
 	path := credentialsFilePath(credentialsFile)
 	outputFormat := f.OutputFormat()

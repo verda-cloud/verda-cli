@@ -71,8 +71,7 @@ type tagsPayload struct {
 // --limit 0; the two flags together are redundant but not an error.
 func NewCmdTags(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 	opts := &tagsOptions{
-		Profile: defaultProfileName,
-		Limit:   defaultTagsLimit,
+		Limit: defaultTagsLimit,
 	}
 
 	cmd := &cobra.Command{
@@ -80,7 +79,11 @@ func NewCmdTags(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 		Short: "List tags in a container repository",
 		Long: cmdutil.LongDesc(`
 			List every tag in the given repository plus per-tag metadata
-			(digest, size).
+			(digest, size). On a terminal, tags are shown as an interactive,
+			filterable picker — select one to print its full pull reference and
+			exit (the same picker "verda registry ls" uses when you drill into a
+			repository). Piped output, -o json/yaml, or --agent print the table
+			instead.
 
 			The repository may be passed as a full reference
 			("vccr.io/<project>/<name>") or a short reference ("<name>"). Short
@@ -116,14 +119,24 @@ func NewCmdTags(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 			# JSON output for scripts
 			verda registry tags my-app -o json
 		`),
-		Args: cobra.ExactArgs(1),
+		// MaximumNArgs (not ExactArgs) so a bare `tags` returns a helpful
+		// pointer to `ls` / `tags <repo>` instead of cobra's terse
+		// "accepts 1 arg(s), received 0". `tags` is tag-centric (one repo);
+		// browsing repositories interactively is `ls`'s job.
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return cmdutil.UsageErrorf(cmd,
+					"tags needs a repository.\n"+
+						"  verda registry tags <repo>   list that repository's tags\n"+
+						"  verda registry ls            browse repositories interactively, then tags")
+			}
 			return runTags(cmd, f, ioStreams, opts, args[0])
 		},
 	}
 
 	flags := cmd.Flags()
-	flags.StringVar(&opts.Profile, "profile", opts.Profile, "Credentials profile to read")
+	flags.StringVar(&opts.Profile, "profile", opts.Profile, "Credentials profile to read (default: active profile)")
 	flags.StringVar(&opts.CredentialsFile, "credentials-file", "", "Path to the shared Verda credentials file")
 	flags.IntVar(&opts.Limit, "limit", opts.Limit, "Cap on per-tag metadata lookups (0 = unlimited)")
 	flags.BoolVar(&opts.All, "all", false, "Run metadata lookups for every tag (overrides --limit)")
@@ -214,8 +227,39 @@ func runTags(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams,
 			return werr
 		}
 	}
+
+	// Interactive terminal: present the same filterable tag picker `ls`'s
+	// drill-down uses; selecting a tag prints its full pull reference. Piped /
+	// redirected / -o json / --agent fall through to the plain table so scripts
+	// stay deterministic. The picker uses cmd.Context() (not the per-request
+	// timeout ctx) so user think-time can't cancel it mid-prompt.
+	if !f.AgentMode() && isTerminalFn(ioStreams.Out) {
+		base := repoPullBase(creds.Endpoint, creds.ProjectID, &RepositoryInfo{FullName: fullRepo})
+		_, perr := runTagPicker(cmd.Context(), f, ioStreams, ref.Repository, base, tagRowsToEntries(rows, metadataCap))
+		return perr
+	}
+
 	renderTagsHuman(ioStreams, payload, metadataCap)
 	return nil
+}
+
+// tagRowsToEntries turns fetched tag rows into picker entries: a "tag  size"
+// label (size renders "--" for rows past the metadata cap) and a ":<tag>"
+// suffix appended to the repo's pull base. Used by the interactive `tags`
+// picker, reusing ls.go's runTagPicker.
+func tagRowsToEntries(rows []tagRow, metadataCap int) []tagEntry {
+	entries := make([]tagEntry, 0, len(rows))
+	for i := range rows {
+		size := "--"
+		if i < metadataCap {
+			size = formatBytes(rows[i].Size)
+		}
+		entries = append(entries, tagEntry{
+			label:  fmt.Sprintf("%-30s  %10s", rows[i].Tag, size),
+			suffix: ":" + rows[i].Tag,
+		})
+	}
+	return entries
 }
 
 // startTagsSpinner starts the listing spinner (if the factory exposes a

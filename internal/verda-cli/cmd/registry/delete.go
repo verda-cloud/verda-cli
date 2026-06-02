@@ -81,7 +81,7 @@ type deleteResult struct {
 // positional target is required AND --yes is mandatory; missing --yes
 // surfaces a CONFIRMATION_REQUIRED AgentError so automations can retry.
 func NewCmdDelete(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
-	opts := &deleteOptions{Profile: defaultProfileName}
+	opts := &deleteOptions{}
 
 	cmd := &cobra.Command{
 		Use:     "delete [REPOSITORY[:TAG|@DIGEST]]",
@@ -133,7 +133,7 @@ func NewCmdDelete(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 	}
 
 	flags := cmd.Flags()
-	flags.StringVar(&opts.Profile, "profile", opts.Profile, "Credentials profile to read")
+	flags.StringVar(&opts.Profile, "profile", opts.Profile, "Credentials profile to read (default: active profile)")
 	flags.StringVar(&opts.CredentialsFile, "credentials-file", "", "Path to the shared Verda credentials file")
 	flags.BoolVarP(&opts.Yes, "yes", "y", false, "Skip confirmation (required in agent mode)")
 
@@ -187,7 +187,12 @@ func runDelete(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 				ExitCode: cmdutil.ExitBadArgs,
 			}
 		}
-		return runDeleteInteractive(ctx, f, ioStreams, lister, creds)
+		// cmd.Context() (not the per-request timeout ctx): the interactive
+		// flow includes user think-time across the repo picker, sub-menu,
+		// multi-select and confirm, so a 30s --timeout must not cancel a
+		// prompt mid-flow. Ctrl+C is the stop signal. The non-interactive
+		// target path below keeps the bounded ctx for its single API call.
+		return runDeleteInteractive(cmd.Context(), f, ioStreams, lister, creds)
 	}
 
 	return runDeleteTarget(ctx, f, ioStreams, lister, creds, target, opts.Yes)
@@ -433,7 +438,7 @@ func runDeleteInteractive(ctx context.Context, f cmdutil.Factory, ioStreams cmdu
 		}
 		labels = append(labels, "Exit")
 
-		idx, err := prompter.Select(ctx, "Select repository to manage (type to filter)", labels, tui.WithShowHints(true))
+		idx, err := prompter.Select(ctx, registryBreadcrumb(creds.Endpoint, ""), labels, tui.WithShowHints(true))
 		if err != nil {
 			return nil //nolint:nilerr // intentional: prompter cancel is a clean exit
 		}
@@ -444,8 +449,15 @@ func runDeleteInteractive(ctx context.Context, f cmdutil.Factory, ioStreams cmdu
 		selected := repos[idx]
 		exit, err := runDeleteRepoMenu(ctx, f, ioStreams, lister, creds, selected)
 		if err != nil {
-			// Surface the error but keep the outer loop alive so the
-			// user can recover (same contract as ls_test's
+			// access_denied is a permission wall, not a transient blip:
+			// every repo will fail the same way, so surface the actionable
+			// error once and exit rather than looping the user back into a
+			// picker that can only re-fail (mirrors ls's handling).
+			if isAccessDenied(err) {
+				return err
+			}
+			// Transient (e.g. 5xx): keep the outer loop alive so the user
+			// can recover (same contract as ls_test's
 			// "ArtifactsErrorStaysInLoop").
 			_, _ = fmt.Fprintf(ioStreams.ErrOut, "Error: %v\n", err)
 			continue
@@ -482,7 +494,7 @@ func runDeleteRepoMenu(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil
 
 	for {
 		idx, err := prompter.Select(ctx,
-			fmt.Sprintf("What would you like to delete in %s?", repo.Name), choices, tui.WithShowHints(true))
+			registryBreadcrumb(creds.Endpoint, repo.Name), choices, tui.WithShowHints(true))
 		if err != nil {
 			return true, nil //nolint:nilerr // intentional: prompter cancel is a clean exit
 		}
@@ -510,9 +522,9 @@ func runDeleteRepoMenu(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil
 }
 
 // runDeleteImagesInteractive lists artifacts in repo and runs a
-// MultiSelect picker over them. Ctrl-A (the built-in "select all" in
-// our bubbletea MultiSelect) is surfaced in the prompt label so users
-// discover it even when they skip the hint bar.
+// MultiSelect picker over them. The hint bar (WithMultiSelectShowHints)
+// advertises the toggle / ctrl+a-select-all / enter keys, matching the
+// s3 browser's multi-select affordances.
 //
 // The confirm step matches the "Delete image" dialog from the web UI:
 // one row per selected artifact, red warning, yes/no.
@@ -534,8 +546,8 @@ func runDeleteImagesInteractive(ctx context.Context, f cmdutil.Factory, ioStream
 
 	prompter := f.Prompter()
 	indices, err := prompter.MultiSelect(ctx,
-		"Select image(s) to delete (space toggles, ctrl+a selects all, enter confirms)",
-		labels)
+		"Select image(s) to delete",
+		labels, tui.WithMultiSelectShowHints(true))
 	if err != nil {
 		// User canceled the picker — back to the menu.
 		return nil //nolint:nilerr // intentional: prompter cancel is a clean exit
@@ -721,8 +733,8 @@ func formatArtifactRow(a *ArtifactInfo) string {
 	if a.Size > 0 {
 		size = formatBytes(a.Size)
 	}
-	return fmt.Sprintf("%-22s  %-30s  %10s",
-		shortDigest(a.Digest), truncateField(tag, 30), size)
+	return fmt.Sprintf("%s %-22s  %-30s  %10s",
+		artifactGlyph, shortDigest(a.Digest), truncateField(tag, 30), size)
 }
 
 // truncateField narrows a field to width, adding "..." when truncated.
