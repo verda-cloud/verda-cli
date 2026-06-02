@@ -1,6 +1,15 @@
 # Changelog
 
 
+## [v1.7.0] - 2026-06-02
+- [`312698c`] Feat/s3 commands
+- [`216f8d8`] Feat/container registry command
+- [`86f389a`] Feat: S3 object-storage command suite + serverless (container/batchjob, pre-release)
+- [`b5329fd`] Fix(s3): configure profile picker + rebuild mv wizard on the shared engine
+- [`c91b704`] Fix(s3): mv create-bucket override + configure picker credentials-file (Codex findings)
+- [`ce5656e`] Feat(help): show "s3 (beta)" tag in the root command list
+- [`42a5d2d`] Feat(registry): beta enablement + interactive wizards + active-profile fix
+
 ## [v1.6.3] - 2026-04-10
 - [`93d9d7a`] Fix/verda update code leak n new doctor
 
