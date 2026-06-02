@@ -21,6 +21,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// TagAnnotation marks a command with a short status label (e.g. "beta") shown
+// next to its name in the grouped root help. Set via cmd.Annotations.
+const TagAnnotation = "verda.tag"
+
 // CommandGroup represents a logical group of subcommands with a heading message.
 type CommandGroup struct {
 	Message  string
@@ -84,7 +88,11 @@ func SetUsageTemplate(cmd *cobra.Command, groups CommandGroups) {
 			if c.Hidden {
 				continue
 			}
-			fmt.Fprintf(&b, "  %-18s %s\n", c.Name(), c.Short)
+			name := c.Name()
+			if tag := c.Annotations[TagAnnotation]; tag != "" {
+				name += " (" + tag + ")"
+			}
+			fmt.Fprintf(&b, "  %-18s %s\n", name, c.Short)
 		}
 		b.WriteString("\n")
 	}

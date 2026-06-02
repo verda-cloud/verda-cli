@@ -37,7 +37,8 @@ func NewCmdS3(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 			Show current S3 credential status:
 			  verda s3 show
 		`),
-		Run: cmdutil.DefaultSubCommandRun(ioStreams.Out),
+		Annotations: map[string]string{cmdutil.TagAnnotation: "beta"},
+		Run:         cmdutil.DefaultSubCommandRun(ioStreams.Out),
 	}
 
 	cmd.AddCommand(
