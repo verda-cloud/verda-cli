@@ -16,6 +16,7 @@ package s3
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -24,6 +25,38 @@ import (
 
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
+
+// TestConfigureProfilePicker_HonorsCredentialsFile guards the Medium bug: the
+// profile picker must list the SAME file the save writes to. With
+// --credentials-file pointing at fileB, the picker should show fileB's profiles,
+// not those of the default/env file.
+func TestConfigureProfilePicker_HonorsCredentialsFile(t *testing.T) {
+	// No t.Parallel: t.Setenv.
+	dir := t.TempDir()
+	fileA := filepath.Join(dir, "default-creds")
+	fileB := filepath.Join(dir, "explicit-creds")
+	if err := os.WriteFile(fileA, []byte("[alpha]\nverda_s3_access_key = a\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(fileB, []byte("[beta]\nverda_s3_access_key = b\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("VERDA_SHARED_CREDENTIALS_FILE", fileA)
+
+	step := configureStepProfile(&configureOptions{CredentialsFile: fileB})
+	choices, err := step.Loader(context.Background(), nil, nil, nil)
+	if err != nil {
+		t.Fatalf("loader: %v", err)
+	}
+	var hasAlpha, hasBeta bool
+	for _, c := range choices {
+		hasAlpha = hasAlpha || c.Value == "alpha"
+		hasBeta = hasBeta || c.Value == "beta"
+	}
+	if !hasBeta || hasAlpha {
+		t.Errorf("choices = %+v; want beta (from --credentials-file) and not alpha", choices)
+	}
+}
 
 // TestConfigureFlagMode_DefaultsEndpointAndRegion verifies that supplying only
 // the keys runs non-interactively and fills in the default endpoint + region.

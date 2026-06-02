@@ -192,8 +192,9 @@ func moveStepNewDestBucket(st *moveWizardState) wizard.Step {
 			return nil
 		},
 		Setter: func(v any) { st.newDstBucket = strings.TrimSpace(v.(string)) },
-		// No-op: skipping (an existing dest bucket was chosen) must not clobber state.
-		Resetter: func() {},
+		// Clear on skip: picking an existing dest bucket must drop a stale name,
+		// else it overrides the chosen bucket in finalizeMove.
+		Resetter: func() { st.newDstBucket = "" },
 		IsSet:    func() bool { return false },
 		Value:    func() any { return st.newDstBucket },
 	}
