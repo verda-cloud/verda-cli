@@ -122,7 +122,7 @@ func runAdd(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, 
 			}
 			content = string(data)
 		case 1: // Paste content
-			content, err = prompter.Editor(ctx, "Script content (Ctrl+D to finish)",
+			content, err = prompter.Editor(ctx, "Script content",
 				tui.WithEditorDefault("#!/bin/bash\n\n# Your startup script here\n"),
 				tui.WithFileExt(".sh"))
 			if err != nil {

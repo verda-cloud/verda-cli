@@ -523,7 +523,7 @@ func stepStorage(getClient clientFunc, cache *apiCache, opts *createOptions) wiz
 				for i, c := range choices {
 					labels[i] = c.Label
 				}
-				idx, err := prompter.Select(ctx, "Storage", labels)
+				idx, err := prompter.Select(ctx, "Storage", labels, tui.WithShowHints(true))
 				if err != nil {
 					return nil, err
 				}
@@ -610,7 +610,7 @@ func stepSSHKeys(getClient clientFunc, opts *createOptions) wizard.Step {
 				for i, c := range choices {
 					labels[i] = c.Label
 				}
-				indices, err := prompter.MultiSelect(ctx, "SSH keys to inject", labels, tui.WithMinSelections(1))
+				indices, err := prompter.MultiSelect(ctx, "SSH keys to inject", labels, tui.WithMinSelections(1), tui.WithMultiSelectShowHints(true))
 				if err != nil {
 					return nil, err
 				}
@@ -692,7 +692,7 @@ func stepStartupScript(getClient clientFunc, opts *createOptions) wizard.Step {
 				for i, c := range choices {
 					labels[i] = c.Label
 				}
-				idx, err := prompter.Select(ctx, "Startup script (optional)", labels)
+				idx, err := prompter.Select(ctx, "Startup script (optional)", labels, tui.WithShowHints(true))
 				if err != nil {
 					return nil, err
 				}
