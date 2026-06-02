@@ -1,6 +1,9 @@
 # Changelog
 
 
+## [Unreleased]
+- [`3970e2d`] Fix(release): correct release notes + auto-update [Unreleased] changelog on merge
+
 ## [v1.7.1] - 2026-06-02
 - [`24c701a`] Fix(docs): use `verda --version`, not the non-existent `verda version`
 - [`a577165`] Fix(vm): restore hint bar on wizard's self-prompting pickers
