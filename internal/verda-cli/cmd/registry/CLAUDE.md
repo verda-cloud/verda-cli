@@ -5,13 +5,13 @@
 ## Quick Reference
 
 - Parent: `verda registry` (aliases: `vccr` canonical, `vcr` legacy)
-- Subcommands: `configure`, `show`, `login`, `ls`, `tags`, `push`, `copy` (alias `cp`), `delete` (aliases `del`, `rm`)
+- Subcommands: `configure`, `configure-docker` (alias `login`), `show`, `ls`, `tags`, `push`, `copy` (alias `cp`), `delete` (aliases `del`, `rm`)
 - Files:
-  - `registry.go` -- Parent command registration. `Hidden: true`; register gated on `VERDA_REGISTRY_ENABLED=1` in `cmd/cmd.go`.
+  - `registry.go` -- Parent command registration. Visible in `verda --help` with a `(beta)` marker on `Short`; registered unconditionally in `cmd/cmd.go` (no env gate).
   - `configure.go` -- Credential setup (three input modes: `--paste`, `--username/--password-stdin/--endpoint`, interactive wizard).
   - `wizard.go` -- Bubbletea wizard steps for `configure`.
   - `show.go` -- Credential status readout (no secrets); near-expiry warning when < 7 days.
-  - `login.go` -- Writes `~/.docker/config.json` so docker/compose/helm/nerdctl can auth against VCR. Pure file merge; no registry call.
+  - `login.go` -- The `configure-docker` command (alias `login`; `NewCmdLogin`/`runLogin` keep the internal "login" names since the merge writes a docker *login* entry). Writes `~/.docker/config.json` so docker/compose/helm/nerdctl can auth against VCR. Pure file merge; no registry call.
   - `client.go` -- `Registry` interface + `ggcrRegistry` production implementation. All `remote.*` and `authn`/`name` imports isolated here + a few siblings.
   - `helper.go` -- `clientBuilder` / `daemonListerBuilder` / `sourceLoaderBuilder` swap points. `loadCredsFromFactory` + default-profile fallback.
   - `path.go` -- Credentials file path resolution (`--credentials-file` > `VERDA_REGISTRY_CREDENTIALS_FILE` > `options.DefaultCredentialsFilePath()`).
@@ -27,11 +27,12 @@
   - `harbor.go` -- `RepositoryLister` interface (`ListRepositories` + `ListArtifacts` + `DeleteRepository` + `DeleteArtifact`) + `harborClient` implementation. Talks to Harbor's REST API v2.0 (`/api/v2.0/projects`, `/api/v2.0/repositories`, `/api/v2.0/projects/{p}/repositories/{r}[/artifacts[/{ref}]]`) using Basic auth. Intentionally separate from the `Registry` interface (which is Docker Registry v2 / ggcr shaped); see "List Repositories (ls)" and "Delete (`delete`)" below.
   - `ls.go` -- List repositories in the active Verda project via `harborClient`. Non-TTY + structured output render a flat table/document; TTY output routes through `f.Prompter().Select` so the user can pick a repo to drill into, at which point `ListArtifacts` fetches per-artifact detail (digest / tags / size / push / pull) for a Harbor-UI-style image card.
   - `delete.go` -- Delete a repository (all artifacts / tags) or a single image (artifact) in the active project via `harborClient`. Positional target shapes: `REPOSITORY`, `REPOSITORY:TAG`, `REPOSITORY@DIGEST`. TTY + no arg enters an interactive flow (pick repo → sub-menu → `MultiSelect` over artifacts for batch delete, or whole-repo delete). Agent mode requires `--yes`; missing `--yes` returns `CONFIRMATION_REQUIRED`. Reuses `Normalize` from `refname.go` plus a local `classifyTarget` to distinguish "bare repo" vs "artifact by tag" (because `Normalize` defaults `Tag` to `"latest"` for push/copy semantics — that default would smuggle a tag-delete otherwise).
-  - `tags.go` -- List tags + per-tag digest/size via `Head`.
-  - `push.go` -- Push local images (daemon/oci/tar). Handles zero-arg interactive picker. `runPickerFn` swap point.
+  - `tags.go` -- List tags + per-tag digest/size via `Head`. `Args: MaximumNArgs(1)`. On a TTY (non-agent, table format) `tags <repo>` reuses `ls.go`'s `runTagPicker` (`tagRowsToEntries` → filterable picker → prints a pull ref, using `cmd.Context()` so think-time can't cancel it); piped / structured / agent render the table. **Bare `tags`** (no repo) returns a friendly usage error pointing at `tags <repo>` / `ls` — `tags` is tag-centric (one repo); browsing repositories interactively is `ls`'s job (intentionally NOT duplicated here).
+  - `push.go` -- Push local images (daemon/oci/tar). Zero-arg on a TTY: if the daemon is reachable → daemon-image picker (`runPickerFn` swap point); if **not** reachable → `pushFileSourceFallback` (prompt source type → path → destination repo/tag, sets `opts.Source/Repo/Tag`) instead of dead-ending. `resolveZeroArgs`/`listAndPickImages` take `opts` so the fallback can set the source.
   - `push_view.go` -- Bubbletea model + renderer for the push/copy progress view. `isTerminalFn` swap point.
   - `push_picker.go` -- Bubbletea model for the interactive daemon-image picker (selectable list + `formatAgo` helper).
-  - `copy.go` -- Copy single ref / `--all-tags` between registries. `sourceKeychainBuilder` / `sourceRegistryBuilder` swap points; worker pool + overwrite guard.
+  - `copy.go` -- Copy single ref / `--all-tags` between registries. `sourceKeychainBuilder` / `sourceRegistryBuilder` swap points; worker pool + overwrite guard. `runCopy` (flag path) reads the `--src-auth basic` secret from stdin then calls `runCopyResolved`, the shared post-auth executor; `buildSourceAuth(opts, basicPassword)` takes the password as a string (stdin on the flag path, a prompt in the wizard).
+  - `copy_wizard.go` -- Interactive `copy` wizard (zero args on a TTY, gated by `copyWizardEligible`). s3-cp-style step-machine: source → access → scope → destination → confirm, Esc=back/Ctrl+C=exit. Collects into `opts` + a prompted password, then calls `runCopyResolved` so the wizard and flag paths share dry-run/overwrite/all-tags/progress behavior. `confirmAndRunCopy` previews the equivalent `verda registry copy …` command before executing.
   - `*_test.go` alongside each file.
 
 ## Domain-Specific Logic
@@ -52,9 +53,11 @@ Registry credentials are **write-once from the user's side**. The Verda API's `G
 - `translateErrorWithExpiry(err, creds)` (`errors.go`) maps a server-side 401 to `registry_credential_expired` when `creds.ExpiresAt` is in the past, otherwise to `registry_auth_failed`. This is the preferred error-translation entry point for any command that has creds in hand.
 - Legacy rows with `ExpiresAt.IsZero()` are treated as "not expired" — the server is authoritative. This keeps pre-Task-9 credentials working without a migration.
 
-### Profile Fallback (registry-specific)
+### Profile resolution (registry-specific)
 
-Registry commands are in `skipCredentialResolution` (see `cmd/cmd.go`), so `Options.Complete()` never runs and `AuthOptions.Profile` stays empty. `loadCredsFromFactory` in `helper.go` therefore falls back to `defaultProfileName` (`"default"`) when the profile is blank. Without this fallback, `LoadRegistryCredentialsForProfile(path, "")` would resolve ini.v1's synthetic `DEFAULT` section instead of the user's `[default]` section, and every registry command would falsely report "not configured" right after a successful `verda registry configure`. This mirrors the s3 package's pattern.
+Registry commands are in `skipCredentialResolution` (see `cmd/cmd.go`), so `Options.Complete()` never runs and the active profile is **not** auto-resolved the way it is for `verda vm`. `resolveProfile(flagProfile)` in `helper.go` replicates the precedence locally: **explicit `--profile` > `VERDA_PROFILE` / `auth.profile` (via `options.ActiveProfile`) > `"default"`**. Every subcommand's `--profile` flag now defaults to `""` (not `defaultProfileName`) so "unspecified" reaches `resolveProfile` and picks up the active profile; `loadCredsFromFactory` and `show`/`configure` all route through it.
+
+This matters because `configure`'s wizard picker already defaults to the active profile (`ActiveProfile`). Before the fix, the read commands hardcoded `"default"`, so a user whose active profile was e.g. `production` configured `production` but `ls`/`tags`/… silently read the stale `default` section — surfacing as a spurious `registry_credential_expired`. The `"default"` final fallback also avoids `LoadRegistryCredentialsForProfile(path, "")` resolving ini.v1's synthetic `DEFAULT` section instead of the user's `[default]`. An explicit `--profile X` always wins (resolution is idempotent). s3 has the same hardcoded-default shape and is a candidate for the same fix.
 
 ### ggcr Isolation Discipline
 
@@ -135,11 +138,10 @@ Before each `Write`, we `Head` the destination ref:
 
 `--dry-run` skips the guard entirely by design (it's asking "what would happen", not doing).
 
-### Feature Gate
+### Release Status (beta)
 
-- Parent command hidden via `Hidden: true` in `registry.go` so `verda --help` doesn't advertise it pre-GA.
-- Registration in `cmd/cmd.go` gated by `registryEnabled()` which reads `VERDA_REGISTRY_ENABLED=1` / `=true`. Without the env var, the command tree isn't registered at all and `verda registry ...` returns "unknown command".
-- **GA flip**: delete `registryEnabled()`, drop the gate in `NewRootCommand`, and remove `Hidden: true` from `registry.go`.
+- Registered unconditionally in `cmd/cmd.go` (the old `registryEnabled()` / `VERDA_REGISTRY_ENABLED` gate is gone) and listed in `verda --help` as `registry … (beta)` — the `(beta)` marker lives in the parent `Short` in `registry.go`, mirroring `cmd/mcp`'s convention.
+- **Beta caveat still open**: `push --no-mount` is accepted but a no-op (prints a notice). Resolve or hide it before dropping the `(beta)` marker for full GA. (`configure --docker-config` is now fully wired — see below.)
 
 ## Gotchas & Edge Cases
 
@@ -150,8 +152,12 @@ Before each `Write`, we `Head` the destination ref:
 - `TestPush_InteractiveMode_HappyPath` (and similar) uses `--progress plain` to bypass the TUI branch; the real bubbletea path is hard to drive in unit tests, so it's covered by model-level tests in `push_view_test.go` / `push_picker_test.go` instead.
 - `pushViewModel` (`push_view.go`) is **reused by `copy`** for both single-ref and `--all-tags`. The heading still says "Pushing N images" even in copy mode — a minor label mismatch, acceptable for v1; easy to swap in a dedicated copy header later.
 - The pre-flight `Head` on a copy destination relies on `translateTransportError` mapping a bare 404 (no structured `Diagnostic` body) to `registry_tag_not_found`. Without that fallthrough, non-existent destinations would surface as `registry_internal_error` and the overwrite guard would bail out before the first write.
-- `configure --docker-config` is accepted but not yet wired — it prints a TODO notice pointing at `verda registry login`.
+- `configure --docker-config` (and the wizard's "Also write ~/.docker/config.json?" step) writes the Docker config via the same `writeDockerLogin` merge `verda registry login` uses. A write failure is non-fatal — the Verda credentials are already saved, so configure warns and points at `registry login` for a retry rather than failing.
+- Wizard input modes (`configureStepInputMode` in `wizard.go`): the `input-mode` Select gates the paste step vs. the manual `username` + `secret` steps via each step's `ShouldSkip` reading `collected["input-mode"]`. The manual path has **no endpoint step** — the host is derived in `resolveRegistryInputs` (the `Username != "" && Secret != ""` branch) via `resolveEndpointForFlags` (saved host → `vccr.io`), with the project id parsed from the credential name by `projectIDFromUsername`. The manual branch is distinguished from the `--password-stdin` flag branch by a non-empty `opts.Secret` (the flag path leaves `Secret` empty and reads stdin). Skipped manual steps use no-op `Resetter`s so paste-mode doesn't clobber the paste-parsed `opts.Username`.
+- Overwrite guard (`confirmOverwriteIfConfigured` in `configure.go`): re-configuring a profile that already has registry creds is an **irreversible** replace (the secret is write-once). On a TTY it prompts to confirm (decline → clean abort, nothing written); in agent/non-TTY it proceeds (rotation intent) with a non-agent stderr note. Detection is `options.LoadRegistryCredentialsForProfile(...).HasCredentials()`; a load error is treated as "nothing to overwrite" so a first-time write is never blocked. The wizard's profile picker independently annotates each profile `registry configured` / `no registry credentials yet`.
 - Bubbletea output always goes to `ioStreams.ErrOut`. Stdout stays clean for structured / scripted consumption.
+- **Interactive prompts must use `cmd.Context()`, not the per-request timeout ctx** (`context.WithTimeout(cmd.Context(), f.Options().Timeout)`). Think-time across a picker/wizard easily exceeds the 30s default `--timeout`; a bounded ctx cancels the prompt mid-flow and the cancel is swallowed as a clean exit (the TUI just vanishes). `ls`/`delete`/`tags`/`copy`/`push` interactive flows pass `cmd.Context()`; the bounded ctx is used only for the up-front listing API call. (Per-call timeouts inside the interactive loop are a future refinement.)
+- `--src-auth basic` validation order matters: `readBasicSourcePassword` checks `--src-username` is set BEFORE reading stdin, so a missing username doesn't drain (and lose) a piped one-shot secret. `buildSourceAuth` keeps its own username + empty-password checks as the wizard-path guard.
 - `splitLocalRef` in `push.go` intentionally does **not** use `Normalize()` — Normalize prefixes with `creds.ProjectID`, which is correct for VCR destinations but would corrupt a local `my-app:v1` source ref. The host heuristic mirrors `isShortRef` (first segment is a host iff it contains `.` / `:` or is `localhost`).
 
 ## Relationships
@@ -204,11 +210,15 @@ Harbor's top-level `/repositories` endpoint has *two* filter syntaxes that look 
 
 1. `-o json|yaml` → `WriteStructured` → return. The picker never runs; scripts always get a deterministic document.
 2. `!isTerminalFn(ioStreams.Out)` → `renderLsHuman` → return. Same table the pre-drill-down `ls` used to produce. Piping to `less` / `jq` / CI logs hits this path.
-3. TTY → `runLsInteractive` loops the user through `prompter.Select` → `ListArtifacts(project, repo.Name)` → `renderRepoArtifacts`. Selecting "Exit" (the appended trailing label) or a prompter cancel error returns nil cleanly, same contract as `cmd/vm/list.go`. A transient `ListArtifacts` error is printed to ErrOut and the picker stays open — matching `vm list`'s "one flaky fetch doesn't kick the user out" behavior.
+3. TTY → `runLsInteractive` loops the repo picker (`prompter.Select`). Selecting a repo calls `ListArtifacts` then `runRepoActions` — a per-repo **action menu** (`prompter.Select`): **Get pull URL** → `runTagPicker`; **Delete image(s)…** → `runDeleteImagesInteractive` (the *same* multi-select + red-warning confirm flow `verda registry delete` uses — one destructive code path, not a copy); **← Back**. Selecting "Exit" on the repo picker or a prompter cancel returns nil cleanly, same contract as `cmd/vm/list.go`. `runLsInteractive` takes `*options.RegistryCredentials` (not just the host string) so it can hand creds to the delete flow. After a delete, `runRepoActions` re-fetches artifacts so a subsequent pull-URL pick reflects the change (the repo-picker counts are built once and may be stale — acceptable for v1).
+
+   `runTagPicker` lists the repo's tags newest-first (`buildTagEntries` sorts artifacts by `PushTime` desc, one row per tag, `<untagged>` rows for tagless artifacts), `prompter.Select`'s type-to-filter handles filtering, and selecting a row prints that tag's full pull reference (`repoPullBase + ":" + tag`, or `@digest` for untagged) to **stdout** so it's clean to copy, then **quits** — getting the URL is the goal, so a positive selection is the terminal action (`runTagPicker` returns quit=true). Esc / "Back" returns to the action menu; Ctrl+C quits.
+
+   `ListArtifacts` errors are classified by `isAccessDenied` (a translated `registry_access_denied` AgentError = Harbor 403). Harbor's artifact API needs a project permission the VCR robots issued today often lack, but the **Docker v2 tag list** (`Registry.Tags`, what `verda registry tags` uses) usually works for the same credential. So on access-denied, `tagsViaRegistry` falls back to `buildClient(creds, …).Tags(repo.FullName)` and, if it returns tags, drives the same `runTagPicker` (names only — no size/push-time from v2) so pull URLs still work. **Delete is intentionally not offered on the fallback path** — it goes through the same denied Harbor API. Only if the v2 list is *also* denied does `renderRepoPullPath` show just the repository pull reference. **Transient** (5xx) errors print to ErrOut and re-prompt — matching `vm list`'s "one flaky fetch doesn't kick the user out" behavior.
 
 `ListArtifacts` percent-encodes the repo name (`url.PathEscape`) because Harbor routes the path; the regression test `TestHarbor_ListArtifacts_URLEscapesRepoSlash` asserts the encoded form reaches the server. Unlike the repository-listing endpoint, the project-scoped `/repositories/{r}/artifacts` endpoint *does* work for the robot accounts VCR mints today (confirmed against staging, Apr 2026). If that changes, `translateHarborError` already maps 401/403 to the appropriate `registry_*` AgentError.
 
-The picker's per-row label is built by `formatRepoRow` (repo name padded to 48 cols + right-aligned artifact/pull counts + short-form "UPDATED" date). The image-list card is rendered by `renderRepoArtifacts`, columns mirror Harbor's web UI (`DIGEST` / `TAGS` / `SIZE` / `PUSHED` / `PULLED`). Zero-valued `PullTime` (Harbor's "never pulled" sentinel is the 0001-01-01 epoch) renders as `--`. Untagged artifacts (SBOMs, referrer manifests) show `<untagged>` in the TAGS column.
+The repo-picker per-row label is built by `formatRepoRow` (repo name padded to 48 cols + right-aligned artifact/pull counts + short-form "UPDATED" date). The interactive drill-down does **not** render the old `DIGEST`/`TAGS`/`SIZE`/`PUSHED`/`PULLED` table — that detailed, non-interactive view now lives only in `verda registry tags <repo>`; the `ls` drill-down is the action menu + tag picker described above. `repoPullBase` (used for both the tag picker and the access-denied path) prefers Harbor's `FullName` (already `<project>/<repo>`) and falls back to `project + "/" + Name`, defaulting the host to `defaultRegistryEndpoint`.
 
 ## Delete (`delete` / aliases `del`, `rm`)
 
@@ -250,6 +260,7 @@ Harbor returns HTTP 412 when a project policy — **Tag Immutability** or **Tag 
 2. Inner menu: "Delete image(s) from X", "Delete repository X (all images)", "Back to repository list", "Exit".
 3. The image-delete sub-flow uses `prompter.MultiSelect` with a label that surfaces the **Ctrl+A** "select all" keystroke — the bubbletea `MultiSelect` already supports it natively (see `verdagostack/pkg/tui/bubbletea/multiselect.go`), so we just advertise it in the prompt label and tests emulate it via `AddMultiSelect([]int{0, 1, ..., n-1})`.
 4. The image batch runs sequentially (Harbor has no bulk-delete endpoint). Failures on individual artifacts are collected and reported at the end; survivors still get deleted — users generally want partial progress, not all-or-nothing.
+5. Error handling in the outer loop classifies via `isAccessDenied` (shared with `ls`): a `registry_access_denied` (Harbor 403) is a permission wall — surface the actionable error once and **return** (exit), rather than looping the user back into a picker that can only re-fail. This is the common case for credentials minted before the Harbor image permission was granted (the error text tells them to re-`configure` with a fresh credential). Transient (5xx) errors still print + `continue` so one flaky fetch doesn't eject the user.
 
 ### Structured output (agent mode)
 
