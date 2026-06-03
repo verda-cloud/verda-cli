@@ -90,7 +90,7 @@ verda registry copy docker.io/library/nginx --all-tags
 verda registry copy gcr.io/my-project/app:v1 my-app:prod
 ```
 
-On a terminal, running `copy` with **no arguments** launches a wizard that mirrors `s3 cp`'s flow: enter the **source** image (validated), pick **source access** (public via `docker login` / anonymous / username+password), choose **scope** (just this tag / all tags), confirm the **destination** (pre-filled with the synthesized `vccr.io/<project>/<repo>:<tag>`), then review a `Will run: verda registry copy …` preview before it executes. Esc steps back a question; Ctrl+C exits. Scripts / `--agent` / `-o json` must pass `<src>` explicitly.
+On a terminal, running `copy` with **no arguments** launches a wizard that mirrors `object-storage cp`'s flow: enter the **source** image (validated), pick **source access** (public via `docker login` / anonymous / username+password), choose **scope** (just this tag / all tags), confirm the **destination** (pre-filled with the synthesized `vccr.io/<project>/<repo>:<tag>`), then review a `Will run: verda registry copy …` preview before it executes. Esc steps back a question; Ctrl+C exits. Scripts / `--agent` / `-o json` must pass `<src>` explicitly.
 
 ### 6. Delete a repository or image
 

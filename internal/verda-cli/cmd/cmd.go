@@ -35,8 +35,8 @@ import (
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/instancetypes"
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/locations"
 	mcpcmd "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/mcp"
+	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/objectstorage"
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/registry"
-	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/s3"
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/serverless"
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/settings"
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/skills"
@@ -81,7 +81,7 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) (*cobra.Command, *clioptions.Op
 			}
 
 			// Commands that legitimately run without resolved credentials (mcp serve,
-			// auth show/use, registry/s3/skills trees, doctor).
+			// auth show/use, registry/object-storage/skills trees, doctor).
 			if skipCredentialResolution(cmd) {
 				log.Init(opts.Log)
 				return nil
@@ -136,7 +136,7 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) (*cobra.Command, *clioptions.Op
 		instancetypes.NewCmdInstanceTypes(f, ioStreams),
 		locations.NewCmdLocations(f, ioStreams),
 		registry.NewCmdRegistry(f, ioStreams),
-		s3.NewCmdS3(f, ioStreams),
+		objectstorage.NewCmdObjectStorage(f, ioStreams),
 		sshkey.NewCmdSSHKey(f, ioStreams),
 		startupscript.NewCmdStartupScript(f, ioStreams),
 		template.NewCmdTemplate(f, ioStreams),
@@ -230,7 +230,7 @@ func skipCredentialResolution(cmd *cobra.Command) bool {
 		return true
 	case pName == "skills":
 		return true
-	case pName == "s3":
+	case pName == "object-storage":
 		return true
 	case pName == "registry":
 		return true

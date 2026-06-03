@@ -30,7 +30,7 @@ import (
 
 // newProfileSentinel is the Choice value for "create a new profile". A NUL
 // byte can't occur in an INI section name, so it never collides with a real
-// profile. Mirrors the s3 wizard's sentinel.
+// profile. Mirrors the object-storage wizard's sentinel.
 const newProfileSentinel = "\x00new-profile"
 
 // Credential input modes offered by the wizard, matching the two ways the web
@@ -165,7 +165,7 @@ func configureStepSecret(opts *configureOptions) wizard.Step {
 // registryProfileChoices lists existing credential profiles (each tagged with
 // whether it already holds registry credentials) plus a trailing "create new"
 // option. Reading the file fails soft: on any error the user still gets the
-// create-new choice. Mirrors the s3 wizard's profileChoices.
+// create-new choice. Mirrors the object-storage wizard's profileChoices.
 func registryProfileChoices(path string) []wizard.Choice {
 	profiles, _ := options.ListProfiles(path)
 	choices := make([]wizard.Choice, 0, len(profiles)+1)

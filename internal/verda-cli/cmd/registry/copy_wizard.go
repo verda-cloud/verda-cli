@@ -26,7 +26,7 @@ import (
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/options"
 )
 
-// copy wizard steps. Mirrors s3 cp's runUploadWizard step-machine: each step
+// copy wizard steps. Mirrors object-storage cp's runUploadWizard step-machine: each step
 // prompts, Esc steps back one, Ctrl+C exits, and a final confirm previews the
 // equivalent command before running the real copy pipeline.
 const (
@@ -154,7 +154,7 @@ func runCopyWizard(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOSt
 
 // classifyWizardNav maps a picker's returned error into back/exit/real outcomes.
 // Esc (IsPromptBack) steps back; Ctrl+C (IsPromptInterrupt) exits; a non-prompt
-// error propagates; nil advances. Mirrors s3 cp's classifyNav.
+// error propagates; nil advances. Mirrors object-storage cp's classifyNav.
 func classifyWizardNav(err error, firstStep bool) (back, exit bool, fatal error) {
 	switch {
 	case err == nil:

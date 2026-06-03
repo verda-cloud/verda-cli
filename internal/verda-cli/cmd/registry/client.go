@@ -31,7 +31,7 @@ import (
 // Docker Registry v2-compatible endpoint. The concrete implementation
 // lives in this file (ggcrRegistry) and is swappable via helper.go's
 // clientBuilder for tests. Keeping all go-containerregistry imports in
-// this file mirrors the s3 package's discipline of isolating SDK
+// this file mirrors the objectstorage package's discipline of isolating SDK
 // imports to client.go + errors.go.
 type Registry interface {
 	// Tags returns tag names for the given repository (e.g. "my-app" or "ns/app").
