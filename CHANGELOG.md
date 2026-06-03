@@ -3,6 +3,7 @@
 
 ## [Unreleased]
 - [`3970e2d`] Fix(release): correct release notes + auto-update [Unreleased] changelog on merge
+- [`165258e`] Feat(object-storage)!: rename s3 command to object-storage (aliases oss, d4)
 
 ## [v1.7.1] - 2026-06-02
 - [`24c701a`] Fix(docs): use `verda --version`, not the non-existent `verda version`
