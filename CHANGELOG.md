@@ -1,7 +1,7 @@
 # Changelog
 
 
-## [Unreleased]
+## [v1.7.2] - 2026-06-03
 - [`3970e2d`] Fix(release): correct release notes + auto-update [Unreleased] changelog on merge
 - [`165258e`] Feat(object-storage)!: rename s3 command to object-storage (aliases oss, d4)
 
