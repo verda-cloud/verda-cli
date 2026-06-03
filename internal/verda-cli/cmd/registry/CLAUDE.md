@@ -32,7 +32,7 @@
   - `push_view.go` -- Bubbletea model + renderer for the push/copy progress view. `isTerminalFn` swap point.
   - `push_picker.go` -- Bubbletea model for the interactive daemon-image picker (selectable list + `formatAgo` helper).
   - `copy.go` -- Copy single ref / `--all-tags` between registries. `sourceKeychainBuilder` / `sourceRegistryBuilder` swap points; worker pool + overwrite guard. `runCopy` (flag path) reads the `--src-auth basic` secret from stdin then calls `runCopyResolved`, the shared post-auth executor; `buildSourceAuth(opts, basicPassword)` takes the password as a string (stdin on the flag path, a prompt in the wizard).
-  - `copy_wizard.go` -- Interactive `copy` wizard (zero args on a TTY, gated by `copyWizardEligible`). s3-cp-style step-machine: source → access → scope → destination → confirm, Esc=back/Ctrl+C=exit. Collects into `opts` + a prompted password, then calls `runCopyResolved` so the wizard and flag paths share dry-run/overwrite/all-tags/progress behavior. `confirmAndRunCopy` previews the equivalent `verda registry copy …` command before executing.
+  - `copy_wizard.go` -- Interactive `copy` wizard (zero args on a TTY, gated by `copyWizardEligible`). object-storage cp-style step-machine: source → access → scope → destination → confirm, Esc=back/Ctrl+C=exit. Collects into `opts` + a prompted password, then calls `runCopyResolved` so the wizard and flag paths share dry-run/overwrite/all-tags/progress behavior. `confirmAndRunCopy` previews the equivalent `verda registry copy …` command before executing.
   - `*_test.go` alongside each file.
 
 ## Domain-Specific Logic
@@ -57,7 +57,7 @@ Registry credentials are **write-once from the user's side**. The Verda API's `G
 
 Registry commands are in `skipCredentialResolution` (see `cmd/cmd.go`), so `Options.Complete()` never runs and the active profile is **not** auto-resolved the way it is for `verda vm`. `resolveProfile(flagProfile)` in `helper.go` replicates the precedence locally: **explicit `--profile` > `VERDA_PROFILE` / `auth.profile` (via `options.ActiveProfile`) > `"default"`**. Every subcommand's `--profile` flag now defaults to `""` (not `defaultProfileName`) so "unspecified" reaches `resolveProfile` and picks up the active profile; `loadCredsFromFactory` and `show`/`configure` all route through it.
 
-This matters because `configure`'s wizard picker already defaults to the active profile (`ActiveProfile`). Before the fix, the read commands hardcoded `"default"`, so a user whose active profile was e.g. `production` configured `production` but `ls`/`tags`/… silently read the stale `default` section — surfacing as a spurious `registry_credential_expired`. The `"default"` final fallback also avoids `LoadRegistryCredentialsForProfile(path, "")` resolving ini.v1's synthetic `DEFAULT` section instead of the user's `[default]`. An explicit `--profile X` always wins (resolution is idempotent). s3 has the same hardcoded-default shape and is a candidate for the same fix.
+This matters because `configure`'s wizard picker already defaults to the active profile (`ActiveProfile`). Before the fix, the read commands hardcoded `"default"`, so a user whose active profile was e.g. `production` configured `production` but `ls`/`tags`/… silently read the stale `default` section — surfacing as a spurious `registry_credential_expired`. The `"default"` final fallback also avoids `LoadRegistryCredentialsForProfile(path, "")` resolving ini.v1's synthetic `DEFAULT` section instead of the user's `[default]`. An explicit `--profile X` always wins (resolution is idempotent). object-storage has the same hardcoded-default shape and is a candidate for the same fix.
 
 ### ggcr Isolation Discipline
 
@@ -123,7 +123,7 @@ Cloud registries (ECR / GCR / Artifact Registry / ACR / ...) don't need a separa
 
 ### `--yes` Implies `--overwrite` (copy)
 
-Matches s3's `rm`/`rb` pattern. Both flags can be set; if either is set, `copy` proceeds through pre-existing destination tags without prompting. In the `runCopy` body we normalize `opts.Yes -> opts.Overwrite` once, so everywhere downstream reads only `Overwrite`.
+Matches object-storage's `rm`/`rb` pattern. Both flags can be set; if either is set, `copy` proceeds through pre-existing destination tags without prompting. In the `runCopy` body we normalize `opts.Yes -> opts.Overwrite` once, so everywhere downstream reads only `Overwrite`.
 
 ### Overwrite Guard (copy)
 

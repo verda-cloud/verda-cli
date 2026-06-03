@@ -34,14 +34,14 @@ All commands: `--agent -o json` (except `verda ssh` and `verda auth show`).
 | "estimate", "how much will it cost" | `cost estimate` |
 | "connect", "SSH in", "remote access" | Tell user to run `verda ssh <host>` themselves (interactive) |
 | "login", "authenticate", "credentials" | `auth login` (user runs manually) |
-| "bucket", "S3", "object storage", "list buckets" | `s3 ls` |
-| "upload", "put file in bucket" | `s3 cp ./file s3://bucket/key` |
-| "download", "get file from bucket" | `s3 cp s3://bucket/key ./file` |
-| "sync", "mirror folder to/from bucket" | `s3 sync <src> <dst>` |
-| "delete object", "remove from bucket" | `s3 rm s3://bucket/key --yes` |
-| "make bucket", "create bucket" / "remove bucket" | `s3 mb` / `s3 rb --yes` |
-| "share link", "presigned URL", "temporary link" | `s3 presign s3://bucket/key` |
-| "set up S3", "configure object storage" | `s3 configure` (user runs manually — interactive) |
+| "bucket", "S3", "object storage", "list buckets" | `object-storage ls` |
+| "upload", "put file in bucket" | `object-storage cp ./file s3://bucket/key` |
+| "download", "get file from bucket" | `object-storage cp s3://bucket/key ./file` |
+| "sync", "mirror folder to/from bucket" | `object-storage sync <src> <dst>` |
+| "delete object", "remove from bucket" | `object-storage rm s3://bucket/key --yes` |
+| "make bucket", "create bucket" / "remove bucket" | `object-storage mb` / `object-storage rb --yes` |
+| "share link", "presigned URL", "temporary link" | `object-storage presign s3://bucket/key` |
+| "set up S3", "configure object storage" | `object-storage configure` (user runs manually — interactive) |
 
 ## Discovery
 
@@ -141,21 +141,22 @@ Hostname patterns: `{random}` → random words, `{location}` → location code
 
 ## Object Storage (S3)
 
+The `object-storage` command (aliases `oss`, `d4`) manages S3-compatible storage.
 Separate credentials from the main API (keys prefixed `verda_s3_`). Set up with
-`verda s3 configure` (interactive — user runs it). Check status first:
+`verda object-storage configure` (interactive — user runs it). Check status first:
 
 | Command | Key Flags | Output Fields |
 |---------|-----------|---------------|
-| `verda s3 show` | `--profile` | Text key:value (NOT JSON): `s3_configured: false` only when unset; otherwise `access_key_loaded`, `secret_key_loaded`, `endpoint`, `region`. Configured ⇔ `access_key_loaded: true` |
-| `verda s3 ls -o json` | — (lists buckets) | `buckets[]`: `name`, `created_at` |
-| `verda s3 ls s3://bucket[/prefix] -o json` | `--recursive`, `--human-readable`, `--summarize` | `objects[]`: `key`, `size`, `modified`; `common_prefixes[]` |
-| `verda s3 cp <src> <dst> -o json` | `--recursive`, `--include`, `--exclude`, `--content-type`, `--part-size`, `--concurrency`, `--no-resume`, `--dryrun` | `transfers[]`: `source`, `destination`, `bytes`, `status`; `summary` |
-| `verda s3 mv <src> <dst> -o json` | same as `cp` (minus resume flags) | same as `cp` (`status: "moved"`) |
-| `verda s3 rm s3://bucket/key -o json` | `--recursive`, `--include`, `--exclude`, `--dryrun`, **`--yes`** | `deleted[]`, `errors[]`, `dryrun` |
-| `verda s3 sync <src> <dst> -o json` | `--delete`, `--exact-timestamps`, `--include`, `--exclude`, `--dryrun` | `transfers[]`, `deleted[]`, `summary` |
-| `verda s3 mb s3://bucket -o json` | — | `bucket`, `created` |
-| `verda s3 rb s3://bucket -o json` | `--force` (empty first), **`--yes`** | `bucket`, `removed`, `objects_deleted` |
-| `verda s3 presign s3://bucket/key -o json` | `--expires-in` (e.g. `15m`, `24h`; default `1h`) | `url`, `expires_at` (table mode prints the bare URL to stdout) |
+| `verda object-storage show` | `--profile` | Text key:value (NOT JSON): `s3_configured: false` only when unset; otherwise `access_key_loaded`, `secret_key_loaded`, `endpoint`, `region`. Configured ⇔ `access_key_loaded: true` |
+| `verda object-storage ls -o json` | — (lists buckets) | `buckets[]`: `name`, `created_at` |
+| `verda object-storage ls s3://bucket[/prefix] -o json` | `--recursive`, `--human-readable`, `--summarize` | `objects[]`: `key`, `size`, `modified`; `common_prefixes[]` |
+| `verda object-storage cp <src> <dst> -o json` | `--recursive`, `--include`, `--exclude`, `--content-type`, `--part-size`, `--concurrency`, `--no-resume`, `--dryrun` | `transfers[]`: `source`, `destination`, `bytes`, `status`; `summary` |
+| `verda object-storage mv <src> <dst> -o json` | same as `cp` (minus resume flags) | same as `cp` (`status: "moved"`) |
+| `verda object-storage rm s3://bucket/key -o json` | `--recursive`, `--include`, `--exclude`, `--dryrun`, **`--yes`** | `deleted[]`, `errors[]`, `dryrun` |
+| `verda object-storage sync <src> <dst> -o json` | `--delete`, `--exact-timestamps`, `--include`, `--exclude`, `--dryrun` | `transfers[]`, `deleted[]`, `summary` |
+| `verda object-storage mb s3://bucket -o json` | — | `bucket`, `created` |
+| `verda object-storage rb s3://bucket -o json` | `--force` (empty first), **`--yes`** | `bucket`, `removed`, `objects_deleted` |
+| `verda object-storage presign s3://bucket/key -o json` | `--expires-in` (e.g. `15m`, `24h`; default `1h`) | `url`, `expires_at` (table mode prints the bare URL to stdout) |
 
 Rules:
 - **`src`/`dst`**: at least one must be an `s3://bucket/key` URI; the other may be a local path (upload/download) or another `s3://` URI (server-side copy).
@@ -193,5 +194,5 @@ Rules:
 | volume ID | `volume list` | `id` |
 | VM ID / hostname | `vm list` | `id`, `hostname` |
 | template name | `template list` | `name` |
-| bucket name | `s3 ls` | `buckets[].name` |
-| object key | `s3 ls s3://bucket` | `objects[].key` |
+| bucket name | `object-storage ls` | `buckets[].name` |
+| object key | `object-storage ls s3://bucket` | `objects[].key` |

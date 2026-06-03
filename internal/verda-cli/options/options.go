@@ -239,7 +239,7 @@ func (o *Options) Validate() error {
 }
 
 // ActiveProfile resolves the auth profile name for commands that skip
-// Options.Complete() (s3, registry — see skipCredentialResolution in cmd.go),
+// Options.Complete() (object-storage, registry — see skipCredentialResolution in cmd.go),
 // honoring the same precedence as full resolution: explicit flag > VERDA_PROFILE
 // env > config file (auth.profile, set by `verda auth use`). Returns "" when
 // none is set so the caller can apply its own default. Without this, those

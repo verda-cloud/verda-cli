@@ -87,7 +87,7 @@ func isStructuredFormat(format string) bool {
 // Harbor's web UI phrasing so the CLI and UI read the same.
 const untaggedLabel = "<untagged>"
 
-// Interactive-picker glyphs mirror the s3 browser's iconography so the two
+// Interactive-picker glyphs mirror the object-storage browser's iconography so the two
 // command trees read the same in interactive mode: 📦 a repository, 📄 an
 // image (artifact). See cmd/s3/browse.go for the originating convention.
 const (

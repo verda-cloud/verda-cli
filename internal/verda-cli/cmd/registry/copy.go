@@ -235,7 +235,7 @@ func runCopy(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams,
 //
 //nolint:gocritic // hugeParam: Ref is an immutable value type; contract uses value receivers uniformly (see refname.go).
 func runCopyResolved(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *copyOptions, args []string, creds *options.RegistryCredentials, srcRef Ref, srcAuth authn.Authenticator) error {
-	// --yes implies --overwrite — matches s3 rm/rb's pattern where --yes
+	// --yes implies --overwrite — matches object-storage rm/rb's pattern where --yes
 	// means "I've already decided." Keeping the two as separate flags lets
 	// a user say "overwrite yes, but also surface progress" without
 	// suppressing future confirmation prompts unrelated to this action.

@@ -524,7 +524,7 @@ func runDeleteRepoMenu(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil
 // runDeleteImagesInteractive lists artifacts in repo and runs a
 // MultiSelect picker over them. The hint bar (WithMultiSelectShowHints)
 // advertises the toggle / ctrl+a-select-all / enter keys, matching the
-// s3 browser's multi-select affordances.
+// object-storage browser's multi-select affordances.
 //
 // The confirm step matches the "Delete image" dialog from the web UI:
 // one row per selected artifact, red warning, yes/no.

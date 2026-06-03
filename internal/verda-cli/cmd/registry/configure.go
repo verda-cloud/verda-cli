@@ -185,7 +185,7 @@ func runConfigure(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStr
 // printConfigureIntro tells the user exactly where the docker-login string
 // lives in the Verda web UI before the wizard prompts for it. The path is
 // several clicks deep, so new users otherwise can't find the "Registry
-// authentication command" the paste step asks for. Mirrors s3's
+// authentication command" the paste step asks for. Mirrors objectstorage's
 // printConfigureIntro. Goes to ErrOut so stdout stays clean.
 func printConfigureIntro(ioStreams cmdutil.IOStreams) {
 	w := ioStreams.ErrOut
