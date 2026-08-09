@@ -104,9 +104,10 @@ func runRb(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, o
 		return err
 	}
 
-	// Interactive confirmation (TTY path).
+	// Interactive confirmation (TTY path). cmd.Context(): think-time is not
+	// --timeout-bounded and must not drain the delete budget below.
 	if !opts.Yes && !f.AgentMode() {
-		proceed, cerr := confirmRbDeletion(ctx, f, ioStreams, uri.Bucket, opts.Force)
+		proceed, cerr := confirmRbDeletion(cmd.Context(), f, ioStreams, uri.Bucket, opts.Force)
 		if cerr != nil {
 			return cerr
 		}
@@ -116,9 +117,13 @@ func runRb(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, o
 		}
 	}
 
+	// Fresh bound: the prompt above may have outlived the listing ctx.
+	execCtx, execCancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
+	defer execCancel()
+
 	objectsDeleted := 0
 	if opts.Force {
-		n, err := emptyBucket(ctx, f, ioStreams, client, uri.Bucket)
+		n, err := emptyBucket(execCtx, f, ioStreams, client, uri.Bucket)
 		if err != nil {
 			return err
 		}
@@ -127,11 +132,11 @@ func runRb(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, o
 
 	var sp interface{ Stop(string) }
 	if status := f.Status(); status != nil {
-		sp, _ = status.Spinner(ctx, fmt.Sprintf("Removing bucket %s...", uri.Bucket))
+		sp, _ = status.Spinner(execCtx, fmt.Sprintf("Removing bucket %s...", uri.Bucket))
 	}
 
 	in := &s3.DeleteBucketInput{Bucket: &uri.Bucket}
-	out, err := client.DeleteBucket(ctx, in)
+	out, err := client.DeleteBucket(execCtx, in)
 	if sp != nil {
 		sp.Stop("")
 	}

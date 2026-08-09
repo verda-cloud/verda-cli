@@ -98,7 +98,7 @@ The repo lints with `golangci-lint` via `make lint` (included in `make test`). T
 
 ### Every API-calling command MUST:
 
-1. **Timeout context**: `ctx, cancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)`
+1. **Timeout context**: `ctx, cancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)` for control-plane calls. Data-plane transfers (registry push/copy, object-storage cp/mv/sync) run on `cmd.Context()` — Ctrl+C is the stop signal; a multi-GB transfer legitimately outlives `--timeout`. Interactive prompts also get `cmd.Context()`, and work resumed after a prompt re-bounds its API ctx so prompt think-time can't drain the budget. The shared `http.Client` carries NO `Timeout` — the client cap covers whole-body reads and would clamp transfers.
 2. **Spinner**: Show spinner during API calls, stop before handling result
 3. **Debug output**: `cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), "label:", data)`
 4. **Dual mode**: Work with flags (non-interactive) AND prompts (interactive) — no partial wizard

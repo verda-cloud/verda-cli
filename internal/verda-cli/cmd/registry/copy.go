@@ -247,11 +247,18 @@ func runCopyResolved(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IO
 	srcReg := sourceRegistryBuilder(srcAuth, retryCfg)
 	dstReg := buildClient(creds, retryCfg)
 
-	ctx, cancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
-	defer cancel()
+	// Control plane (Tags/Head/manifest reads) stays bounded by --timeout.
+	// The Read+Write transfer is data-plane: a multi-GB image legitimately
+	// outlives the request timeout, so it runs on cmd.Context() with Ctrl+C
+	// as the stop signal (review H2; mirrors objectstorage cp, and the
+	// wizard path's promise in copy_wizard.go). Prompts hang off cmd ctx.
+	apiCtx, apiCancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
+	defer apiCancel()
+	transferCtx, transferCancel := context.WithCancel(cmd.Context())
+	defer transferCancel()
 
 	if opts.AllTags {
-		return runCopyAllTagsFlow(ctx, cancel, cmd, f, ioStreams, srcReg, dstReg, srcRef, args, creds, opts)
+		return runCopyAllTagsFlow(apiCtx, transferCtx, transferCancel, cmd, f, ioStreams, srcReg, dstReg, srcRef, args, creds, opts)
 	}
 
 	dstRef, err := resolveCopyDestination(args, srcRef, creds)
@@ -263,12 +270,12 @@ func runCopyResolved(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IO
 	dstString := dstRef.String()
 
 	if opts.DryRun {
-		return runCopyDryRunSingle(ctx, srcReg, srcString, dstString, f, ioStreams)
+		return runCopyDryRunSingle(apiCtx, srcReg, srcString, dstString, f, ioStreams)
 	}
 
 	// Overwrite guard: inspect dst before writing. Dry-run skips this by
 	// design (it never writes; the user is asking "what would happen").
-	decision, derr := resolveOverwriteDecision(ctx, dstReg, dstString, opts, f, ioStreams)
+	decision, derr := resolveOverwriteDecision(apiCtx, cmd.Context(), dstReg, dstString, opts, f, ioStreams)
 	if derr != nil {
 		return derr
 	}
@@ -289,7 +296,7 @@ func runCopyResolved(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IO
 		return nil
 	}
 
-	result := performCopy(ctx, cancel, srcReg, dstReg, srcString, dstString, creds, opts, f, ioStreams)
+	result := performCopy(transferCtx, transferCancel, srcReg, dstReg, srcString, dstString, creds, opts, f, ioStreams)
 
 	if isStructuredFormat(f.OutputFormat()) {
 		payload := buildCopyPayload(srcString, dstString, result)
@@ -793,8 +800,12 @@ func renderCopyDryRun(ioStreams cmdutil.IOStreams, outputFormat string, rows []c
 // the environment can't prompt and --overwrite/--yes wasn't provided); the
 // error return carries agent-mode CONFIRMATION_REQUIRED or a surfaced Head
 // error.
+//
+// ctx bounds the Head call; promptCtx carries the user's think-time
+// (cmd.Context()) so a slow answer can't be killed by --timeout.
 func resolveOverwriteDecision(
 	ctx context.Context,
+	promptCtx context.Context,
 	dstReg Registry,
 	dstString string,
 	opts *copyOptions,
@@ -829,7 +840,7 @@ func resolveOverwriteDecision(
 	if !isTerminalFn(ioStreams.ErrOut) {
 		return overwriteSkip, nil
 	}
-	confirmed, cerr := f.Prompter().Confirm(ctx,
+	confirmed, cerr := f.Prompter().Confirm(promptCtx,
 		fmt.Sprintf("Destination %s exists. Overwrite?", dstString),
 		tui.WithConfirmDefault(false),
 	)
@@ -1072,10 +1083,14 @@ func assembleAllTagsResults(
 // shape, fetches the tag list, and delegates the fan-out to
 // runCopyAllTagsPool.
 //
+// apiCtx bounds the control-plane calls (Tags/Head); transferCtx drives the
+// pool's transfers and is what the TUI's cancel func aborts.
+//
 //nolint:gocritic // hugeParam: Ref is an immutable value type; contract uses value receivers uniformly (see refname.go).
 func runCopyAllTagsFlow(
-	ctx context.Context,
-	cancel context.CancelFunc,
+	apiCtx context.Context,
+	transferCtx context.Context,
+	transferCancel context.CancelFunc,
 	cmd *cobra.Command,
 	f cmdutil.Factory,
 	ioStreams cmdutil.IOStreams,
@@ -1105,7 +1120,7 @@ func runCopyAllTagsFlow(
 	// host (source refs must be fully qualified). Without the prefix,
 	// ggcr would either fall back to docker.io or emit a hostless URL.
 	srcRepoPath := srcRef.Host + "/" + srcRef.FullRepository()
-	tags, err := srcReg.Tags(ctx, srcRepoPath)
+	tags, err := srcReg.Tags(apiCtx, srcRepoPath)
 	if err != nil {
 		return translateError(err)
 	}
@@ -1114,19 +1129,19 @@ func runCopyAllTagsFlow(
 	}
 
 	if opts.DryRun {
-		return runCopyDryRunAllTags(ctx, f, ioStreams, srcReg, srcRef, dstBase, tags)
+		return runCopyDryRunAllTags(apiCtx, f, ioStreams, srcReg, srcRef, dstBase, tags)
 	}
 
 	// Pre-flight overwrite check: we inspect every dst ref first so we can
 	// short-circuit before any Write lands. In agent mode the very first
 	// existing dst raises CONFIRMATION_REQUIRED; in interactive mode the
 	// user decides per-tag, and declined tags are recorded as skipped.
-	skip, oerr := resolveAllTagsOverwrite(ctx, dstReg, dstBase, tags, opts, f, ioStreams)
+	skip, oerr := resolveAllTagsOverwrite(apiCtx, cmd.Context(), dstReg, dstBase, tags, opts, f, ioStreams)
 	if oerr != nil {
 		return oerr
 	}
 
-	results := assembleAllTagsResults(ctx, cancel, srcReg, dstReg, srcRef, dstBase, tags, skip, creds, opts, f, ioStreams)
+	results := assembleAllTagsResults(transferCtx, transferCancel, srcReg, dstReg, srcRef, dstBase, tags, skip, creds, opts, f, ioStreams)
 	summary := summarizeCopyResults(results)
 
 	if handled, err := writeAllTagsStructured(ioStreams, f.OutputFormat(), results, summary); handled {
@@ -1480,9 +1495,13 @@ func newPartialFailureError(s allTagsSummary) error {
 // surface the issue ASAP so the caller can decide once rather than racing
 // partial writes. Non-TTY non-agent callers get the safe default (skip).
 //
+// ctx bounds the per-tag Head calls; promptCtx carries user think-time
+// (cmd.Context(), see resolveOverwriteDecision).
+//
 //nolint:gocritic // hugeParam: Ref is an immutable value type; contract uses value receivers uniformly (see refname.go).
 func resolveAllTagsOverwrite(
 	ctx context.Context,
+	promptCtx context.Context,
 	dstReg Registry,
 	dstBase Ref,
 	tags []string,
@@ -1518,7 +1537,7 @@ func resolveAllTagsOverwrite(
 			skip[tag] = struct{}{}
 			continue
 		}
-		confirmed, cerr := f.Prompter().Confirm(ctx,
+		confirmed, cerr := f.Prompter().Confirm(promptCtx,
 			fmt.Sprintf("Destination %s exists. Overwrite?", dstRef),
 			tui.WithConfirmDefault(false),
 		)

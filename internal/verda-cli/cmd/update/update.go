@@ -83,7 +83,9 @@ func NewCmdUpdate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 			}
 			if verify {
 				info := version.Get()
-				return runVerify(ioStreams.Out, ioStreams.ErrOut, f.OutputFormat(), f.HTTPClient(), info.GitVersion, runtime.GOOS, runtime.GOARCH)
+				verifyCtx, cancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
+				defer cancel()
+				return runVerify(verifyCtx, ioStreams.Out, ioStreams.ErrOut, f.OutputFormat(), f.HTTPClient(), info.GitVersion, runtime.GOOS, runtime.GOARCH)
 			}
 			return runUpdate(cmd.Context(), f, ioStreams, targetVersion)
 		},

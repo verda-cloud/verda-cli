@@ -16,6 +16,7 @@ package update
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -231,7 +232,7 @@ func TestFetchChecksums(t *testing.T) {
 	defer srv.Close()
 
 	client := srv.Client()
-	body, err := fetchChecksums(client, srv.URL)
+	body, err := fetchChecksums(context.Background(), client, srv.URL)
 	if err != nil {
 		t.Fatalf("fetchChecksums error: %v", err)
 	}
@@ -249,7 +250,7 @@ func TestFetchChecksums404(t *testing.T) {
 	defer srv.Close()
 
 	client := srv.Client()
-	_, err := fetchChecksums(client, srv.URL)
+	_, err := fetchChecksums(context.Background(), client, srv.URL)
 	if err == nil {
 		t.Fatal("expected error for 404")
 	}
@@ -278,7 +279,7 @@ func TestVerifyBinaryMatch(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	result, err := verifyBinary(srv.Client(), binPath, srv.URL, goos, goarch)
+	result, err := verifyBinary(context.Background(), srv.Client(), binPath, srv.URL, goos, goarch)
 	if err != nil {
 		t.Fatalf("verifyBinary error: %v", err)
 	}
@@ -311,7 +312,7 @@ func TestVerifyBinaryMismatch(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	result, err := verifyBinary(srv.Client(), binPath, srv.URL, goos, goarch)
+	result, err := verifyBinary(context.Background(), srv.Client(), binPath, srv.URL, goos, goarch)
 	if err != nil {
 		t.Fatalf("verifyBinary error: %v", err)
 	}
@@ -336,7 +337,7 @@ func TestRunVerifyDevBuild(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			var outBuf, errBuf bytes.Buffer
-			err := runVerify(&outBuf, &errBuf, "", nil, tt.version, "", "")
+			err := runVerify(context.Background(), &outBuf, &errBuf, "", nil, tt.version, "", "")
 			if err == nil {
 				t.Fatal("expected error for dev build")
 			}

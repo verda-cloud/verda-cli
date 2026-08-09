@@ -195,7 +195,7 @@ func runDelete(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 		return runDeleteInteractive(cmd.Context(), f, ioStreams, lister, creds)
 	}
 
-	return runDeleteTarget(ctx, f, ioStreams, lister, creds, target, opts.Yes)
+	return runDeleteTarget(ctx, cmd.Context(), f, ioStreams, lister, creds, target, opts.Yes)
 }
 
 // classifyTarget inspects the raw positional argument and decides whether
@@ -226,7 +226,12 @@ func classifyTarget(raw string) (isArtifact, isDigest bool) {
 // target, dispatch to repo-or-artifact delete. Shared by CLI users who
 // type a target explicitly AND by the interactive picker after the user
 // selects "Delete this repository".
-func runDeleteTarget(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams,
+//
+// ctx bounds the listing/lookup calls; promptCtx is the command root ctx —
+// prompts run on it directly (think-time is never --timeout-bounded) and
+// the post-confirm delete re-bounds from it so a slow answer can't hand
+// the delete an expired ctx.
+func runDeleteTarget(ctx, promptCtx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams,
 	lister RepositoryLister, creds *options.RegistryCredentials, target string, yes bool) error {
 	isArtifact, _ := classifyTarget(target)
 
@@ -258,9 +263,9 @@ func runDeleteTarget(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.I
 		if reference == "" {
 			reference = ref.Tag
 		}
-		return deleteArtifactFlow(ctx, f, ioStreams, lister, creds, ref.Repository, reference, yes)
+		return deleteArtifactFlow(ctx, promptCtx, f, ioStreams, lister, creds, ref.Repository, reference, yes)
 	}
-	return deleteRepositoryFlow(ctx, f, ioStreams, lister, creds, ref.Repository, yes)
+	return deleteRepositoryFlow(ctx, promptCtx, f, ioStreams, lister, creds, ref.Repository, yes)
 }
 
 // deleteRepositoryFlow implements the "Delete image repository" dialog
@@ -269,7 +274,7 @@ func runDeleteTarget(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.I
 // surfaces the blast radius ("this image repository holds N image"),
 // matching the UI. A failing count lookup degrades gracefully to a
 // generic "all artifacts" wording.
-func deleteRepositoryFlow(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams,
+func deleteRepositoryFlow(ctx, promptCtx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams,
 	lister RepositoryLister, creds *options.RegistryCredentials, repoName string, yes bool) error {
 	artifactCount := -1
 	if arts, err := lister.ListArtifacts(ctx, creds.ProjectID, repoName); err == nil {
@@ -281,7 +286,7 @@ func deleteRepositoryFlow(ctx context.Context, f cmdutil.Factory, ioStreams cmdu
 			return cmdutil.NewConfirmationRequiredError("delete")
 		}
 	} else {
-		confirmed, err := confirmDeleteRepository(ctx, f, ioStreams, repoName, artifactCount, yes)
+		confirmed, err := confirmDeleteRepository(promptCtx, f, ioStreams, repoName, artifactCount, yes)
 		if err != nil {
 			return err
 		}
@@ -297,7 +302,10 @@ func deleteRepositoryFlow(ctx context.Context, f cmdutil.Factory, ioStreams cmdu
 		"artifact_count": artifactCount,
 	})
 
-	err := cmdutil.RunWithSpinner(ctx, f.Status(), fmt.Sprintf("Deleting repository %s...", repoName), func(ctx context.Context) error {
+	// Fresh bound: think-time at the prompt above must not drain the delete.
+	execCtx, cancel := context.WithTimeout(promptCtx, f.Options().Timeout)
+	defer cancel()
+	err := cmdutil.RunWithSpinner(execCtx, f.Status(), fmt.Sprintf("Deleting repository %s...", repoName), func(ctx context.Context) error {
 		return lister.DeleteRepository(ctx, creds.ProjectID, repoName)
 	})
 	if err != nil {
@@ -332,7 +340,7 @@ func deleteRepositoryFlow(ctx context.Context, f cmdutil.Factory, ioStreams cmdu
 // the agent-mode payload carries those fields. On lookup failure we
 // proceed without the context (Harbor's DELETE is still safe — the
 // confirmation just shows less info).
-func deleteArtifactFlow(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams,
+func deleteArtifactFlow(ctx, promptCtx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams,
 	lister RepositoryLister, creds *options.RegistryCredentials, repoName, reference string, yes bool) error {
 	art := lookupArtifact(ctx, lister, creds.ProjectID, repoName, reference)
 
@@ -341,7 +349,7 @@ func deleteArtifactFlow(ctx context.Context, f cmdutil.Factory, ioStreams cmduti
 			return cmdutil.NewConfirmationRequiredError("delete")
 		}
 	} else {
-		confirmed, err := confirmDeleteArtifact(ctx, f, ioStreams, repoName, reference, art, yes)
+		confirmed, err := confirmDeleteArtifact(promptCtx, f, ioStreams, repoName, reference, art, yes)
 		if err != nil {
 			return err
 		}
@@ -357,7 +365,10 @@ func deleteArtifactFlow(ctx context.Context, f cmdutil.Factory, ioStreams cmduti
 		"reference":  reference,
 	})
 
-	err := cmdutil.RunWithSpinner(ctx, f.Status(), fmt.Sprintf("Deleting image %s...", reference), func(ctx context.Context) error {
+	// Fresh bound: think-time at the prompt above must not drain the delete.
+	execCtx, cancel := context.WithTimeout(promptCtx, f.Options().Timeout)
+	defer cancel()
+	err := cmdutil.RunWithSpinner(execCtx, f.Status(), fmt.Sprintf("Deleting image %s...", reference), func(ctx context.Context) error {
 		return lister.DeleteArtifact(ctx, creds.ProjectID, repoName, reference)
 	})
 	if err != nil {
@@ -513,7 +524,7 @@ func runDeleteRepoMenu(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil
 			// changed.
 			continue
 		case menuRepo:
-			if err := deleteRepositoryFlow(ctx, f, ioStreams, lister, creds, repo.Name, false); err != nil {
+			if err := deleteRepositoryFlow(ctx, ctx, f, ioStreams, lister, creds, repo.Name, false); err != nil {
 				return false, err
 			}
 			// A successful repo delete means there's nothing left to do

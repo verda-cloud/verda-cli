@@ -34,7 +34,10 @@ const objectPickerCap = 1000
 // selectBucket lists buckets and prompts the user to pick one. Returns the
 // chosen bucket name, or ("", nil) on a clean cancel (Ctrl+C/Esc) or when no
 // buckets exist — callers treat an empty name as "nothing to do, exit cleanly".
-func selectBucket(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client API) (string, error) {
+//
+// ctx bounds the ListBuckets call; promptCtx (the command root ctx) carries
+// the picker's think-time so --timeout never cancels a prompt mid-flow.
+func selectBucket(ctx, promptCtx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client API) (string, error) {
 	out, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading buckets...", func(ctx context.Context) (*s3.ListBucketsOutput, error) {
 		return client.ListBuckets(ctx, &s3.ListBucketsInput{})
 	})
@@ -50,7 +53,7 @@ func selectBucket(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOSt
 	for i := range out.Buckets {
 		labels[i] = aws.ToString(out.Buckets[i].Name)
 	}
-	idx, err := f.Prompter().Select(ctx, "Select bucket", labels, tui.WithShowHints(true))
+	idx, err := f.Prompter().Select(promptCtx, "Select bucket", labels, tui.WithShowHints(true))
 	if err != nil {
 		if cmdutil.IsPromptCancel(err) {
 			return "", nil
@@ -88,7 +91,7 @@ func resolveBucketArg(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.I
 	if err != nil {
 		return "", err
 	}
-	bucket, err := selectBucket(ctx, f, ioStreams, client)
+	bucket, err := selectBucket(ctx, cmd.Context(), f, ioStreams, client)
 	if err != nil {
 		return "", err
 	}

@@ -118,6 +118,14 @@ func newServer(t *testing.T) *mockapi.Server {
 // on interactive input hangs at the per-command timeout instead of passing.
 func runCLI(t *testing.T, srv *mockapi.Server, args ...string) cliResult {
 	t.Helper()
+	return runCLIEnv(t, srv, nil, args...)
+}
+
+// runCLIEnv is runCLI plus extra env entries appended after the hermetic
+// baseline (so they win over the stripped inherited vars — e.g.
+// VERDA_REGISTRY_CREDENTIALS_FILE for registry commands).
+func runCLIEnv(t *testing.T, srv *mockapi.Server, extraEnv []string, args ...string) cliResult {
+	t.Helper()
 	if verdaBin == "" {
 		t.Skip("contract suite requires building the binary (disabled with -short)")
 	}
@@ -133,7 +141,7 @@ func runCLI(t *testing.T, srv *mockapi.Server, args ...string) cliResult {
 
 	fullArgs := append([]string{"--base-url", srv.URL()}, args...)
 	cmd := exec.CommandContext(ctx, verdaBin, fullArgs...)
-	cmd.Env = cliEnv(t)
+	cmd.Env = append(cliEnv(t), extraEnv...)
 	cmd.Dir = t.TempDir()
 	cmd.Stdin = devNull
 	var stdout, stderr bytes.Buffer

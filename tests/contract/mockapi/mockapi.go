@@ -70,6 +70,7 @@ type Server struct {
 	volumes        map[string]*verda.Volume
 	sshKeys        map[string]*verda.SSHKey
 	failures       map[string]int // exact path -> HTTP status override
+	hangs          map[string]bool
 	forceFormToken bool
 	instanceGets   int // GET /instances/{id} count — status polling signal
 	idSeq          int
@@ -82,6 +83,7 @@ func New() *Server {
 		volumes:   map[string]*verda.Volume{},
 		sshKeys:   map[string]*verda.SSHKey{},
 		failures:  map[string]int{},
+		hangs:     map[string]bool{},
 	}
 
 	mux := http.NewServeMux()
@@ -121,6 +123,17 @@ func (s *Server) FailRoute(path string, status int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.failures[path] = status
+}
+
+// HangRoute makes requests to exact path block until the client cancels
+// (deadline, Ctrl+C, process exit) — never a timed sleep, so the suite stays
+// fast. Server-side it then answers 503; the client that gave up orderly will
+// already be gone. Regression pin for review H2: a control-plane call under
+// --timeout must fail fast instead of hanging on a wedged endpoint.
+func (s *Server) HangRoute(path string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.hangs[path] = true
 }
 
 // ClearFailures removes all route failure overrides.
@@ -202,12 +215,18 @@ func (s *Server) InstanceGetCount() int {
 	return s.instanceGets
 }
 
-// guard enforces failure overrides before routing.
+// guard enforces failure + hang overrides before routing.
 func (s *Server) guard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
 		status, fail := s.failures[r.URL.Path]
+		hang := s.hangs[r.URL.Path]
 		s.mu.Unlock()
+		if hang {
+			<-r.Context().Done()
+			writeError(w, http.StatusServiceUnavailable, "mock hung route: client context canceled")
+			return
+		}
 		if fail {
 			writeError(w, status, http.StatusText(status))
 			return

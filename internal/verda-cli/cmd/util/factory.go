@@ -61,7 +61,11 @@ func redactSensitiveJSON(s string) string {
 type Factory interface {
 	// ServerAddr returns the configured API server address.
 	ServerAddr() string
-	// HTTPClient returns a shared HTTP client with the configured timeout.
+	// HTTPClient returns a shared HTTP client. It intentionally has no
+	// client-level Timeout: that cap applies to whole-body reads and would
+	// kill long transfers. Callers bound requests with a context instead
+	// (control plane: WithTimeout(cmd.Context(), Options().Timeout); data
+	// plane: cmd.Context()).
 	HTTPClient() *http.Client
 	// Options returns the underlying Options for advanced use.
 	Options() *clioptions.Options
@@ -182,14 +186,16 @@ func (t *debugTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 
 // NewFactory creates a Factory from the given Options. debugOut receives
 // HTTP request/response dumps when --debug is enabled.
+//
+// The client has no client-level Timeout (review H2): Client.Timeout covers
+// the entire body read and silently clamped any request to opts.Timeout,
+// killing multi-GB transfers. Dial/TLS bounds stay on http.DefaultTransport;
+// per-call deadlines come from request contexts instead.
 func NewFactory(opts *clioptions.Options, debugOut io.Writer) Factory {
 	f := &factoryImpl{opts: opts}
 	var rt http.RoundTripper = &userAgentTransport{base: http.DefaultTransport, userAgent: userAgentString()}
 	rt = &debugTransport{base: rt, out: debugOut, enabled: f.Debug}
-	f.client = &http.Client{
-		Timeout:   opts.Timeout,
-		Transport: rt,
-	}
+	f.client = &http.Client{Transport: rt}
 	f.prompter = tui.Default()
 	f.status = tui.DefaultStatus()
 	return f

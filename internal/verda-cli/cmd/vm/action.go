@@ -214,8 +214,11 @@ func runAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 		opts.InstanceID = id
 	}
 
-	// Fetch instance details.
-	inst, err := client.Instances.GetByID(ctx, opts.InstanceID)
+	// Fetch instance details. Bare cmd.Context() would have no deadline now
+	// that the HTTP client carries no Timeout (review H2 sweep).
+	fetchCtx, fetchCancel := context.WithTimeout(ctx, f.Options().Timeout)
+	inst, err := client.Instances.GetByID(fetchCtx, opts.InstanceID)
+	fetchCancel()
 	if err != nil {
 		return fmt.Errorf("fetching instance: %w", err)
 	}
