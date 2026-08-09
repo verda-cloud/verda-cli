@@ -1,7 +1,7 @@
 # Changelog
 
 
-## [Unreleased]
+## [v1.8.0] - 2026-08-09
 - [`59bf886`] Refactor(tui): move TUI core in-tree under pkg/, remove GitNexus
 - [`98c3c45`] Fix(vm): don't offer "None (skip)" after queuing storage volumes
 - [`592e334`] Feat: architecture hardening — agent contract, pricing truth, wizard engine, timeouts, MCP, verified updates
