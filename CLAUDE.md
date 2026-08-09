@@ -6,12 +6,12 @@ Go CLI for Verda Cloud. Cobra commands + Bubble Tea TUI + lipgloss styling.
 
 ```bash
 make build        # Build binary to ./bin/verda
-make test         # Run all tests (go test + golangci-lint)
-make lint         # Lint only
+make test         # Run all tests (go test -race)
+make lint         # Lint only (golangci-lint); also run by pre-commit hooks
 make pre-commit   # Full pre-commit suite
 ```
 
-Never use raw `go test ./...` — always `make test` which includes linting.
+Never use raw `go test ./...` — always `make test` (go test -race). Lint is separate: `make lint`; the pre-commit hooks run both.
 
 ## Architecture
 
@@ -43,6 +43,9 @@ Each command directory has its own `CLAUDE.md` (domain knowledge) and `README.md
 | `cmd/registry/` | CLAUDE.md, README.md | Container registry (vccr.io): configure, configure-docker (alias login), show, ls, tags, push, copy, delete — beta (enabled by default, marked `(beta)` in `verda --help`) |
 | `cmd/update/` | CLAUDE.md, README.md | CLI self-update |
 | `cmd/settings/` | CLAUDE.md, README.md | CLI settings management |
+| `cmd/objectstorage/` | CLAUDE.md, README.md | S3-style object storage: configure, mb/rb, cp/mv/sync/ls/rm, uploads, presign |
+| `cmd/serverless/` | CLAUDE.md, README.md | Serverless containers and batch jobs |
+| `cmd/doctor/` | — | Environment diagnostics |
 | `cmd/availability/` | — | Instance availability by location |
 | `cmd/cost/` | — | Balance, running costs, estimates |
 | `cmd/images/` | — | OS image listing |
@@ -73,7 +76,7 @@ Each command directory has its own `CLAUDE.md` (domain knowledge) and `README.md
 
 ### Go House Style — avoid avoidable lint hits
 
-The repo lints with `golangci-lint` via `make lint` (included in `make test`). These are the patterns the linters enforce — write them correctly the first time instead of fixing them in a second pass:
+The repo lints with `golangci-lint` via `make lint` (also enforced by the pre-commit hooks, not by `make test`). These are the patterns the linters enforce — write them correctly the first time instead of fixing them in a second pass:
 
 - **HTTP bodies** — use `http.NoBody` for GET/DELETE/etc., never `nil`. Close with `defer func() { _ = resp.Body.Close() }()`, not bare `defer resp.Body.Close()` (errcheck).
 - **American English** — `behavior`, `canceled`, `artifact`, `checkered`, `gray`. `misspell` runs with `locale: US` and rejects British spellings in code and comments.
@@ -158,10 +161,11 @@ Before considering any change complete:
 
 ```bash
 make build                    # Must compile
-make test                     # Must pass (tests + lint)
+make test                     # Must pass (go test -race)
+make lint                     # Must pass (golangci-lint; also run by pre-commit hooks)
 ```
 
-`make test` runs `golangci-lint` — **never** report work as complete with lint failures outstanding. Fix them before the "done" message; don't defer to the pre-commit hook. See the "Go House Style" section above for the patterns that prevent the common hits.
+**Never** report work as complete with lint failures outstanding. Fix them before the "done" message; don't defer to the pre-commit hook. See the "Go House Style" section above for the patterns that prevent the common hits.
 
 If you modified a command, also verify:
 - `./bin/verda <command> --help` renders correctly

@@ -77,7 +77,7 @@ go install github.com/verda-cloud/verda-cli/cmd/verda@latest
 ```bash
 verda --version          # verify installation
 verda update             # update to latest
-verda update --version v1.0.0  # specific version
+verda update --target v1.0.0   # specific version
 ```
 
 ## Getting Started

@@ -72,13 +72,5 @@ func TestResolveCredentialsFileUsesDefault(t *testing.T) {
 
 func makeLocalTempDir(t *testing.T) string {
 	t.Helper()
-
-	dir, err := os.MkdirTemp(".", "tmp-test-")
-	if err != nil {
-		t.Fatalf("os.MkdirTemp() returned error: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = os.RemoveAll(dir)
-	})
-	return dir
+	return t.TempDir()
 }

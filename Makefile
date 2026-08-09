@@ -38,6 +38,7 @@ test-s3-integration: build ## Run S3 data-plane smoke test against a live endpoi
 
 fmt: ## Format code with gofmt and goimports
 	@gofmt -w .
+	@# local prefix has a known typo (missing .com, same as .golangci.yaml); fixing it would regroup ~100 files — deliberate deferral, see .golangci.yaml.
 	@goimports -w -local github/verda-cloud/verda-cli .
 	@go mod tidy
 
