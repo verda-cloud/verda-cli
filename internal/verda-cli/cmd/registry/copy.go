@@ -220,7 +220,7 @@ func runCopy(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams,
 	if err != nil {
 		return err
 	}
-	srcAuth, err := buildSourceAuth(opts, basicPassword)
+	srcAuth, err := buildSourceAuth(opts, srcRef, basicPassword)
 	if err != nil {
 		return err
 	}
@@ -567,8 +567,11 @@ func readBasicSourcePassword(opts *copyOptions, stdin io.Reader) (string, error)
 // on --src-auth. The basic secret is supplied by the caller (stdin on the flag
 // path, a prompt in the wizard). docker-config routes through the swappable
 // sourceKeychainBuilder so tests can assert which keychain was selected without
-// driving a real credential store.
-func buildSourceAuth(opts *copyOptions, basicPassword string) (authn.Authenticator, error) {
+// driving a real credential store; srcRef pins the keychain lookup to the
+// source registry's host.
+//
+//nolint:gocritic // hugeParam: Ref is an immutable value type; contract uses value receivers uniformly (see refname.go).
+func buildSourceAuth(opts *copyOptions, srcRef Ref, basicPassword string) (authn.Authenticator, error) {
 	switch opts.SrcAuth {
 	case srcAuthAnonymous:
 		return authn.Anonymous, nil
@@ -594,15 +597,12 @@ func buildSourceAuth(opts *copyOptions, basicPassword string) (authn.Authenticat
 		}), nil
 
 	case srcAuthDockerConfig, "":
-		// The keychain needs a Resource (host) to resolve against. We
-		// don't have the srcRef here — keychain callers pass the
-		// reference at call time. remote.WithAuth accepts a plain
-		// Authenticator though, not a Keychain, so we return a
-		// thin keychainAuth adapter that resolves lazily from the
-		// configured sourceKeychainBuilder. In practice the keychain
-		// is consulted once per Read and applied to every request for
-		// that session.
-		return &keychainAuth{keychain: sourceKeychainBuilder}, nil
+		// Resolve per source-registry host so private ghcr/ECR/GCR/ACR
+		// sources get their docker-config creds AND the Docker Hub entry
+		// is never presented to a different host (review H3). srcRef.Host
+		// is already normalized by Parse (ggcr rewrites docker.io to
+		// index.docker.io, which is what the keychain keys on).
+		return &keychainAuth{keychain: sourceKeychainBuilder, host: srcRef.Host}, nil
 
 	default:
 		return nil, &cmdutil.AgentError{
@@ -613,37 +613,30 @@ func buildSourceAuth(opts *copyOptions, basicPassword string) (authn.Authenticat
 	}
 }
 
-// keychainAuth adapts authn.Keychain to the authn.Authenticator contract
-// by deferring resolution until Authorization() is called. The keychain
-// itself decides which credential (docker-config, helper, anonymous) to
-// return per-host. If resolution fails we fall back to anonymous so
-// public images remain pullable even when the keychain is misconfigured.
+// keychainAuth adapts authn.Keychain to the authn.Authenticator contract.
+// Resolution is pinned to the source registry's host: the keychain decides
+// which credential (docker-config entry, helper, anonymous) applies to THAT
+// host. If resolution misses we fall back to anonymous so public images
+// remain pullable even when the keychain is misconfigured.
 type keychainAuth struct {
 	keychain authn.Keychain
-	// resource is the host the authenticator is currently being used
-	// against. Populated lazily on first Authorization() call via a
-	// side-channel setResource hook invoked by the ggcr transport
-	// machinery through the remote.Option path. In practice ggcr
-	// passes a Resource to Keychain.Resolve directly — we embed that
-	// lookup inline in Authorization so we don't depend on newer
-	// ContextKeychain APIs.
+	// host is the source registry (authn.Resource.RegistryStr()) the
+	// authenticator resolves against. Without it, a plain Authenticator
+	// adapter would resolve the keychain's default resource — Docker Hub —
+	// and send the Hub credential to whatever registry it talks to
+	// (review H3: scope-confusion secret leak).
+	host string
 }
 
-// Authorization resolves the keychain at call time. For single-host
-// copies the adapter is effectively memoized because remote.Image
-// captures the resolved Authenticator after the first request; for
-// v1 we re-resolve on every call, which is cheap for DefaultKeychain
-// (file read is cached internally by ggcr).
+// Authorization resolves the keychain for the pinned source host. For
+// single-host copies that's memoization-safe: every call hits the same
+// registry. DefaultKeychain caches the config-file read internally, so
+// re-resolving per call is cheap.
 func (k *keychainAuth) Authorization() (*authn.AuthConfig, error) {
-	// ggcr's keychain-aware call sites go through remote.WithAuthFromKeychain
-	// rather than an Authenticator adapter like this one — but remote.WithAuth
-	// is simpler and avoids a second option slot, so we adapt here. The
-	// resolve-without-resource fallback below returns the Docker Hub entry
-	// (keychain's default) which is the common public-image case.
 	if k.keychain == nil {
 		return (&authn.AuthConfig{}), nil
 	}
-	auth, err := k.keychain.Resolve(keychainResource{host: authn.DefaultAuthKey})
+	auth, err := k.keychain.Resolve(keychainResource{host: k.host})
 	if err != nil || auth == nil {
 		return (&authn.AuthConfig{}), nil //nolint:nilerr // fall back to anonymous for public images
 	}

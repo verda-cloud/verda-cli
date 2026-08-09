@@ -113,7 +113,7 @@ ggcr auto-emits `mount=<digest>&from=<existing-repo>` hints when it sees a layer
 
 `copy` runs two independent auth chains: VCR credentials on the destination (always the robot account from `~/.verda/credentials`), and a pluggable source-side chain selected by `--src-auth`:
 
-- `docker-config` (default) -- `authn.DefaultKeychain` via `sourceKeychainBuilder`. Reads `~/.docker/config.json`, honors `credsStore` / `credHelpers`, anonymous fallback. **If `docker pull <src>` works, `vccr copy <src>` reads the same creds.**
+- `docker-config` (default) -- `authn.DefaultKeychain` via `sourceKeychainBuilder`. Reads `~/.docker/config.json`, honors `credsStore` / `credHelpers`, anonymous fallback. **If `docker pull <src>` works, `vccr copy <src>` reads the same creds.** The keychain is resolved against the SOURCE registry's host (`keychainAuth.host` from the parsed src ref), so non-Hub private sources (ghcr/ECR/GCR/ACR) get their entry and the Hub credential is never presented to a foreign host.
 - `anonymous` -- sends no Authorization header. Used to bypass a stale docker-config entry, or to prove a source is actually public.
 - `basic` -- takes `--src-username` + secret via `--src-password-stdin`. The CLI never persists these to disk. `--debug` may still emit `Authorization` headers in its HTTP trace, so avoid `--debug` on shared terminals when using `basic`.
 
