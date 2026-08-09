@@ -386,3 +386,7 @@ docs/plans/
 # AI agent project-level configs (installed by users, not shipped)
 .cursor/
 .claude/skills/
+
+# The boilerplate *testing pattern above is for loose test junk; Go
+# pkg/.../testing/ dirs are library code (it once swallowed pkg/tui/testing).
+!**/testing/
