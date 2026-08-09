@@ -99,8 +99,9 @@ Credentials are resolved from multiple sources in order of precedence:
 | 3 | Environment variables | `VERDA_CLIENT_ID`, `VERDA_CLIENT_SECRET` |
 | 4 | Credentials file | `[default]` in `~/.verda/credentials` |
 
-> **Note:** When `--auth.profile` is passed explicitly, the credentials file
-> values for that profile override env vars — but CLI flags still win.
+> **Note:** `--auth.profile` / `VERDA_PROFILE` select WHICH credentials file
+> profile fills missing values; inline sources (flags, config, env — including
+> the `VERDA_AUTH_*` spellings) always win over stored profile values.
 
 ### Environment Variables
 
