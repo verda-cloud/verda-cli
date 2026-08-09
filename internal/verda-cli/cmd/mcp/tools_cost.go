@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
@@ -69,22 +70,35 @@ func (s *Server) handleGetBalance(ctx context.Context, _ mcp.CallToolRequest) (*
 
 //nolint:gocritic // hugeParam: handler signature defined by mcp-go.
 func (s *Server) handleEstimateCost(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	a := args(req)
+
+	instanceType, err := requiredString(a, "instance_type")
+	if err != nil {
+		return toolErrorResult(err), nil
+	}
+	spot, err := optionalBool(a, "spot")
+	if err != nil {
+		return toolErrorResult(err), nil
+	}
+	osVolumeGB, err := optionalInt(a, "os_volume_gb")
+	if err != nil {
+		return toolErrorResult(err), nil
+	}
+	storageGB, err := optionalInt(a, "storage_gb")
+	if err != nil {
+		return toolErrorResult(err), nil
+	}
+	storageType, err := optionalString(a, "storage_type")
+	if err != nil {
+		return toolErrorResult(err), nil
+	}
+	if storageType == "" {
+		storageType = verda.VolumeTypeNVMe
+	}
+
 	client, err := s.verdaClient()
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
-	}
-
-	instanceType, err := requiredString(args(req), "instance_type")
-	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
-	}
-
-	spot := optionalBool(args(req), "spot")
-	osVolumeGB := optionalInt(args(req), "os_volume_gb")
-	storageGB := optionalInt(args(req), "storage_gb")
-	storageType := optionalString(args(req), "storage_type")
-	if storageType == "" {
-		storageType = "NVMe"
 	}
 
 	// Get instance type pricing by fetching all types and filtering.
@@ -111,19 +125,9 @@ func (s *Server) handleEstimateCost(ctx context.Context, req mcp.CallToolRequest
 	// Get volume pricing (shared cmdutil helper: same formula as the CLI).
 	var osVolumeHourly, storageHourly float64
 	if osVolumeGB > 0 || storageGB > 0 {
-		volTypes, err := client.VolumeTypes.GetAllVolumeTypes(ctx)
+		osVolumeHourly, storageHourly, err = volumeHourlyRates(ctx, client, osVolumeGB, storageGB, storageType)
 		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
-		}
-		vtMap := make(map[string]verda.VolumeType, len(volTypes))
-		for _, vt := range volTypes {
-			vtMap[vt.Type] = vt
-		}
-		if vt, ok := vtMap[verda.VolumeTypeNVMe]; ok && osVolumeGB > 0 {
-			osVolumeHourly = cmdutil.VolumeHourlyPrice(vt.Price.PricePerMonthPerGB, osVolumeGB)
-		}
-		if vt, ok := vtMap[storageType]; ok && storageGB > 0 {
-			storageHourly = cmdutil.VolumeHourlyPrice(vt.Price.PricePerMonthPerGB, storageGB)
+			return toolErrorResult(err), nil
 		}
 	}
 
@@ -143,6 +147,38 @@ func (s *Server) handleEstimateCost(ctx context.Context, req mcp.CallToolRequest
 		},
 	}
 	return jsonResult(result)
+}
+
+// volumeHourlyRates prices the OS volume (always NVMe) and extra storage from
+// the API volume-type catalog. A type missing from the catalog fails loudly —
+// pricing it $0 would lie about cost (mirrors the CLI's volumeCostItem).
+func volumeHourlyRates(ctx context.Context, client *verda.Client, osVolumeGB, storageGB int, storageType string) (osHourly, storageHourly float64, err error) {
+	volTypes, err := client.VolumeTypes.GetAllVolumeTypes(ctx)
+	if err != nil {
+		return 0, 0, err
+	}
+	vtMap := make(map[string]verda.VolumeType, len(volTypes))
+	for _, vt := range volTypes {
+		vtMap[vt.Type] = vt
+	}
+
+	if osVolumeGB > 0 {
+		vt, ok := vtMap[verda.VolumeTypeNVMe]
+		if !ok {
+			return 0, 0, fmt.Errorf("volume type catalog has no %q entry; cannot price the OS volume (valid types: %s)",
+				verda.VolumeTypeNVMe, strings.Join(cmdutil.ValidVolumeTypeNames(vtMap), ", "))
+		}
+		osHourly = cmdutil.VolumeHourlyPrice(vt.Price.PricePerMonthPerGB, osVolumeGB)
+	}
+	if storageGB > 0 {
+		vt, ok := vtMap[storageType]
+		if !ok {
+			return 0, 0, invalidArgError("storage_type",
+				fmt.Sprintf("unknown volume type %q (valid types: %s)", storageType, strings.Join(cmdutil.ValidVolumeTypeNames(vtMap), ", ")))
+		}
+		storageHourly = cmdutil.VolumeHourlyPrice(vt.Price.PricePerMonthPerGB, storageGB)
+	}
+	return osHourly, storageHourly, nil
 }
 
 //nolint:gocritic // hugeParam: handler signature defined by mcp-go.

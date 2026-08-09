@@ -48,6 +48,15 @@ var VolumeTerminalStatuses = map[string]bool{
 	"detached": true,
 }
 
+// VolumeFailedStatuses contains volume statuses that mean the operation
+// failed; polling must stop and report an error instead of running until
+// timeout.
+var VolumeFailedStatuses = map[string]bool{
+	verda.VolumeStatusCanceled: true,
+	verda.VolumeStatusDeleted:  true,
+	"error":                    true, // no SDK constant exists; kept defensively
+}
+
 // InstanceStatusMessage returns a human-friendly message for an instance status.
 // Falls back to the raw status string if no mapping exists.
 func InstanceStatusMessage(status string) string {

@@ -97,6 +97,7 @@ func New() *Server {
 	mux.HandleFunc("POST /volumes", s.handleCreateVolume)
 	mux.HandleFunc("GET /volumes/{id}", s.handleGetVolume)
 	mux.HandleFunc("DELETE /volumes/{id}", s.handleDeleteVolume)
+	mux.HandleFunc("GET /volume-types", s.handleVolumeTypes)
 	mux.HandleFunc("GET /ssh-keys", s.handleListSSHKeys)
 	mux.HandleFunc("POST /ssh-keys", s.handleCreateSSHKey)
 	mux.HandleFunc("DELETE /ssh-keys/{id}", s.handleDeleteSSHKey)
@@ -593,6 +594,22 @@ func (s *Server) newVolumeSizedLocked(req *verda.VolumeCreateRequest, hostname s
 		vol.Type = req.Type
 	}
 	return vol
+}
+
+// --- volume types ---
+
+// NVMeMonthlyPerGB / HDDMonthlyPerGB are the mock volume-type catalog prices
+// (monthly per GiB), referenced by pricing/estimate tests.
+const (
+	NVMeMonthlyPerGB = 0.12
+	HDDMonthlyPerGB  = 0.035
+)
+
+func (s *Server) handleVolumeTypes(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, []verda.VolumeType{
+		{Type: verda.VolumeTypeNVMe, Price: verda.VolumeTypePrice{PricePerMonthPerGB: NVMeMonthlyPerGB}},
+		{Type: verda.VolumeTypeHDD, Price: verda.VolumeTypePrice{PricePerMonthPerGB: HDDMonthlyPerGB}},
+	})
 }
 
 // --- ssh keys ---

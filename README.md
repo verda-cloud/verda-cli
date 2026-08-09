@@ -157,6 +157,12 @@ Once configured, just talk to your agent:
 
 Credentials are shared with the CLI — run `verda auth login` first.
 
+### Safety contract
+
+Tools that create billed resources (`create_vm`, `create_volume`) require `confirm: true`, and `vm_action` requires it for the destructive actions (`shutdown`, `force_shutdown`, `hibernate`, `delete`) — the same gate as `--yes` in `--agent` mode. Without it the tool fails with `CONFIRMATION_REQUIRED` in the [agent error format](docs/agent-errors.md#mcp-server-tools), so the agent can present the exact action to the user and retry after approval.
+
+`vm_action` reports `status: "accepted"` once the API accepts the action; only `wait: true` polls the instance to its expected status and reports `"completed"` (`create_vm` waits by default). Argument types are validated strictly — wrong JSON types and unknown enum values fail with `VALIDATION_ERROR` instead of being silently coerced. The full tool/parameter reference lives in [cmd/mcp/README.md](internal/verda-cli/cmd/mcp/README.md).
+
 ### Agent Mode
 
 For scripts and agents that use the CLI directly (without MCP):

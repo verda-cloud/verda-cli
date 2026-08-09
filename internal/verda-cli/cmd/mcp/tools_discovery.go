@@ -76,6 +76,16 @@ func (s *Server) handleListLocations(ctx context.Context, _ mcp.CallToolRequest)
 //nolint:gocritic // hugeParam: handler signature defined by mcp-go.
 //nolint:gocritic // hugeParam: handler signature defined by mcp-go.
 func (s *Server) handleListInstanceTypes(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	a := args(req)
+	gpuOnly, err := optionalBool(a, "gpu_only")
+	if err != nil {
+		return toolErrorResult(err), nil
+	}
+	cpuOnly, err := optionalBool(a, "cpu_only")
+	if err != nil {
+		return toolErrorResult(err), nil
+	}
+
 	client, err := s.verdaClient()
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
@@ -85,9 +95,6 @@ func (s *Server) handleListInstanceTypes(ctx context.Context, req mcp.CallToolRe
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
-
-	gpuOnly := optionalBool(args(req), "gpu_only")
-	cpuOnly := optionalBool(args(req), "cpu_only")
 
 	if gpuOnly || cpuOnly {
 		filtered := types[:0]
@@ -108,14 +115,24 @@ func (s *Server) handleListInstanceTypes(ctx context.Context, req mcp.CallToolRe
 
 //nolint:gocritic // hugeParam: handler signature defined by mcp-go.
 func (s *Server) handleCheckAvailability(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	a := args(req)
+	location, err := optionalString(a, "location")
+	if err != nil {
+		return toolErrorResult(err), nil
+	}
+	instanceType, err := optionalString(a, "instance_type")
+	if err != nil {
+		return toolErrorResult(err), nil
+	}
+	spot, err := optionalBool(a, "spot")
+	if err != nil {
+		return toolErrorResult(err), nil
+	}
+
 	client, err := s.verdaClient()
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
-
-	location := optionalString(args(req), "location")
-	instanceType := optionalString(args(req), "instance_type")
-	spot := optionalBool(args(req), "spot")
 
 	// If checking a specific instance type, use the targeted API.
 	if instanceType != "" {
@@ -142,12 +159,15 @@ func (s *Server) handleCheckAvailability(ctx context.Context, req mcp.CallToolRe
 
 //nolint:gocritic // hugeParam: handler signature defined by mcp-go.
 func (s *Server) handleListImages(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	instanceType, err := optionalString(args(req), "instance_type")
+	if err != nil {
+		return toolErrorResult(err), nil
+	}
+
 	client, err := s.verdaClient()
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
-
-	instanceType := optionalString(args(req), "instance_type")
 
 	var images any
 

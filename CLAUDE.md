@@ -50,7 +50,7 @@ Each command directory has its own `CLAUDE.md` (domain knowledge) and `README.md
 | `cmd/locations/` | — | Datacenter locations |
 | `cmd/status/` | — | Status dashboard |
 | `cmd/ssh/` | — | SSH into instances |
-| `cmd/mcp/` | — | MCP server |
+| `cmd/mcp/` | CLAUDE.md, README.md | MCP server (AI-agent tool surface; confirm gates, accepted/completed semantics) |
 | `cmd/skills/` | — | AI skills management |
 | `cmd/completion/` | — | Shell completions |
 

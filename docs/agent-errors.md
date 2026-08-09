@@ -246,3 +246,17 @@ Errors are classified in this priority order:
 - Error types: `internal/verda-cli/cmd/util/agent_error.go`
 - Classification: `ClassifyError()` in the same file
 - Entry point: `cmd/verda/main.go` calls `ClassifyError()` on all errors
+
+## MCP server tools
+
+Tools exposed by `verda mcp serve` reuse this contract with one transport difference: MCP has no stderr/exit codes, so tool failures arrive as tool results with `isError: true` whose **text payload is the same JSON envelope**. Argument-contract errors produced inside the MCP server use these codes:
+
+- `CONFIRMATION_REQUIRED` — billing/destructive tool called without `confirm: true`; `details.action` names the gated action
+- `MISSING_REQUIRED_FLAGS` — required tool argument absent; `details.missing` lists them
+- `VALIDATION_ERROR` — argument type/out-of-set value rejected; `details.field` + `details.reason`
+
+```json
+{"error": {"code": "CONFIRMATION_REQUIRED", "message": "action \"delete\" creates billing or destructive changes and requires an explicit confirm: true argument", "details": {"action": "delete"}}}
+```
+
+All other tool failures (API errors, auth, unknown IDs) arrive as plain-text `isError` results. See `internal/verda-cli/cmd/mcp/README.md` for the full tool reference.

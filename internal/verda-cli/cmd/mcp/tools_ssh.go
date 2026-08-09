@@ -54,6 +54,11 @@ func (s *Server) registerSSHTools() {
 
 //nolint:gocritic // hugeParam: handler signature defined by mcp-go.
 func (s *Server) handleListSSHKeys(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	search, err := optionalString(args(req), "search")
+	if err != nil {
+		return toolErrorResult(err), nil
+	}
+
 	client, err := s.verdaClient()
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
@@ -64,7 +69,7 @@ func (s *Server) handleListSSHKeys(ctx context.Context, req mcp.CallToolRequest)
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	if search := optionalString(args(req), "search"); search != "" {
+	if search != "" {
 		lower := strings.ToLower(search)
 		filtered := keys[:0]
 		for i := range keys {
@@ -87,11 +92,11 @@ func (s *Server) handleAddSSHKey(ctx context.Context, req mcp.CallToolRequest) (
 
 	name, err := requiredString(args(req), "name")
 	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
+		return toolErrorResult(err), nil
 	}
 	publicKey, err := requiredString(args(req), "public_key")
 	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
+		return toolErrorResult(err), nil
 	}
 
 	key, err := client.SSHKeys.AddSSHKey(ctx, &verda.CreateSSHKeyRequest{
@@ -106,19 +111,23 @@ func (s *Server) handleAddSSHKey(ctx context.Context, req mcp.CallToolRequest) (
 
 //nolint:gocritic // hugeParam: handler signature defined by mcp-go.
 func (s *Server) handleGetSSHCommand(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	if _, err := s.verdaClient(); err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
+	a := args(req)
+	idOrHostname, err := requiredString(a, "id_or_hostname")
+	if err != nil {
+		return toolErrorResult(err), nil
+	}
+	user, err := optionalString(a, "user")
+	if err != nil {
+		return toolErrorResult(err), nil
+	}
+	keyPath, err := optionalString(a, "key_path")
+	if err != nil {
+		return toolErrorResult(err), nil
 	}
 
-	idOrHostname, err := requiredString(args(req), "id_or_hostname")
-	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
-	}
-	user := optionalString(args(req), "user")
 	if user == "" {
 		user = "root"
 	}
-	keyPath := optionalString(args(req), "key_path")
 
 	// Try to resolve the instance to get the IP.
 	inst, err := s.resolveInstance(ctx, idOrHostname)
