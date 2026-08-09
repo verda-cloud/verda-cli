@@ -42,16 +42,31 @@ import (
 
 const (
 	repo        = "verda-cloud/verda-cli"
-	apiBase     = "https://api.github.com"
 	httpTimeout = 60 * time.Second
 	osWindows   = "windows"
+	zipExt      = "zip"
+
+	binNameUnix = "verda"
+	binNameWin  = "verda.exe"
 )
+
+// apiBase is a var so tests can point the GitHub client at a fixture server.
+var apiBase = "https://api.github.com"
+
+// platformBinaryName returns the installed binary name for the current OS.
+func platformBinaryName() string {
+	if runtime.GOOS == osWindows {
+		return binNameWin
+	}
+	return binNameUnix
+}
 
 // NewCmdUpdate creates the update command.
 func NewCmdUpdate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 	var targetVersion string
 	var listVersions bool
 	var verify bool
+	var skipVerify bool
 
 	cmd := &cobra.Command{
 		Use:   "update",
@@ -61,6 +76,11 @@ func NewCmdUpdate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 			No Go installation required.
 
 			The binary is installed to ~/.verda/bin/ (no sudo required).
+
+			The downloaded archive is verified against the release's SHA256SUMS
+			before the running binary is replaced; on any verification failure
+			the update aborts and the binary is left untouched. Use --skip-verify
+			only as a deliberate escape hatch.
 
 			Without flags, updates to the latest version.
 			Use --target to install a specific version (upgrade or downgrade).
@@ -87,13 +107,14 @@ func NewCmdUpdate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 				defer cancel()
 				return runVerify(verifyCtx, ioStreams.Out, ioStreams.ErrOut, f.OutputFormat(), f.HTTPClient(), info.GitVersion, runtime.GOOS, runtime.GOARCH)
 			}
-			return runUpdate(cmd.Context(), f, ioStreams, targetVersion)
+			return runUpdate(cmd.Context(), f, ioStreams, targetVersion, skipVerify)
 		},
 	}
 
 	cmd.Flags().StringVar(&targetVersion, "target", "", "Version to install (e.g. v1.0.0)")
 	cmd.Flags().BoolVar(&listVersions, "list", false, "List available versions")
 	cmd.Flags().BoolVar(&verify, "verify", false, "Verify the binary checksum against the GitHub release")
+	cmd.Flags().BoolVar(&skipVerify, "skip-verify", false, "Skip checksum verification of the downloaded release archive (NOT recommended)")
 
 	return cmd
 }
@@ -119,7 +140,17 @@ func runList(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams
 	return nil
 }
 
-func runUpdate(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, targetVersion string) error {
+// updateResult is the machine-readable (-o json / --agent) update outcome.
+type updateResult struct {
+	Version          string `json:"version"`
+	PreviousVersion  string `json:"previousVersion"`
+	Path             string `json:"path,omitempty"`
+	Updated          bool   `json:"updated"`
+	ChecksumVerified bool   `json:"checksumVerified"`
+}
+
+func runUpdate(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, targetVersion string, skipVerify bool) error {
+	format := f.OutputFormat()
 	current := version.Get().GitVersion
 	if !strings.HasPrefix(current, "v") {
 		current = "v" + current
@@ -139,6 +170,10 @@ func runUpdate(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStrea
 	}
 
 	if target == current {
+		res := updateResult{Version: current, PreviousVersion: current}
+		if wrote, err := cmdutil.WriteStructured(ioStreams.Out, format, res); wrote {
+			return err
+		}
 		_, _ = fmt.Fprintf(ioStreams.Out, "Already at %s\n", current)
 		return nil
 	}
@@ -152,12 +187,12 @@ func runUpdate(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStrea
 		"arch":    runtime.GOARCH,
 	})
 
-	// Download.
+	// Download (checksum-verified unless --skip-verify).
 	var sp interface{ Stop(string) }
 	if status := f.Status(); status != nil {
 		sp, _ = status.Spinner(ctx, fmt.Sprintf("Downloading %s...", target))
 	}
-	binary, err := downloadRelease(ctx, target)
+	binary, err := downloadRelease(ctx, target, skipVerify)
 	if sp != nil {
 		sp.Stop("")
 	}
@@ -170,24 +205,33 @@ func runUpdate(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStrea
 	if err != nil {
 		return fmt.Errorf("preparing install directory: %w", err)
 	}
-	binaryName := "verda"
-	if runtime.GOOS == osWindows {
-		binaryName = "verda.exe"
-	}
-	dst := filepath.Join(binDir, binaryName)
+	dst := filepath.Join(binDir, platformBinaryName())
 
 	if err := replaceBinary(dst, binary); err != nil {
 		return fmt.Errorf("replacing binary: %w", err)
 	}
 
-	_, _ = fmt.Fprintf(ioStreams.Out, "Updated to %s\n", target)
+	res := updateResult{
+		Version:          target,
+		PreviousVersion:  current,
+		Path:             dst,
+		Updated:          true,
+		ChecksumVerified: !skipVerify,
+	}
+	if wrote, werr := cmdutil.WriteStructured(ioStreams.Out, format, res); wrote {
+		if werr != nil {
+			return werr
+		}
+	} else {
+		_, _ = fmt.Fprintf(ioStreams.Out, "Updated to %s\n", target)
+	}
 
 	// Update installed skills if any agents have them.
 	updateInstalledSkills(ctx, dst, ioStreams)
 
 	// Migrate: if the currently running binary is outside ~/.verda/bin/,
 	// handle the old location based on how it was installed.
-	oldExe, _ := resolveExecutable()
+	oldExe, _ := executablePath()
 	if oldExe != "" && oldExe != dst {
 		if isManagedByPackageManager(oldExe) {
 			// Installed via Homebrew, apt, rpm, etc. — don't touch it.
@@ -254,7 +298,7 @@ func fetchVersions(ctx context.Context) ([]string, error) {
 	return versions, nil
 }
 
-func downloadRelease(ctx context.Context, tag string) ([]byte, error) {
+func downloadRelease(ctx context.Context, tag string, skipVerify bool) ([]byte, error) {
 	// Fetch release to get asset URLs.
 	url := fmt.Sprintf("%s/repos/%s/releases/tags/%s", apiBase, repo, tag)
 	var rel ghRelease
@@ -266,24 +310,51 @@ func downloadRelease(ctx context.Context, tag string) ([]byte, error) {
 	versionNum := strings.TrimPrefix(tag, "v")
 	ext := "tar.gz"
 	if runtime.GOOS == osWindows {
-		ext = "zip"
+		ext = zipExt
 	}
 	assetName := fmt.Sprintf("verda_%s_%s_%s.%s", versionNum, runtime.GOOS, runtime.GOARCH, ext)
 
-	var downloadURL string
-	for i := range rel.Assets {
-		if rel.Assets[i].Name == assetName {
-			downloadURL = rel.Assets[i].BrowserDownloadURL
-			break
-		}
-	}
+	downloadURL := findAssetURL(&rel, assetName)
 	if downloadURL == "" {
 		return nil, fmt.Errorf("no asset %q found in release %s", assetName, tag)
 	}
 
 	// Download the archive.
 	client := &http.Client{Timeout: httpTimeout}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, http.NoBody)
+	archiveData, err := downloadAsset(ctx, client, downloadURL)
+	if err != nil {
+		return nil, err
+	}
+
+	// Integrity gate: verify the archive bytes against the release's archive
+	// sums (goreleaser checksum pipe output verda_<VER>_SHA256SUMS) before
+	// anything is extracted or replaced. Fails closed unless --skip-verify.
+	if !skipVerify {
+		if err := verifyReleaseArchive(ctx, client, &rel, archiveData, assetName, versionNum); err != nil {
+			return nil, err
+		}
+	}
+
+	// Extract the binary from the archive.
+	binaryName := platformBinaryName()
+	if ext == zipExt {
+		return extractFromZip(archiveData, binaryName)
+	}
+	return extractFromTarGz(archiveData, binaryName)
+}
+
+// findAssetURL returns the browser download URL of the named release asset.
+func findAssetURL(rel *ghRelease, name string) string {
+	for i := range rel.Assets {
+		if rel.Assets[i].Name == name {
+			return rel.Assets[i].BrowserDownloadURL
+		}
+	}
+	return ""
+}
+
+func downloadAsset(ctx context.Context, client *http.Client, url string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 	if err != nil {
 		return nil, err
 	}
@@ -295,22 +366,31 @@ func downloadRelease(ctx context.Context, tag string) ([]byte, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("download failed: HTTP %d", resp.StatusCode)
 	}
+	return io.ReadAll(resp.Body)
+}
 
-	archiveData, err := io.ReadAll(resp.Body)
+// verifyReleaseArchive checks the downloaded archive against the release's
+// archive sums file. Any fetch/parse/mismatch failure aborts the update.
+func verifyReleaseArchive(ctx context.Context, client *http.Client, rel *ghRelease, archiveData []byte, assetName, versionNum string) error {
+	sumsName := fmt.Sprintf("verda_%s_SHA256SUMS", versionNum)
+	sumsURL := findAssetURL(rel, sumsName)
+	if sumsURL == "" {
+		return checksumAbort(fmt.Errorf("checksum file %q not found in release assets", sumsName))
+	}
+	sumsBody, err := fetchChecksums(ctx, client, sumsURL)
 	if err != nil {
-		return nil, err
+		return checksumAbort(err)
 	}
+	if err := verifyArchiveChecksum(archiveData, sumsBody, assetName); err != nil {
+		return checksumAbort(err)
+	}
+	return nil
+}
 
-	// Extract the binary from the archive.
-	binaryName := "verda"
-	if runtime.GOOS == osWindows {
-		binaryName = "verda.exe"
-	}
-
-	if ext == "zip" {
-		return extractFromZip(archiveData, binaryName)
-	}
-	return extractFromTarGz(archiveData, binaryName)
+// checksumAbort wraps a verification failure so the message names the
+// --skip-verify escape hatch and states that the binary was left untouched.
+func checksumAbort(err error) error {
+	return fmt.Errorf("checksum verification failed: %w; update aborted, binary left untouched (use --skip-verify to bypass)", err)
 }
 
 func extractFromTarGz(data []byte, name string) ([]byte, error) {
@@ -381,6 +461,10 @@ func isManagedByPackageManager(exePath string) bool {
 }
 
 // --- Binary replacement ---
+
+// executablePath is wrapped so update tests can stub the running-binary path;
+// otherwise a happy-path runUpdate test would try to rewrite the test binary.
+var executablePath = resolveExecutable
 
 func resolveExecutable() (string, error) {
 	exe, err := os.Executable()

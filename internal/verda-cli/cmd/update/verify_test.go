@@ -321,6 +321,101 @@ func TestVerifyBinaryMismatch(t *testing.T) {
 	}
 }
 
+func TestFindMatchingChecksumEdgeCases(t *testing.T) {
+	t.Parallel()
+
+	// Keys without a GoReleaser variant suffix (e.g. "verda_linux_arm64/verda")
+	// must match too.
+	body := "fff666  verda_linux_arm64/verda\n"
+	got, err := findMatchingChecksum(body, "linux", "arm64")
+	if err != nil {
+		t.Fatalf("unexpected error for suffix-less key: %v", err)
+	}
+	if got != "fff666" {
+		t.Errorf("got %q, want %q", got, "fff666")
+	}
+
+	// A key that merely starts with the os_arch prefix (no "/" or "_" boundary)
+	// must not match.
+	body = "zzz999  verda_linux_amd64evil/verda\n"
+	if _, err := findMatchingChecksum(body, "linux", "amd64"); err == nil {
+		t.Error("expected error for prefix-collision key, got match")
+	}
+
+	// Body with only comments and blanks yields no match.
+	body = "# comment\n\n   \n"
+	if _, err := findMatchingChecksum(body, "linux", "amd64"); err == nil {
+		t.Error("expected error for comment-only body")
+	}
+}
+
+func TestFindArchiveChecksum(t *testing.T) {
+	t.Parallel()
+
+	body := `# goreleaser archive sums
+aaa111  verda_1.0.0_linux_amd64.tar.gz
+bbb222  verda_1.0.0_linux_amd64.deb
+ccc333  verda_1.0.0_darwin_arm64.tar.gz
+`
+
+	tests := []struct {
+		name     string
+		artifact string
+		wantHash string
+		wantErr  bool
+	}{
+		{name: "exact archive", artifact: "verda_1.0.0_linux_amd64.tar.gz", wantHash: "aaa111"},
+		{name: "same prefix different ext", artifact: "verda_1.0.0_linux_amd64.deb", wantHash: "bbb222"},
+		{name: "other platform", artifact: "verda_1.0.0_darwin_arm64.tar.gz", wantHash: "ccc333"},
+		{name: "prefix without ext must not match", artifact: "verda_1.0.0_linux_amd64", wantErr: true},
+		{name: "unknown artifact", artifact: "verda_2.0.0_linux_amd64.tar.gz", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := findArchiveChecksum(body, tt.artifact)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got match %q", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tt.wantHash {
+				t.Errorf("got %q, want %q", got, tt.wantHash)
+			}
+		})
+	}
+}
+
+func TestVerifyArchiveChecksum(t *testing.T) {
+	t.Parallel()
+
+	data := []byte("archive payload")
+	sum := sha256.Sum256(data)
+	goodBody := hex.EncodeToString(sum[:]) + "  verda_1.0.0_linux_amd64.tar.gz\n"
+
+	if err := verifyArchiveChecksum(data, goodBody, "verda_1.0.0_linux_amd64.tar.gz"); err != nil {
+		t.Errorf("expected match, got error: %v", err)
+	}
+
+	badBody := strings.Replace(goodBody, hex.EncodeToString(sum[:]), "0000000000000000000000000000000000000000000000000000000000000000", 1)
+	err := verifyArchiveChecksum(data, badBody, "verda_1.0.0_linux_amd64.tar.gz")
+	if err == nil {
+		t.Fatal("expected mismatch error, got nil")
+	}
+	if !strings.Contains(err.Error(), "checksum mismatch") {
+		t.Errorf("error should describe the mismatch, got: %v", err)
+	}
+
+	if err := verifyArchiveChecksum(data, goodBody, "verda_9.9.9_windows_amd64.zip"); err == nil {
+		t.Error("expected error for artifact missing from sums file")
+	}
+}
+
 func TestRunVerifyDevBuild(t *testing.T) {
 	t.Parallel()
 

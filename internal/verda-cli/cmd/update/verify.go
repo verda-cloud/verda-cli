@@ -128,6 +128,38 @@ func findMatchingChecksum(body, goos, goarch string) (string, error) {
 	return "", fmt.Errorf("no checksum entry found for %s/%s", goos, goarch)
 }
 
+// findArchiveChecksum finds the expected hash for an exact archive artifact
+// name (e.g. "verda_1.0.0_linux_amd64.tar.gz") in a GoReleaser archive sums
+// file (verda_<VER>_SHA256SUMS). Unlike findMatchingChecksum (dist-dir keys
+// with variant suffixes), archive keys match exactly.
+func findArchiveChecksum(body, artifactName string) (string, error) {
+	for _, line := range strings.Split(body, "\n") {
+		hexStr, key, ok := parseChecksumLine(line)
+		if !ok {
+			continue
+		}
+		if key == artifactName {
+			return hexStr, nil
+		}
+	}
+	return "", fmt.Errorf("no checksum entry found for %q", artifactName)
+}
+
+// verifyArchiveChecksum checks data against the archive sums entry for
+// artifactName.
+func verifyArchiveChecksum(data []byte, sumsBody, artifactName string) error {
+	expected, err := findArchiveChecksum(sumsBody, artifactName)
+	if err != nil {
+		return err
+	}
+	sum := sha256.Sum256(data)
+	actual := hex.EncodeToString(sum[:])
+	if actual != expected {
+		return fmt.Errorf("checksum mismatch for %q: expected %s, got %s", artifactName, expected, actual)
+	}
+	return nil
+}
+
 // verifyBinary fetches the checksums and compares against the binary at binPath.
 func verifyBinary(ctx context.Context, client *http.Client, binPath, url, goos, goarch string) (*VerifyResult, error) {
 	body, err := fetchChecksums(ctx, client, url)
