@@ -16,7 +16,6 @@ package vm
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -177,7 +176,7 @@ func runAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 		if opts.Hostname != "" {
 			flags = append(flags, "--hostname")
 		}
-		return fmt.Errorf("%s can only be used with --all", strings.Join(flags, " and "))
+		return cmdutil.UsageErrorf(cmd, "%s can only be used with --all", strings.Join(flags, " and "))
 	}
 
 	// In agent mode, --id and --action are required.
@@ -265,7 +264,7 @@ func runAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 
 	// --with-volumes only applies to delete (delete has Execute == nil).
 	if opts.WithVolumes && action.Execute != nil {
-		return errors.New("--with-volumes is only valid with the delete action")
+		return cmdutil.UsageErrorf(cmd, "--with-volumes is only valid with the delete action")
 	}
 
 	// Special handling for delete — needs volume selection sub-flow.

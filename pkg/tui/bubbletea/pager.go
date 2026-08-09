@@ -131,11 +131,12 @@ func (m pagerModel) View() tea.View {
 func (p *Prompter) Pager(ctx context.Context, content string, opts ...tui.PagerOption) error {
 	cfg := tui.ResolvePagerConfig(opts)
 
-	// Auto-detect: if content fits in terminal, just print it.
+	// Auto-detect: if content fits in terminal, just print it. The
+	// print-through path is data, so it goes to dataOut (house rule).
 	lines := strings.Count(content, "\n") + 1
 	termHeight := terminalHeight(p.out)
 	if lines <= termHeight-2 { // leave room for prompt
-		_, err := fmt.Fprint(p.out, content)
+		_, err := fmt.Fprint(p.dataOut, content)
 		return err
 	}
 

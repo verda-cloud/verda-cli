@@ -222,10 +222,11 @@ Catch-all for errors that don't match a more specific code.
 Errors are classified in this priority order:
 
 1. **Already an AgentError** (from explicit checks in commands) -- returned as-is
-2. **SDK `APIError`** -- mapped by HTTP status code (401/403 -> AUTH_ERROR, 404 -> NOT_FOUND, 402 -> INSUFFICIENT_BALANCE, others -> API_ERROR)
-3. **SDK `ValidationError`** -- mapped to VALIDATION_ERROR with field and reason
-4. **Auth-related message heuristic** -- messages containing "no credentials configured", "unauthorized", "token expired" -> AUTH_ERROR
-5. **Fallback** -- generic ERROR with the original message
+2. **CLI usage errors** (`cmdutil.UsageError` from flag/argument misuse) -- VALIDATION_ERROR, exit 2
+3. **SDK `APIError`** -- mapped by HTTP status code (401/403 -> AUTH_ERROR, 404 -> NOT_FOUND, 402 -> INSUFFICIENT_BALANCE, others -> API_ERROR)
+4. **SDK `ValidationError`** -- mapped to VALIDATION_ERROR with field and reason
+5. **Auth-related message heuristic** -- messages containing "no credentials configured", "unauthorized", "token expired" -> AUTH_ERROR
+6. **Fallback** -- generic ERROR with the original message
 
 ## For Developers
 

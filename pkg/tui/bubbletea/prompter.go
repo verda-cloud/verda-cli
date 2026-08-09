@@ -85,17 +85,19 @@ func (p *Prompter) runProgram(ctx context.Context, model tea.Model) runResult {
 
 // Prompter implements tui.Prompter using Bubbletea.
 type Prompter struct {
-	in     io.Reader
-	out    io.Writer
-	errOut io.Writer
+	in      io.Reader
+	out     io.Writer // interactive UI: prompts, spinner, progress, pager scroller
+	errOut  io.Writer
+	dataOut io.Writer // data output: Table, pager print-through
 }
 
 // New creates a Bubbletea-backed Prompter.
 func New(ioOpts ...func(*Prompter)) *Prompter {
 	p := &Prompter{
-		in:     os.Stdin,
-		out:    os.Stdout,
-		errOut: os.Stderr,
+		in:      os.Stdin,
+		out:     os.Stdout,
+		errOut:  os.Stderr,
+		dataOut: os.Stdout,
 	}
 	for _, o := range ioOpts {
 		o(p)
@@ -103,19 +105,33 @@ func New(ioOpts ...func(*Prompter)) *Prompter {
 	return p
 }
 
-// WithIO configures the prompter with custom IO streams.
+// WithIO configures the prompter with custom IO streams. The split follows the
+// house rule "prompts → ErrOut, data → Out": interactive UI (Select, Confirm,
+// TextInput, spinner, progress, the pager scroller) renders on ErrOut, while
+// data (Table, pager print-through) is written to Out.
 func WithIO(io tui.IO) func(*Prompter) {
 	return func(p *Prompter) {
 		if io.In != nil {
 			p.in = io.In
 		}
 		if io.Out != nil {
-			p.out = io.Out
+			p.dataOut = io.Out
 		}
 		if io.ErrOut != nil {
+			p.out = io.ErrOut
 			p.errOut = io.ErrOut
 		}
 	}
+}
+
+// NewFromIO adapts tui.IO modifiers into a Prompter; used by the registered
+// Default/DefaultStatus builders.
+func NewFromIO(ioOpts ...func(*tui.IO)) *Prompter {
+	var io tui.IO
+	for _, o := range ioOpts {
+		o(&io)
+	}
+	return New(WithIO(io))
 }
 
 // Compile-time interface checks.
@@ -124,10 +140,10 @@ var _ tui.Status = (*Prompter)(nil)
 var _ tui.LiveLister = (*Prompter)(nil)
 
 func init() {
-	tui.RegisterBuilder(func(_ ...func(*tui.IO)) tui.Prompter {
-		return New()
+	tui.RegisterBuilder(func(ioOpts ...func(*tui.IO)) tui.Prompter {
+		return NewFromIO(ioOpts...)
 	})
-	tui.RegisterStatusBuilder(func(_ ...func(*tui.IO)) tui.Status {
-		return New()
+	tui.RegisterStatusBuilder(func(ioOpts ...func(*tui.IO)) tui.Status {
+		return NewFromIO(ioOpts...)
 	})
 }

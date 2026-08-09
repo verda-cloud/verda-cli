@@ -17,10 +17,13 @@ package bubbletea
 import (
 	"context"
 	"fmt"
+	"io"
+	"os"
 	"sync"
 
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/term"
 
 	"github.com/verda-cloud/verda-cli/pkg/tui"
 )
@@ -142,8 +145,37 @@ func (h *spinnerHandle) Interrupted() bool {
 	return h.interrupted
 }
 
+// --- Silent handle ---
+
+// silentSpinner is a no-op handle used when the output is not a terminal —
+// spinners are transient UI; rendering frames into a pipe or capture buffer
+// would corrupt machine-consumed stdout/stderr.
+type silentSpinner struct{}
+
+func (silentSpinner) UpdateMessage(string) {}
+func (silentSpinner) Stop(string)          {}
+func (silentSpinner) Interrupted() bool    { return false }
+
+// silentProgress is the Progress counterpart of silentSpinner.
+type silentProgress struct{}
+
+func (silentProgress) SetPercent(float64) {}
+func (silentProgress) Increment(float64)  {}
+func (silentProgress) Stop(string)        {}
+func (silentProgress) Interrupted() bool  { return false }
+
+// rendersToTerminal reports whether w is a terminal — the precondition for
+// animated UI (spinner/progress) to be visible instead of polluting a pipe.
+func rendersToTerminal(w io.Writer) bool {
+	f, ok := w.(*os.File)
+	return ok && term.IsTerminal(f.Fd())
+}
+
 // Spinner implements tui.Status.
 func (p *Prompter) Spinner(ctx context.Context, message string, opts ...tui.SpinnerOption) (tui.SpinnerHandle, error) {
+	if !rendersToTerminal(p.out) {
+		return silentSpinner{}, nil
+	}
 	cfg := tui.ResolveSpinnerConfig(opts)
 	model := newSpinnerModel(message, cfg)
 

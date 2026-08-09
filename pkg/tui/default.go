@@ -33,13 +33,13 @@ func RegisterBuilder(fn func(ioOpts ...func(*IO)) Prompter) {
 // Default returns a Prompter created by the registered builder.
 // Panics if no builder has been registered — import a backend package
 // (e.g., _ "github.com/verda-cloud/verda-cli/pkg/tui/bubbletea") to register one.
-func Default() Prompter {
+func Default(ioOpts ...func(*IO)) Prompter {
 	mu.Lock()
 	defer mu.Unlock()
 	if builder == nil {
 		panic("tui: no backend registered — import a backend package")
 	}
-	return builder()
+	return builder(ioOpts...)
 }
 
 // RegisterStatusBuilder sets the factory used by DefaultStatus().
@@ -51,11 +51,11 @@ func RegisterStatusBuilder(fn func(ioOpts ...func(*IO)) Status) {
 
 // DefaultStatus returns a Status created by the registered builder.
 // Panics if no builder has been registered.
-func DefaultStatus() Status {
+func DefaultStatus(ioOpts ...func(*IO)) Status {
 	mu.Lock()
 	defer mu.Unlock()
 	if statusBuilder == nil {
 		panic("tui: no status backend registered — import a backend package")
 	}
-	return statusBuilder()
+	return statusBuilder(ioOpts...)
 }

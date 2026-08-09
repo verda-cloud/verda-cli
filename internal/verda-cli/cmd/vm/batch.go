@@ -16,7 +16,6 @@ package vm
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -34,12 +33,12 @@ import (
 func runBatchAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *actionOptions) error {
 	// Validation: --all cannot be combined with --id or a positional instance ID.
 	if opts.InstanceID != "" {
-		return errors.New("cannot combine --all with --id or positional instance ID")
+		return cmdutil.UsageErrorf(cmd, "cannot combine --all with --id or positional instance ID")
 	}
 
 	// Validation: --with-volumes is only valid for delete.
 	if opts.WithVolumes && opts.Action != verda.ActionDelete {
-		return errors.New("--with-volumes is only valid with the delete action")
+		return cmdutil.UsageErrorf(cmd, "--with-volumes is only valid with the delete action")
 	}
 
 	// Agent mode requires --yes for batch operations (always destructive at scale).

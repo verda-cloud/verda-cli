@@ -154,6 +154,9 @@ func (h *progressHandle) Interrupted() bool {
 
 // Progress implements tui.Status.
 func (p *Prompter) Progress(ctx context.Context, message string, opts ...tui.ProgressOption) (tui.ProgressHandle, error) {
+	if !rendersToTerminal(p.out) {
+		return silentProgress{}, nil
+	}
 	cfg := tui.ResolveProgressConfig(opts)
 	model := newProgressModel(message, cfg)
 

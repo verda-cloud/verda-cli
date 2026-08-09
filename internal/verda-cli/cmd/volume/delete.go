@@ -16,7 +16,6 @@ package volume
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"charm.land/lipgloss/v2"
@@ -79,12 +78,12 @@ func NewCmdDelete(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 func runDelete(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *deleteOptions) error {
 	// Validate: --status is a filter that requires --all.
 	if !opts.All && opts.Status != "" {
-		return errors.New("--status can only be used with --all")
+		return cmdutil.UsageErrorf(cmd, "--status can only be used with --all")
 	}
 
 	// Validate: --all cannot combine with --id or positional arg.
 	if opts.All && opts.VolumeID != "" {
-		return errors.New("cannot combine --all with --id or positional volume ID")
+		return cmdutil.UsageErrorf(cmd, "cannot combine --all with --id or positional volume ID")
 	}
 
 	// Agent mode: --all requires --yes.

@@ -208,20 +208,26 @@ func (t *debugTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return resp, nil
 }
 
-// NewFactory creates a Factory from the given Options. debugOut receives
-// HTTP request/response dumps when --debug is enabled.
+// NewFactory creates a Factory from the given Options. ioStreams wires all
+// harness output: --debug dumps HTTP details to ErrOut, and prompt UI
+// (select/confirm/text input, spinners) renders on ErrOut so stdout stays
+// machine-consumable data (house rule; a bare tui.Default() rendered prompts
+// to os.Stdout and polluted pipes — review MEDIUM "prompts honor IO").
 //
 // The client has no client-level Timeout (review H2): Client.Timeout covers
 // the entire body read and silently clamped any request to opts.Timeout,
 // killing multi-GB transfers. Dial/TLS bounds stay on http.DefaultTransport;
 // per-call deadlines come from request contexts instead.
-func NewFactory(opts *clioptions.Options, debugOut io.Writer) Factory {
+func NewFactory(opts *clioptions.Options, ioStreams IOStreams) Factory {
 	f := &factoryImpl{opts: opts}
 	var rt http.RoundTripper = &userAgentTransport{base: http.DefaultTransport, userAgent: userAgentString()}
-	rt = &debugTransport{base: rt, out: debugOut, enabled: f.Debug}
+	rt = &debugTransport{base: rt, out: ioStreams.ErrOut, enabled: f.Debug}
 	f.client = &http.Client{Transport: rt}
-	f.prompter = tui.Default()
-	f.status = tui.DefaultStatus()
+	streamIO := func(s *tui.IO) {
+		s.In, s.Out, s.ErrOut = ioStreams.In, ioStreams.Out, ioStreams.ErrOut
+	}
+	f.prompter = tui.Default(streamIO)
+	f.status = tui.DefaultStatus(streamIO)
 	return f
 }
 

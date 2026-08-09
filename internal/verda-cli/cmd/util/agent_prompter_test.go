@@ -15,6 +15,7 @@
 package util
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -61,7 +62,7 @@ func TestAgentPrompter_ReturnsAgentError(t *testing.T) {
 // therefore resolve the agent prompter lazily at call time (C2 regression test).
 func TestFactoryPrompter_AgentSetAfterConstruction(t *testing.T) {
 	opts := clioptions.NewOptions()
-	f := NewFactory(opts, io.Discard)
+	f := NewFactory(opts, IOStreams{In: bytes.NewReader(nil), Out: io.Discard, ErrOut: io.Discard})
 
 	opts.Agent = true
 
@@ -87,7 +88,7 @@ func TestFactoryPrompter_AgentSetAfterConstruction(t *testing.T) {
 
 func TestFactoryPrompter_InteractiveByDefault(t *testing.T) {
 	opts := clioptions.NewOptions()
-	f := NewFactory(opts, io.Discard)
+	f := NewFactory(opts, IOStreams{In: bytes.NewReader(nil), Out: io.Discard, ErrOut: io.Discard})
 
 	if _, blocked := f.Prompter().(*agentPrompter); blocked {
 		t.Error("non-agent factory must return the interactive prompter")

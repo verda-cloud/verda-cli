@@ -15,10 +15,15 @@
 package util
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
+	"strings"
 	"testing"
+	"time"
+
+	"github.com/verda-cloud/verda-cli/pkg/tui"
 
 	clioptions "github.com/verda-cloud/verda-cli/internal/verda-cli/options"
 )
@@ -28,7 +33,7 @@ import (
 // --agent has not been parsed yet.
 func newFactoryPreFlagParse() (Factory, *clioptions.Options) {
 	opts := &clioptions.Options{Output: "table"}
-	return NewFactory(opts, io.Discard), opts
+	return NewFactory(opts, IOStreams{In: bytes.NewReader(nil), Out: io.Discard, ErrOut: io.Discard}), opts
 }
 
 // Regression: the factory is constructed before flag parsing, so an agent-mode
@@ -117,10 +122,67 @@ func TestFactory_StatusSuppressedInAgentMode(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			opts := &clioptions.Options{Output: tt.output, Agent: tt.agent}
-			got := NewFactory(opts, io.Discard).Status()
+			got := NewFactory(opts, IOStreams{In: bytes.NewReader(nil), Out: io.Discard, ErrOut: io.Discard}).Status()
 			if (got == nil) != tt.wantNil {
 				t.Errorf("Status() nil = %v, want %v (%s)", got == nil, tt.wantNil, tt.rationale)
 			}
 		})
+	}
+}
+
+// Prompts are UI, not data (house rule): a factory built on piped streams must
+// render prompt frames on ErrOut and leave Out clean for machine consumers.
+// Backend-level split lives in pkg/tui/bubbletea (TestWithIO_*).
+func TestFactory_PromptsRenderToErrOut(t *testing.T) {
+	t.Parallel()
+
+	var out, errOut bytes.Buffer
+	f := NewFactory(&clioptions.Options{Output: "table"}, IOStreams{
+		In:     bytes.NewBufferString("\r"), // Enter: pick the first choice
+		Out:    &out,
+		ErrOut: &errOut,
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	idx, err := f.Prompter().Select(ctx, "Pick one", []string{"alpha", "beta"}, tui.WithShowHints(true))
+	if err != nil {
+		t.Fatalf("Select: %v", err)
+	}
+	if idx != 0 {
+		t.Errorf("Select returned %d, want 0", idx)
+	}
+	if out.Len() != 0 {
+		t.Errorf("prompt UI leaked into stdout: %q", out.String())
+	}
+	if errOut.Len() == 0 {
+		t.Error("prompt rendered nowhere — ErrOut wiring lost")
+	}
+}
+
+// Status.Table is data: it must land on Out even though prompts live on ErrOut.
+func TestFactory_StatusTableWritesDataToOut(t *testing.T) {
+	t.Parallel()
+
+	var out, errOut bytes.Buffer
+	f := NewFactory(&clioptions.Options{Output: "table"}, IOStreams{
+		In:     bytes.NewReader(nil),
+		Out:    &out,
+		ErrOut: &errOut,
+	})
+
+	status := f.Status()
+	if status == nil {
+		t.Fatal("Status() = nil in interactive table mode")
+	}
+	if err := status.Table(context.Background(), []string{"NAME"}, [][]string{{"row-1"}}); err != nil {
+		t.Fatalf("Table: %v", err)
+	}
+	if !strings.Contains(out.String(), "NAME") {
+		t.Errorf("table data missing from Out: %q", out.String())
+	}
+	if errOut.Len() != 0 {
+		t.Errorf("table data polluted ErrOut: %q", errOut.String())
 	}
 }

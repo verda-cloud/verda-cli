@@ -128,7 +128,7 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) (*cobra.Command, *clioptions.Op
 		initConfig(viper.GetString(clioptions.FlagConfig))
 	})
 
-	f := cmdutil.NewFactory(opts, ioStreams.ErrOut)
+	f := cmdutil.NewFactory(opts, ioStreams)
 
 	resourceCmds := []*cobra.Command{
 		availability.NewCmdAvailability(f, ioStreams),
