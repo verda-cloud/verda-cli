@@ -141,9 +141,11 @@ func promptResumeSource(ctx context.Context, f cmdutil.Factory, ioStreams cmduti
 
 // resumeServerUpload resumes an in-progress multipart upload (bucket/key/
 // uploadID) against the local file at absPath. It infers the original part size
-// from the server's parts (so byte ranges align), verifies the file is large
-// enough, seeds a checkpoint that ADOPTS the existing UploadId, then runs the
-// normal resumable path (progress + same-host lock).
+// from the server's parts (so byte ranges align), verifies the file matches the
+// server-side part map (covered bytes plus, when the map is fully covered, the
+// tail-part size — the strongest check available without content hashes), seeds
+// a checkpoint that ADOPTS the existing UploadId, then runs the normal
+// resumable path (progress + same-host lock).
 func resumeServerUpload(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client API, bucket, key, uploadID, absPath string) error {
 	info, err := os.Stat(absPath)
 	if err != nil {
@@ -164,12 +166,27 @@ func resumeServerUpload(ctx context.Context, f cmdutil.Factory, ioStreams cmduti
 	partSize := inferPartSize(parts)
 	if partSize > 0 {
 		var maxN int32
+		partSizes := make(map[int32]int64, len(parts))
 		for i := range parts {
-			maxN = max(maxN, aws.ToInt32(parts[i].PartNumber))
+			n := aws.ToInt32(parts[i].PartNumber)
+			maxN = max(maxN, n)
+			partSizes[n] = aws.ToInt64(parts[i].Size)
 		}
 		if int64(maxN-1)*partSize >= info.Size() {
 			return fmt.Errorf("local file %q (%s) is smaller than the in-progress upload — it does not match this object",
 				absPath, humanBytes(info.Size()))
+		}
+		// When the server parts fully cover the file's implied part map,
+		// completion assembles the object from those parts alone. A tail part
+		// sized for a different file would silently finish the object with the
+		// wrong bytes (review H9) — sizes are the only signal here, ListParts
+		// exposes multipart ETags, not content hashes.
+		if total := numParts(info.Size(), partSize); maxN == total {
+			want := info.Size() - int64(maxN-1)*partSize
+			if got := partSizes[maxN]; got != want {
+				return fmt.Errorf("local file %q does not match the in-progress upload: its final part would be %s, the server's is %s",
+					absPath, humanBytes(want), humanBytes(got))
+			}
 		}
 	}
 

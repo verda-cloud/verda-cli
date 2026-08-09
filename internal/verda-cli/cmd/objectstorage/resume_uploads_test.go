@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -137,5 +138,60 @@ func TestResumeServerUpload(t *testing.T) {
 	}
 	if len(fake.completed) != 4 {
 		t.Errorf("completed with %d parts, want 4", len(fake.completed))
+	}
+}
+
+// TestResumeServerUploadRejectsMismatchedTail is the H9 regression test: the
+// file's implied part map is fully covered by server parts, but the tail part
+// was sized for a different file — completing would assemble the object from
+// the wrong bytes. One part of minPartSize from another file's upload vs a
+// (minPartSize-1) source file.
+func TestResumeServerUploadRejectsMismatchedTail(t *testing.T) {
+	withTempVerdaHome(t)
+	abs, _, _ := writeTempFile(t, minPartSize-1) // one short tail part
+
+	fake := &resumeFakeAPI{existing: []s3types.Part{
+		{PartNumber: aws.Int32(1), Size: aws.Int64(minPartSize), ETag: aws.String("\"e1\"")},
+	}}
+	f := cmdutil.NewTestFactory(nil)
+	io := cmdutil.IOStreams{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}
+
+	err := resumeServerUpload(context.Background(), f, io, fake, "b", "cli-test/model.bin", "u1", abs)
+	if err == nil {
+		t.Fatal("expected tail-size mismatch to refuse the adoption")
+	}
+	if !strings.Contains(err.Error(), "does not match the in-progress upload") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fake.createCalls != 0 || len(fake.uploaded) != 0 || len(fake.completed) != 0 {
+		t.Errorf("adoption must refuse before any API mutation; got create=%d uploaded=%v completed=%v",
+			fake.createCalls, fake.uploaded, fake.completed)
+	}
+}
+
+// TestResumeServerUploadExactTailCompletes: a fully covered part map whose
+// tail size matches proceeds and completes without re-uploading anything.
+func TestResumeServerUploadExactTailCompletes(t *testing.T) {
+	withTempVerdaHome(t)
+	abs, _, _ := writeTempFile(t, minPartSize+100) // part 1 + 100-byte tail
+
+	fake := &resumeFakeAPI{existing: []s3types.Part{
+		{PartNumber: aws.Int32(1), Size: aws.Int64(minPartSize), ETag: aws.String("\"e1\"")},
+		{PartNumber: aws.Int32(2), Size: aws.Int64(100), ETag: aws.String("\"e2\"")},
+	}}
+	f := cmdutil.NewTestFactory(nil)
+	io := cmdutil.IOStreams{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}
+
+	if err := resumeServerUpload(context.Background(), f, io, fake, "b", "cli-test/model.bin", "u1", abs); err != nil {
+		t.Fatalf("resumeServerUpload: %v", err)
+	}
+	if fake.createCalls != 0 {
+		t.Errorf("CreateMultipartUpload called %d times, want 0 (must adopt the existing UploadId)", fake.createCalls)
+	}
+	if len(fake.uploaded) != 0 {
+		t.Errorf("uploaded parts = %v, want none (all parts already on server)", fake.uploaded)
+	}
+	if len(fake.completed) != 2 {
+		t.Errorf("completed with %d parts, want 2", len(fake.completed))
 	}
 }
