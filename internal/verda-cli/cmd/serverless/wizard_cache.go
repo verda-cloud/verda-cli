@@ -18,31 +18,19 @@ import (
 	"context"
 	"fmt"
 
+	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 	"github.com/verda-cloud/verda-cli/pkg/tui"
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
 )
 
 // withFetchSpinner runs fn while showing a spinner labeled msg. If status is
 // nil (e.g. tests with no TUI) or the spinner can't start, fn still runs.
+// Ctrl+C on the spinner cancels fn's context (via cmdutil.WithSpinner).
 // Used by wizard loaders so the API calls hidden inside cache fetchers
 // (compute resources, registry creds, secrets) show progress instead of
 // looking like a hang while the API responds.
 func withFetchSpinner[T any](ctx context.Context, status tui.Status, msg string, fn func(context.Context) (T, error)) (T, error) {
-	var zero T
-	if status == nil {
-		return fn(ctx)
-	}
-	sp, err := status.Spinner(ctx, msg)
-	if err != nil {
-		return fn(ctx)
-	}
-	res, ferr := fn(ctx)
-	if ferr != nil {
-		sp.Stop("")
-		return zero, ferr
-	}
-	sp.Stop("")
-	return res, nil
+	return cmdutil.WithSpinner(ctx, status, msg, fn)
 }
 
 // clientFunc lazily resolves a Verda API client. Early wizard steps (name,

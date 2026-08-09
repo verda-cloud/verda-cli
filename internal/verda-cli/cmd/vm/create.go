@@ -236,7 +236,7 @@ func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 	createCtx, createCancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
 	defer createCancel()
 
-	instance, err := cmdutil.WithSpinner(createCtx, f.Status(), "Creating VM instance...", func() (*verda.Instance, error) {
+	instance, err := cmdutil.WithSpinner(createCtx, f.Status(), "Creating VM instance...", func(ctx context.Context) (*verda.Instance, error) {
 		return client.Instances.Create(createCtx, req)
 	})
 	if err != nil {
@@ -290,7 +290,7 @@ func missingCreateFlags(opts *createOptions) []string {
 
 func runWizard(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *createOptions) error {
 	flow := buildCreateFlow(ctx, f.VerdaClient, opts, WizardModeDeploy)
-	engine := wizard.NewEngine(f.Prompter(), f.Status(), wizard.WithOutput(ioStreams.ErrOut), wizard.WithExitConfirmation())
+	engine := wizard.NewEngine(f.Prompter(), f.Status(), wizard.WithOutput(ioStreams.ErrOut))
 	return engine.Run(ctx, flow)
 }
 

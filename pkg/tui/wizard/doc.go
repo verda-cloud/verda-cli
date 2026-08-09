@@ -392,10 +392,6 @@
 // Messages chain: if a view publishes messages in response to a received
 // message, those are delivered to their subscribers in the same cycle.
 //
-// See the wizard-views example for a complete working demonstration:
-//
-//	go run ./pkg/tui/examples/wizard-views
-//
 // # Pager
 //
 // For displaying long content (lists, logs, details), use [tui.Status.Pager]:

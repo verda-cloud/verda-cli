@@ -57,7 +57,7 @@ func runRmBrowser(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOSt
 // Returns again=false to leave the browser entirely; again=true to keep looping
 // (cur may have been mutated to drill in/out).
 func rmBrowseLevel(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client API, cur *URI) (bool, error) {
-	payload, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading...", func() (objectsPayload, error) {
+	payload, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading...", func(ctx context.Context) (objectsPayload, error) {
 		return collectObjects(ctx, f, ioStreams, client, *cur, "/")
 	})
 	if err != nil {

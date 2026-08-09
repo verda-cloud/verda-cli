@@ -73,7 +73,7 @@ func runBatchjobDelete(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.
 	ctx, cancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
 	defer cancel()
 
-	err = cmdutil.RunWithSpinner(ctx, f.Status(), fmt.Sprintf("Deleting %s...", name), func() error {
+	err = cmdutil.RunWithSpinner(ctx, f.Status(), fmt.Sprintf("Deleting %s...", name), func(ctx context.Context) error {
 		return client.ServerlessJobs.DeleteJobDeployment(ctx, name, timeoutMs)
 	})
 	if err != nil {

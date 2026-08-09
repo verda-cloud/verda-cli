@@ -70,7 +70,7 @@ func runContainerList(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.I
 	defer cancel()
 
 	statuses := newContainerStatusCache(containerStatusCacheTTL)
-	deployments, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading container deployments...", func() ([]verda.ContainerDeployment, error) {
+	deployments, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading container deployments...", func(ctx context.Context) ([]verda.ContainerDeployment, error) {
 		return client.ContainerDeployments.GetDeployments(ctx)
 	})
 	if err != nil {
@@ -84,7 +84,7 @@ func runContainerList(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.I
 	// List response omits status; prefetch when filtering/structured/non-interactive,
 	// otherwise LiveList fills rows lazily.
 	if opts.Status != "" || !interactive {
-		_ = cmdutil.RunWithSpinner(ctx, f.Status(), "Loading statuses...", func() error {
+		_ = cmdutil.RunWithSpinner(ctx, f.Status(), "Loading statuses...", func(ctx context.Context) error {
 			statuses.refresh(ctx, client, deployments)
 			return nil
 		})
@@ -203,7 +203,7 @@ func runContainerListEager(
 ) error {
 	for {
 		if statuses.anyStale(deployments) {
-			_ = cmdutil.RunWithSpinner(cmd.Context(), f.Status(), "Loading statuses...", func() error {
+			_ = cmdutil.RunWithSpinner(cmd.Context(), f.Status(), "Loading statuses...", func(ctx context.Context) error {
 				refreshCtx, cancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
 				defer cancel()
 				statuses.refresh(refreshCtx, client, deployments)

@@ -66,7 +66,7 @@ func selectContainerDeployment(ctx context.Context, f cmdutil.Factory, ioStreams
 	listCtx, cancel := context.WithTimeout(ctx, f.Options().Timeout)
 	defer cancel()
 
-	deployments, err := cmdutil.WithSpinner(listCtx, f.Status(), "Loading container deployments...", func() ([]verda.ContainerDeployment, error) {
+	deployments, err := cmdutil.WithSpinner(listCtx, f.Status(), "Loading container deployments...", func(ctx context.Context) ([]verda.ContainerDeployment, error) {
 		return client.ContainerDeployments.GetDeployments(listCtx)
 	})
 	if err != nil {
@@ -114,7 +114,7 @@ func runContainerDescribe(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdut
 	// subordinate timeout so a slow status RPC can't blank it. Describe still
 	// succeeds if the status RPC fails.
 	var status string
-	deployment, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading deployment...", func() (*verda.ContainerDeployment, error) {
+	deployment, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading deployment...", func(ctx context.Context) (*verda.ContainerDeployment, error) {
 		d, derr := client.ContainerDeployments.GetDeploymentByName(ctx, name)
 		if derr != nil {
 			return nil, derr

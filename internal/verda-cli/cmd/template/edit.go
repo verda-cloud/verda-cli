@@ -293,7 +293,7 @@ func editInstanceType(ctx context.Context, f cmdutil.Factory, t *Template) error
 		return err
 	}
 	isSpot := t.BillingType == "spot"
-	types, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading instance types...", func() ([]verda.InstanceTypeInfo, error) {
+	types, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading instance types...", func(ctx context.Context) ([]verda.InstanceTypeInfo, error) {
 		return client.InstanceTypes.Get(ctx, "usd")
 	})
 	if err != nil {
@@ -339,7 +339,7 @@ func editLocation(ctx context.Context, f cmdutil.Factory, t *Template) error {
 	if err != nil {
 		return err
 	}
-	locations, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading locations...", func() ([]verda.Location, error) {
+	locations, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading locations...", func(ctx context.Context) ([]verda.Location, error) {
 		return client.Locations.Get(ctx)
 	})
 	if err != nil {
@@ -372,7 +372,7 @@ func editImage(ctx context.Context, f cmdutil.Factory, t *Template) error {
 		return err
 	}
 	// Filter images by instance type when available.
-	images, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading images...", func() ([]verda.Image, error) {
+	images, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading images...", func(ctx context.Context) ([]verda.Image, error) {
 		if t.InstanceType != "" {
 			return client.Images.GetImagesByInstanceType(ctx, t.InstanceType)
 		}
@@ -406,7 +406,7 @@ func editSSHKeys(ctx context.Context, f cmdutil.Factory, t *Template) error {
 	if err != nil {
 		return err
 	}
-	keys, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading SSH keys...", func() ([]verda.SSHKey, error) {
+	keys, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading SSH keys...", func(ctx context.Context) ([]verda.SSHKey, error) {
 		return client.SSHKeys.GetAllSSHKeys(ctx)
 	})
 	if err != nil {
@@ -450,7 +450,7 @@ func editStartupScript(ctx context.Context, f cmdutil.Factory, t *Template) erro
 	if err != nil {
 		return err
 	}
-	scripts, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading startup scripts...", func() ([]verda.StartupScript, error) {
+	scripts, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading startup scripts...", func(ctx context.Context) ([]verda.StartupScript, error) {
 		return client.StartupScripts.GetAllStartupScripts(ctx)
 	})
 	if err != nil {

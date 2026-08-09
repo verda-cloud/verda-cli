@@ -210,7 +210,7 @@ func runContainerCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil
 	ctx, cancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
 	defer cancel()
 
-	deployment, err := cmdutil.WithSpinner(ctx, f.Status(), "Creating container deployment...", func() (*verda.ContainerDeployment, error) {
+	deployment, err := cmdutil.WithSpinner(ctx, f.Status(), "Creating container deployment...", func(ctx context.Context) (*verda.ContainerDeployment, error) {
 		return client.ContainerDeployments.CreateDeployment(ctx, req)
 	})
 	if err != nil {
@@ -230,8 +230,7 @@ func runContainerCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil
 func runContainerWizard(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *containerCreateOptions) error {
 	flow := buildContainerCreateFlow(ctx, f.VerdaClient, opts)
 	engine := wizard.NewEngine(f.Prompter(), f.Status(),
-		wizard.WithOutput(ioStreams.ErrOut),
-		wizard.WithExitConfirmation())
+		wizard.WithOutput(ioStreams.ErrOut))
 	return engine.Run(ctx, flow)
 }
 

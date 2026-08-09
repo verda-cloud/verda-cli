@@ -47,6 +47,13 @@ type SpinnerHandle interface {
 	// Stop stops the spinner and shows a final message.
 	// If finalMessage is empty, the last message is shown.
 	Stop(finalMessage string)
+
+	// Interrupted blocks until the spinner program exits and reports whether
+	// the user ended it with Ctrl+C. Call it from a watcher goroutine (or
+	// after Stop) — the intent is that whoever owns the operation the spinner
+	// guards cancels it immediately instead of quitting only the UI while the
+	// work runs to completion unseen.
+	Interrupted() bool
 }
 
 // ProgressHandle controls a running progress bar.
@@ -59,4 +66,9 @@ type ProgressHandle interface {
 
 	// Stop stops the progress bar and shows a final message.
 	Stop(finalMessage string)
+
+	// Interrupted blocks until the progress program exits and reports whether
+	// the user ended it with Ctrl+C. Same watcher-goroutine contract as
+	// SpinnerHandle.Interrupted.
+	Interrupted() bool
 }

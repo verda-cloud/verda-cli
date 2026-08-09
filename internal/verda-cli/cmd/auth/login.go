@@ -85,7 +85,7 @@ func NewCmdLogin(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command 
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if strings.TrimSpace(opts.ClientID) == "" || strings.TrimSpace(opts.ClientSecret) == "" {
 				flow := buildLoginFlow(opts)
-				engine := wizard.NewEngine(f.Prompter(), f.Status(), wizard.WithOutput(ioStreams.ErrOut), wizard.WithExitConfirmation())
+				engine := wizard.NewEngine(f.Prompter(), f.Status(), wizard.WithOutput(ioStreams.ErrOut))
 				if err := engine.Run(cmd.Context(), flow); err != nil {
 					return err
 				}

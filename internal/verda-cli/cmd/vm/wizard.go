@@ -92,7 +92,7 @@ func RunTemplateWizard(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil
 
 func runTemplateWizardWithOpts(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *createOptions) (*TemplateResult, error) {
 	flow := buildCreateFlow(ctx, f.VerdaClient, opts, WizardModeTemplate)
-	engine := wizard.NewEngine(f.Prompter(), f.Status(), wizard.WithOutput(ioStreams.ErrOut), wizard.WithExitConfirmation())
+	engine := wizard.NewEngine(f.Prompter(), f.Status(), wizard.WithOutput(ioStreams.ErrOut))
 	if err := engine.Run(ctx, flow); err != nil {
 		return nil, err
 	}
@@ -231,7 +231,7 @@ func stepContract(getClient clientFunc, opts *createOptions) wizard.Step {
 			if err != nil {
 				return choices, nil //nolint:nilerr // Non-fatal: just offer pay-as-you-go.
 			}
-			periods, err := cmdutil.WithSpinner(ctx, status, "Loading contract options...", func() ([]verda.LongTermPeriod, error) {
+			periods, err := cmdutil.WithSpinner(ctx, status, "Loading contract options...", func(ctx context.Context) ([]verda.LongTermPeriod, error) {
 				return client.LongTerm.GetInstancePeriods(ctx)
 			})
 			if err != nil {
@@ -300,7 +300,7 @@ func stepInstanceType(getClient clientFunc, cache *apiCache, opts *createOptions
 			kind := c["kind"].(string)
 			isSpot := c["billing-type"] == billingTypeSpot
 
-			types, err := cmdutil.WithSpinner(ctx, status, "Loading instance types...", func() ([]verda.InstanceTypeInfo, error) {
+			types, err := cmdutil.WithSpinner(ctx, status, "Loading instance types...", func(ctx context.Context) ([]verda.InstanceTypeInfo, error) {
 				return client.InstanceTypes.Get(ctx, "usd")
 			})
 			if err != nil {
@@ -407,7 +407,7 @@ func stepImage(getClient clientFunc, opts *createOptions) wizard.Step {
 			}
 			// Filter images by instance type when available.
 			instType, _ := store.Collected()["instance-type"].(string)
-			images, err := cmdutil.WithSpinner(ctx, status, "Loading OS images...", func() ([]verda.Image, error) {
+			images, err := cmdutil.WithSpinner(ctx, status, "Loading OS images...", func(ctx context.Context) ([]verda.Image, error) {
 				if instType != "" {
 					return client.Images.GetImagesByInstanceType(ctx, instType)
 				}
@@ -595,7 +595,7 @@ func stepSSHKeys(getClient clientFunc, opts *createOptions) wizard.Step {
 			if err != nil {
 				return nil, err
 			}
-			keys, err := cmdutil.WithSpinner(ctx, status, "Loading SSH keys...", func() ([]verda.SSHKey, error) {
+			keys, err := cmdutil.WithSpinner(ctx, status, "Loading SSH keys...", func(ctx context.Context) ([]verda.SSHKey, error) {
 				return client.SSHKeys.GetAllSSHKeys(ctx)
 			})
 			if err != nil {
@@ -677,7 +677,7 @@ func stepStartupScript(getClient clientFunc, opts *createOptions) wizard.Step {
 			if err != nil {
 				return nil, err
 			}
-			scripts, err := cmdutil.WithSpinner(ctx, status, "Loading startup scripts...", func() ([]verda.StartupScript, error) {
+			scripts, err := cmdutil.WithSpinner(ctx, status, "Loading startup scripts...", func(ctx context.Context) ([]verda.StartupScript, error) {
 				return client.StartupScripts.GetAllStartupScripts(ctx)
 			})
 			if err != nil {

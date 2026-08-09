@@ -22,24 +22,35 @@ import (
 
 // WithSpinner runs fn while showing a spinner message. If status is nil or the
 // spinner cannot be created, fn is executed directly without visual feedback.
-func WithSpinner[T any](ctx context.Context, status tui.Status, msg string, fn func() (T, error)) (T, error) {
+//
+// fn receives a context derived from ctx: Ctrl+C on the spinner quits the UI
+// and cancels it, so the guarded operation aborts instead of running to
+// completion unseen (surfacing as context.Canceled through fn's error).
+func WithSpinner[T any](ctx context.Context, status tui.Status, msg string, fn func(context.Context) (T, error)) (T, error) {
 	if status == nil {
-		return fn()
+		return fn(ctx)
 	}
 	sp, err := status.Spinner(ctx, msg)
 	if err != nil {
-		return fn() // fallback: run without spinner
+		return fn(ctx) // fallback: run without spinner
 	}
-	result, fnErr := fn()
+	opCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go func() {
+		if sp.Interrupted() {
+			cancel()
+		}
+	}()
+	result, fnErr := fn(opCtx)
 	sp.Stop("")
 	return result, fnErr
 }
 
 // RunWithSpinner runs fn while showing a spinner message. It is a convenience
 // wrapper around [WithSpinner] for functions that return only an error.
-func RunWithSpinner(ctx context.Context, status tui.Status, msg string, fn func() error) error {
-	_, err := WithSpinner(ctx, status, msg, func() (struct{}, error) {
-		return struct{}{}, fn()
+func RunWithSpinner(ctx context.Context, status tui.Status, msg string, fn func(context.Context) error) error {
+	_, err := WithSpinner(ctx, status, msg, func(ctx context.Context) (struct{}, error) {
+		return struct{}{}, fn(ctx)
 	})
 	return err
 }

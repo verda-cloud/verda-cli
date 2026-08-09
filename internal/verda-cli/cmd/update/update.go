@@ -97,9 +97,7 @@ func NewCmdUpdate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 }
 
 func runList(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams) error {
-	versions, err := cmdutil.WithSpinner(ctx, f.Status(), "Fetching available versions...", func() ([]string, error) {
-		return fetchVersions(ctx)
-	})
+	versions, err := cmdutil.WithSpinner(ctx, f.Status(), "Fetching available versions...", fetchVersions)
 	if err != nil {
 		return err
 	}
@@ -128,9 +126,7 @@ func runUpdate(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStrea
 	// Resolve target version.
 	target := targetVersion
 	if target == "" {
-		latest, err := cmdutil.WithSpinner(ctx, f.Status(), "Checking for latest version...", func() (string, error) {
-			return fetchLatestVersion(ctx)
-		})
+		latest, err := cmdutil.WithSpinner(ctx, f.Status(), "Checking for latest version...", fetchLatestVersion)
 		if err != nil {
 			return err
 		}

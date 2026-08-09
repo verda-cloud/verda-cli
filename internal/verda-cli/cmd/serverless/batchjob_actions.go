@@ -75,7 +75,7 @@ func runBatchjobAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.
 	ctx, cancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
 	defer cancel()
 
-	err = cmdutil.RunWithSpinner(ctx, f.Status(), fmt.Sprintf("%s %s...", spinner, name), func() error {
+	err = cmdutil.RunWithSpinner(ctx, f.Status(), fmt.Sprintf("%s %s...", spinner, name), func(ctx context.Context) error {
 		return fn(ctx, client, name)
 	})
 	if err != nil {

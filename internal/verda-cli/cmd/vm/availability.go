@@ -106,7 +106,7 @@ func runAvailability(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IO
 		types []verda.InstanceTypeInfo
 		avail []verda.LocationAvailability
 	}
-	data, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading availability and pricing...", func() (availData, error) {
+	data, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading availability and pricing...", func(ctx context.Context) (availData, error) {
 		types, typesErr := client.InstanceTypes.Get(ctx, "usd")
 		if typesErr != nil {
 			return availData{}, fmt.Errorf("fetching instance types: %w", typesErr)

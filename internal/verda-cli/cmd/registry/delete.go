@@ -297,7 +297,7 @@ func deleteRepositoryFlow(ctx context.Context, f cmdutil.Factory, ioStreams cmdu
 		"artifact_count": artifactCount,
 	})
 
-	err := cmdutil.RunWithSpinner(ctx, f.Status(), fmt.Sprintf("Deleting repository %s...", repoName), func() error {
+	err := cmdutil.RunWithSpinner(ctx, f.Status(), fmt.Sprintf("Deleting repository %s...", repoName), func(ctx context.Context) error {
 		return lister.DeleteRepository(ctx, creds.ProjectID, repoName)
 	})
 	if err != nil {
@@ -357,7 +357,7 @@ func deleteArtifactFlow(ctx context.Context, f cmdutil.Factory, ioStreams cmduti
 		"reference":  reference,
 	})
 
-	err := cmdutil.RunWithSpinner(ctx, f.Status(), fmt.Sprintf("Deleting image %s...", reference), func() error {
+	err := cmdutil.RunWithSpinner(ctx, f.Status(), fmt.Sprintf("Deleting image %s...", reference), func(ctx context.Context) error {
 		return lister.DeleteArtifact(ctx, creds.ProjectID, repoName, reference)
 	})
 	if err != nil {
@@ -602,7 +602,7 @@ func runDeleteImagesInteractive(ctx context.Context, f cmdutil.Factory, ioStream
 		}
 		err := cmdutil.RunWithSpinner(ctx, f.Status(),
 			fmt.Sprintf("Deleting %s...", shortDigest(a.Digest)),
-			func() error {
+			func(ctx context.Context) error {
 				return lister.DeleteArtifact(ctx, creds.ProjectID, repo.Name, ref)
 			})
 		if err != nil {

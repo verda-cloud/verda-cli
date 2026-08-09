@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"sort"
+	"sync"
 	"testing"
 	"time"
 
@@ -70,8 +71,11 @@ func TestFindCheckpointByUploadID(t *testing.T) {
 
 // resumeFakeAPI serves a fixed set of pre-existing parts and records uploads /
 // completion. CreateMultipartUpload must NOT be called (resume adopts the id).
+// uploadMissingParts drives UploadPart from a worker pool, so the fake must
+// be safe for concurrent use.
 type resumeFakeAPI struct {
 	API
+	mu          sync.Mutex
 	existing    []s3types.Part
 	createCalls int
 	uploaded    []int32
@@ -79,7 +83,9 @@ type resumeFakeAPI struct {
 }
 
 func (r *resumeFakeAPI) CreateMultipartUpload(ctx context.Context, in *s3.CreateMultipartUploadInput, opts ...func(*s3.Options)) (*s3.CreateMultipartUploadOutput, error) {
+	r.mu.Lock()
 	r.createCalls++
+	r.mu.Unlock()
 	return &s3.CreateMultipartUploadOutput{UploadId: aws.String("should-not-happen")}, nil
 }
 
@@ -89,13 +95,17 @@ func (r *resumeFakeAPI) ListParts(ctx context.Context, in *s3.ListPartsInput, op
 
 func (r *resumeFakeAPI) UploadPart(ctx context.Context, in *s3.UploadPartInput, opts ...func(*s3.Options)) (*s3.UploadPartOutput, error) {
 	n := aws.ToInt32(in.PartNumber)
+	r.mu.Lock()
 	r.uploaded = append(r.uploaded, n)
+	r.mu.Unlock()
 	return &s3.UploadPartOutput{ETag: aws.String("\"new-etag\"")}, nil
 }
 
 func (r *resumeFakeAPI) CompleteMultipartUpload(ctx context.Context, in *s3.CompleteMultipartUploadInput, opts ...func(*s3.Options)) (*s3.CompleteMultipartUploadOutput, error) {
 	if in.MultipartUpload != nil {
+		r.mu.Lock()
 		r.completed = in.MultipartUpload.Parts
+		r.mu.Unlock()
 	}
 	return &s3.CompleteMultipartUploadOutput{}, nil
 }

@@ -102,7 +102,7 @@ func runBatchAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOS
 	actionCtx, cancel := context.WithTimeout(ctx, f.Options().Timeout)
 	defer cancel()
 
-	results, err := cmdutil.WithSpinner(actionCtx, f.Status(), fmt.Sprintf("%s %d instances...", action.Label, len(instances)), func() ([]verda.InstanceActionResult, error) {
+	results, err := cmdutil.WithSpinner(actionCtx, f.Status(), fmt.Sprintf("%s %d instances...", action.Label, len(instances)), func(ctx context.Context) ([]verda.InstanceActionResult, error) {
 		return client.Instances.Action(actionCtx, verda.InstanceActionRequest{
 			Action: actionNameToAPI(opts.Action),
 			ID:     ids,
@@ -179,7 +179,7 @@ func runBatchDelete(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOS
 	deleteCtx, cancel := context.WithTimeout(ctx, f.Options().Timeout)
 	defer cancel()
 
-	results, err := cmdutil.WithSpinner(deleteCtx, f.Status(), fmt.Sprintf("Deleting %d instances...", len(instances)), func() ([]verda.InstanceActionResult, error) {
+	results, err := cmdutil.WithSpinner(deleteCtx, f.Status(), fmt.Sprintf("Deleting %d instances...", len(instances)), func(ctx context.Context) ([]verda.InstanceActionResult, error) {
 		return client.Instances.Action(deleteCtx, verda.InstanceActionRequest{
 			Action:    verda.ActionDelete,
 			ID:        ids,
@@ -426,7 +426,7 @@ func runBatchWithInstances(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdu
 	actionCtx, cancel := context.WithTimeout(ctx, f.Options().Timeout)
 	defer cancel()
 
-	results, err := cmdutil.WithSpinner(actionCtx, f.Status(), fmt.Sprintf("%s %d instances...", action.Label, len(instances)), func() ([]verda.InstanceActionResult, error) {
+	results, err := cmdutil.WithSpinner(actionCtx, f.Status(), fmt.Sprintf("%s %d instances...", action.Label, len(instances)), func(ctx context.Context) ([]verda.InstanceActionResult, error) {
 		return client.Instances.Action(actionCtx, verda.InstanceActionRequest{
 			Action: actionNameToAPI(opts.Action),
 			ID:     ids,

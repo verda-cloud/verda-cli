@@ -35,7 +35,7 @@ const objectPickerCap = 1000
 // chosen bucket name, or ("", nil) on a clean cancel (Ctrl+C/Esc) or when no
 // buckets exist — callers treat an empty name as "nothing to do, exit cleanly".
 func selectBucket(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client API) (string, error) {
-	out, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading buckets...", func() (*s3.ListBucketsOutput, error) {
+	out, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading buckets...", func(ctx context.Context) (*s3.ListBucketsOutput, error) {
 		return client.ListBuckets(ctx, &s3.ListBucketsInput{})
 	})
 	if err != nil {

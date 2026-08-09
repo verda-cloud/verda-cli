@@ -14,7 +14,10 @@
 
 package wizard
 
-import "reflect"
+import (
+	"reflect"
+	"sync"
+)
 
 type viewSlot struct {
 	id      string
@@ -25,7 +28,12 @@ type viewSlot struct {
 }
 
 // MessageBus routes messages between the engine and views.
+//
+// It is safe for concurrent use: the engine's stepLoop goroutine writes
+// (Broadcast / store-change updates) while the composite tea program reads
+// (RenderAll) once per frame on its own goroutine.
 type MessageBus struct {
+	mu    sync.RWMutex
 	slots []viewSlot
 }
 
@@ -34,22 +42,27 @@ func NewMessageBus() *MessageBus {
 	return &MessageBus{}
 }
 
-// Register adds a view to the bus.
+// Register adds a view to the bus. Not safe to call concurrently with
+// Broadcast/Publish/RenderAll — register all views before Run starts.
 func (b *MessageBus) Register(id string, v View) {
 	subs := make(map[reflect.Type]bool)
 	for _, t := range v.Subscribe() {
 		subs[t] = true
 	}
+	b.mu.Lock()
 	b.slots = append(b.slots, viewSlot{
 		id:   id,
 		view: v,
 		subs: subs,
 	})
+	b.mu.Unlock()
 }
 
 // Broadcast sends a message to ALL views (engine-level events).
 // Processes any published messages from views (chained delivery).
 func (b *MessageBus) Broadcast(msg any) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	var pending []any
 	for i := range b.slots {
 		render, published := b.slots[i].view.Update(msg)
@@ -62,6 +75,8 @@ func (b *MessageBus) Broadcast(msg any) {
 // Publish sends messages only to views that subscribed to those types.
 // Processes any published messages from views (chained delivery).
 func (b *MessageBus) Publish(from string, msgs []any) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	var pending []any
 	for _, msg := range msgs {
 		msgType := reflect.TypeOf(msg)
@@ -80,6 +95,7 @@ func (b *MessageBus) Publish(from string, msgs []any) {
 }
 
 // deliverPending processes chained messages (published by views during Update).
+// Callers must hold b.mu.
 func (b *MessageBus) deliverPending(msgs []any) {
 	for len(msgs) > 0 {
 		var next []any
@@ -99,16 +115,19 @@ func (b *MessageBus) deliverPending(msgs []any) {
 
 // RenderAll returns the last rendered output of each view in order.
 func (b *MessageBus) RenderAll() []string {
+	b.mu.RLock()
 	renders := make([]string, len(b.slots))
 	for i, s := range b.slots {
 		renders[i] = s.last
 	}
+	b.mu.RUnlock()
 	return renders
 }
 
 // RenderChanged returns outputs only for views whose render changed
 // since the last call to RenderChanged. Unchanged views return "".
 func (b *MessageBus) RenderChanged() []string {
+	b.mu.Lock()
 	renders := make([]string, len(b.slots))
 	for i := range b.slots {
 		if b.slots[i].last != b.slots[i].printed {
@@ -116,5 +135,6 @@ func (b *MessageBus) RenderChanged() []string {
 			b.slots[i].printed = b.slots[i].last
 		}
 	}
+	b.mu.Unlock()
 	return renders
 }

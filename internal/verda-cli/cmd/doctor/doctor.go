@@ -83,7 +83,7 @@ func runDoctor(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 	authResult := checkAuthentication(f, credResult, apiResult)
 
 	// CLI update check hits GitHub; spinner covers ~2s of silence.
-	versionResult, _ := cmdutil.WithSpinner(ctx, f.Status(), "Checking for CLI updates...", func() (checkResult, error) {
+	versionResult, _ := cmdutil.WithSpinner(ctx, f.Status(), "Checking for CLI updates...", func(ctx context.Context) (checkResult, error) {
 		return checkCLIVersion(ctx), nil
 	})
 

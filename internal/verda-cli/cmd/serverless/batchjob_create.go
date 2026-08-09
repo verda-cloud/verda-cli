@@ -143,7 +143,7 @@ func runBatchjobCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.
 	ctx, cancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
 	defer cancel()
 
-	deployment, err := cmdutil.WithSpinner(ctx, f.Status(), "Creating batch-job deployment...", func() (*verda.JobDeployment, error) {
+	deployment, err := cmdutil.WithSpinner(ctx, f.Status(), "Creating batch-job deployment...", func(ctx context.Context) (*verda.JobDeployment, error) {
 		return client.ServerlessJobs.CreateJobDeployment(ctx, req)
 	})
 	if err != nil {
@@ -163,8 +163,7 @@ func runBatchjobCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.
 func runBatchjobWizard(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *batchjobCreateOptions) error {
 	flow := buildBatchjobCreateFlow(ctx, f.VerdaClient, opts)
 	engine := wizard.NewEngine(f.Prompter(), f.Status(),
-		wizard.WithOutput(ioStreams.ErrOut),
-		wizard.WithExitConfirmation())
+		wizard.WithOutput(ioStreams.ErrOut))
 	return engine.Run(ctx, flow)
 }
 

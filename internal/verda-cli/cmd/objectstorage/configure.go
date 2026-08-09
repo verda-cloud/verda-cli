@@ -86,7 +86,7 @@ func NewCmdConfigure(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Comm
 			if strings.TrimSpace(opts.AccessKey) == "" || strings.TrimSpace(opts.SecretKey) == "" {
 				printConfigureIntro(ioStreams)
 				flow := buildConfigureFlow(opts)
-				engine := wizard.NewEngine(f.Prompter(), f.Status(), wizard.WithOutput(ioStreams.ErrOut), wizard.WithExitConfirmation())
+				engine := wizard.NewEngine(f.Prompter(), f.Status(), wizard.WithOutput(ioStreams.ErrOut))
 				if err := engine.Run(cmd.Context(), flow); err != nil {
 					return err
 				}

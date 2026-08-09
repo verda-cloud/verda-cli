@@ -29,10 +29,23 @@ import (
 	"github.com/verda-cloud/verda-cli/pkg/tui/bubbletea"
 )
 
-// ErrCancelled is returned by Engine.Run when the user aborts the wizard
-// (Ctrl+C, or Esc with no step to go back to). Callers use errors.Is to map
-// it to a clean exit while propagating real engine/loader failures.
+// ErrCancelled matches any user abort of the wizard (Ctrl+C, or Esc with no
+// step to go back to). Callers use errors.Is to map it to a clean exit while
+// propagating real engine/loader failures.
+//
+// It is never returned bare: Run returns one of the two values below, each
+// wrapping both ErrCancelled and the low-level cause the CLI's cancel
+// predicates key on. Keeping the cause attached is what lets Esc and Ctrl+C
+// stay distinguishable (cmdutil.IsPromptBack vs IsPromptInterrupt) while
+// IsPromptCancel matches either.
 var ErrCancelled = errors.New("wizard cancelled")
+
+var (
+	// errCancelledInterrupt: Ctrl+C — a deliberate hard exit.
+	errCancelledInterrupt = fmt.Errorf("%w: %w", ErrCancelled, tui.ErrInterrupted)
+	// errCancelledBack: Esc pressed with no earlier step to return to.
+	errCancelledBack = fmt.Errorf("%w: %w", ErrCancelled, context.Canceled)
+)
 
 // stepState represents the lifecycle state of a step during execution.
 type stepState int
@@ -73,14 +86,13 @@ type Engine struct {
 	writer         io.Writer
 	reader         io.Reader
 	keyBindings    []KeyBinding
-	exitConfirm    bool              // when true, Ctrl+C prompts "Exit wizard?" before exiting
 	resultOverride chan promptResult // test-only: bypasses composite model
 	program        *tea.Program      // the running composite program (nil in test mode)
 	resultCh       chan promptResult // channel for receiving prompt results
 
-	// interruptCancel lets a second Ctrl+C on the "Exit wizard?" confirm
-	// abort any in-flight loader ctx, not just the wizard itself.
-	interruptCancel context.CancelFunc
+	// validationMsg is set when a step fails Validate; printed above the
+	// re-drawn prompt so a rejected answer isn't a silent redraw.
+	validationMsg string
 }
 
 // EngineOption configures the Engine.
@@ -99,12 +111,6 @@ func WithKeyBindings(bindings ...KeyBinding) EngineOption {
 // WithInput sets the input reader for the composite tea.Program (defaults to os.Stdin).
 func WithInput(r io.Reader) EngineOption {
 	return func(e *Engine) { e.reader = r }
-}
-
-// WithExitConfirmation enables a "Exit wizard?" confirmation prompt when the
-// user presses Ctrl+C. Without this option, Ctrl+C exits immediately.
-func WithExitConfirmation() EngineOption {
-	return func(e *Engine) { e.exitConfirm = true }
 }
 
 // TestResult represents a prompt result for testing.
@@ -214,7 +220,6 @@ func (e *Engine) Run(ctx context.Context, flow *Flow) error {
 		sigCtx, sigCancel := context.WithCancel(ctx)
 		defer sigCancel()
 		ctx = sigCtx
-		e.interruptCancel = sigCancel
 
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, os.Interrupt)
@@ -353,7 +358,6 @@ func (e *Engine) stepLoop(ctx context.Context) error {
 		}
 
 		// Wait for result from composite and process it.
-		// handlePromptResult may call confirmExit which reuses the program.
 		result := <-e.resultCh
 		done, err := e.handlePromptResult(result, step, choices, canGoBack)
 
@@ -366,6 +370,11 @@ func (e *Engine) stepLoop(ctx context.Context) error {
 		}
 		if done {
 			e.current++
+		} else if e.validationMsg != "" {
+			// Printed after the prompt program stops so the line lands above
+			// the re-drawn prompt instead of interleaving with its renderer.
+			_, _ = fmt.Fprintf(e.out(), "  ✗ %s\n", e.validationMsg)
+			e.validationMsg = ""
 		}
 	}
 	return nil
@@ -413,21 +422,17 @@ func (e *Engine) stopProgram(done chan struct{}) {
 // Returns (false, nil) when the engine should re-prompt or rewind (current adjusted internally).
 // Returns (false, err) on fatal error.
 func (e *Engine) handlePromptResult(result promptResult, step Step, choices []Choice, canGoBack bool) (bool, error) {
+	e.validationMsg = ""
 	switch result.action {
 	case ActionExit:
-		if e.exitConfirm && e.program != nil {
-			if stayed := e.confirmExit(); stayed {
-				return false, nil // re-prompt current step
-			}
-		}
 		_, _ = fmt.Fprintln(e.out())
-		return false, ErrCancelled
+		return false, errCancelledInterrupt
 	case ActionBack:
 		if canGoBack {
 			e.rewindOne()
 		} else {
 			_, _ = fmt.Fprintln(e.out())
-			return false, ErrCancelled
+			return false, errCancelledBack
 		}
 		return false, nil
 	}
@@ -469,9 +474,13 @@ func (e *Engine) handlePromptResult(result promptResult, step Step, choices []Ch
 		return false, nil // re-prompt
 	}
 
-	// Validate.
+	// Validate. On failure the step re-prompts; the error is printed above the
+	// re-drawn prompt instead of being silently dropped. TextInput steps
+	// usually never get here — the prompt model validates inline and blocks
+	// submission (see buildPromptModel).
 	if step.Validate != nil {
 		if err := step.Validate(value); err != nil {
+			e.validationMsg = err.Error()
 			return false, nil // re-prompt
 		}
 	}
@@ -553,6 +562,17 @@ func (e *Engine) buildPromptModel(step Step, choices []Choice, canGoBack bool) b
 			if d, ok := step.Default(col).(string); ok && d != "" {
 				opts = append(opts, tui.WithDefault(d))
 			}
+		}
+		if step.Validate != nil {
+			validate := step.Validate
+			opts = append(opts, tui.WithValidation(func(s string) error {
+				// The engine substitutes Default for empty input on optional
+				// steps; validating "" here would wrongly reject that path.
+				if !step.Required && s == "" {
+					return nil
+				}
+				return validate(s)
+			}))
 		}
 		cfg := tui.ResolveTextInputConfig(opts)
 		return bubbletea.NewTextInputPrompt(promptLabel(step), cfg)
@@ -647,7 +667,13 @@ func (e *Engine) transition(idx int, newState stepState, value any) {
 	rt.value = value
 	rt.choices = nil // invalidate cached choices
 	rt.loaded = false
-	rt.rewindCount = 0 // reset guard so revisits get fresh attempts
+	// Only forward progress clears the auto-rewind guard. Resetting it on
+	// every transition was self-defeating: the rewind that follows an empty
+	// loader resets the very step that counted the attempt, so the guard
+	// never fired and a failing loader bounced the user back forever.
+	if newState == stateCompleted {
+		rt.rewindCount = 0
+	}
 
 	// Keep store in sync.
 	if value != nil {
@@ -803,41 +829,6 @@ func (e *Engine) invalidateDownstream(changedIdx int) {
 			e.steps[i].loaded = false
 		}
 	}
-}
-
-// --- Exit confirmation ---
-
-// confirmExit swaps the active prompt with a "Exit wizard?" confirm prompt.
-// Returns true if the user chose to stay (declined or pressed Esc).
-//
-// A second Ctrl+C on the confirm force-exits rather than bouncing back
-// into the flow — the user has already asked to leave once, and double
-// Ctrl+C is the universal escape hatch.
-func (e *Engine) confirmExit() (stayed bool) {
-	cfg := tui.ResolveConfirmConfig([]tui.ConfirmOption{tui.WithConfirmDefault(true)})
-	confirmModel := bubbletea.NewConfirmPrompt("Exit wizard?", cfg)
-
-	e.program.Send(showPromptMsg{
-		model:   confirmModel,
-		stepMsg: StepChangedMsg{PromptType: ConfirmPrompt},
-	})
-
-	result := <-e.resultCh
-	switch result.action {
-	case ActionExit:
-		// Second Ctrl+C — also cancel any in-flight loader ctx so no
-		// cleanup work sneaks past the exit.
-		if e.interruptCancel != nil {
-			e.interruptCancel()
-		}
-		return false
-	case ActionBack:
-		return true
-	}
-	if confirmed, ok := result.value.(bool); ok && confirmed {
-		return false
-	}
-	return true
 }
 
 // --- Utilities ---

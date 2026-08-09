@@ -64,7 +64,7 @@ func selectBatchjobDeployment(ctx context.Context, f cmdutil.Factory, ioStreams 
 	listCtx, cancel := context.WithTimeout(ctx, f.Options().Timeout)
 	defer cancel()
 
-	jobs, err := cmdutil.WithSpinner(listCtx, f.Status(), "Loading batch-job deployments...", func() ([]verda.JobDeploymentShortInfo, error) {
+	jobs, err := cmdutil.WithSpinner(listCtx, f.Status(), "Loading batch-job deployments...", func(ctx context.Context) ([]verda.JobDeploymentShortInfo, error) {
 		return client.ServerlessJobs.GetJobDeployments(listCtx)
 	})
 	if err != nil {
@@ -112,7 +112,7 @@ func runBatchjobDescribe(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmduti
 	// subordinate timeout so a slow status RPC can't blank it (see
 	// container_describe.go).
 	var status string
-	job, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading deployment...", func() (*verda.JobDeployment, error) {
+	job, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading deployment...", func(ctx context.Context) (*verda.JobDeployment, error) {
 		d, derr := client.ServerlessJobs.GetJobDeploymentByName(ctx, name)
 		if derr != nil {
 			return nil, derr

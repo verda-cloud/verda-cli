@@ -42,10 +42,11 @@ func terminalHeight(w io.Writer) int {
 }
 
 type pagerModel struct {
-	viewport viewport.Model
-	title    string
-	ready    bool
-	quitting bool
+	viewport    viewport.Model
+	title       string
+	ready       bool
+	quitting    bool
+	interrupted bool // true for Ctrl+C (hard cancel), false for q/Esc
 }
 
 func newPagerModel(content string, cfg tui.PagerConfig) pagerModel {
@@ -85,7 +86,11 @@ func (m pagerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.ready = true
 	case tea.KeyPressMsg:
 		switch msg.String() {
-		case "q", keyEsc, keyCtrlC:
+		case keyCtrlC:
+			m.quitting = true
+			m.interrupted = true
+			return m, tea.Quit
+		case "q", keyEsc:
 			m.quitting = true
 			return m, tea.Quit
 		}
@@ -142,6 +147,12 @@ func (p *Prompter) Pager(ctx context.Context, content string, opts ...tui.PagerO
 		tea.WithContext(ctx),
 	)
 
-	_, err := program.Run()
-	return err
+	result, err := program.Run()
+	if err != nil {
+		return err
+	}
+	if m, ok := result.(pagerModel); ok && m.interrupted {
+		return tui.ErrInterrupted
+	}
+	return nil
 }

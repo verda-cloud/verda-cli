@@ -293,7 +293,7 @@ func runAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 	actionCtx, cancel := context.WithTimeout(ctx, f.Options().Timeout)
 	defer cancel()
 
-	err = cmdutil.RunWithSpinner(actionCtx, f.Status(), fmt.Sprintf("%s %s...", action.Label, inst.Hostname), func() error {
+	err = cmdutil.RunWithSpinner(actionCtx, f.Status(), fmt.Sprintf("%s %s...", action.Label, inst.Hostname), func(ctx context.Context) error {
 		return action.Execute(actionCtx, client, inst)
 	})
 	if err != nil {
@@ -522,7 +522,7 @@ func runDeleteFlow(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOS
 	deleteCtx, cancel := context.WithTimeout(ctx, f.Options().Timeout)
 	defer cancel()
 
-	err = cmdutil.RunWithSpinner(deleteCtx, f.Status(), fmt.Sprintf("Deleting %s...", inst.Hostname), func() error {
+	err = cmdutil.RunWithSpinner(deleteCtx, f.Status(), fmt.Sprintf("Deleting %s...", inst.Hostname), func(ctx context.Context) error {
 		return client.Instances.Delete(deleteCtx, []string{inst.ID}, volumeIDs, false)
 	})
 	if err != nil {

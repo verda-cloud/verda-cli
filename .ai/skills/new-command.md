@@ -173,7 +173,7 @@ Shape of a flow:
 
 ```go
 engine := wizard.NewEngine(f.Prompter(), f.Status(),
-    wizard.WithOutput(ioStreams.ErrOut), wizard.WithExitConfirmation())
+    wizard.WithOutput(ioStreams.ErrOut))
 if err := engine.Run(ctx, flow); err != nil {
     return err // Ctrl+C returns an error here — propagate it, like configure/vm/mv
 }

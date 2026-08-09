@@ -374,7 +374,7 @@ func promptAddVolume(ctx context.Context, prompter tui.Prompter, store *wizard.S
 }
 
 func promptAttachExisting(ctx context.Context, prompter tui.Prompter, status tui.Status, client *verda.Client) (string, error) {
-	volumes, err := cmdutil.WithSpinner(ctx, status, "Loading volumes...", func() ([]verda.Volume, error) {
+	volumes, err := cmdutil.WithSpinner(ctx, status, "Loading volumes...", func(ctx context.Context) ([]verda.Volume, error) {
 		return client.Volumes.ListVolumes(ctx)
 	})
 	if err != nil {

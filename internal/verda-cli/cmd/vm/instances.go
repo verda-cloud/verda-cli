@@ -30,7 +30,7 @@ func fetchInstances(ctx context.Context, f cmdutil.Factory, client *verda.Client
 		apiStatus = statusFilter[0]
 	}
 
-	instances, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading instances...", func() ([]verda.Instance, error) {
+	instances, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading instances...", func(ctx context.Context) ([]verda.Instance, error) {
 		return client.Instances.Get(ctx, apiStatus)
 	})
 	if err != nil {

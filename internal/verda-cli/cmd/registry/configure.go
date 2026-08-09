@@ -135,7 +135,7 @@ func runConfigure(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStr
 		printConfigureIntro(ioStreams)
 		flow := buildConfigureFlow(opts)
 		engine := wizard.NewEngine(f.Prompter(), f.Status(),
-			wizard.WithOutput(ioStreams.ErrOut), wizard.WithExitConfirmation())
+			wizard.WithOutput(ioStreams.ErrOut))
 		if err := engine.Run(cmd.Context(), flow); err != nil {
 			return err
 		}

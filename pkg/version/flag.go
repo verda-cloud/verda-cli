@@ -65,15 +65,22 @@ func (v *versionValue) String() string {
 
 func (v *versionValue) Type() string { return "version" }
 
+// versionFlags holds the --version definition. Deliberately NOT
+// pflag.CommandLine: cobra's updateParentsPflags merges that process-global
+// set into every executed command tree (AddFlagSet → VisitAll), and its lazy
+// sort cache is written on first read — so any two parallel test executions
+// race on it. A private set has no hidden concurrent readers.
+var versionFlags = pflag.NewFlagSet("version", pflag.ContinueOnError)
+
 func init() {
-	pflag.CommandLine.Var(&versionFlag, versionFlagName, `Print version information and quit.
+	versionFlags.Var(&versionFlag, versionFlagName, `Print version information and quit.
 Accepts "true", "false", or "raw" for full details.`)
-	pflag.CommandLine.Lookup(versionFlagName).NoOptDefVal = "true"
+	versionFlags.Lookup(versionFlagName).NoOptDefVal = "true"
 }
 
 // AddFlags adds the --version flag to the given FlagSet.
 func AddFlags(fs *pflag.FlagSet) {
-	if f := pflag.CommandLine.Lookup(versionFlagName); f != nil {
+	if f := versionFlags.Lookup(versionFlagName); f != nil {
 		fs.AddFlag(f)
 	}
 }

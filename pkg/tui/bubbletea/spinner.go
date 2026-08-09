@@ -17,7 +17,6 @@ package bubbletea
 import (
 	"context"
 	"fmt"
-	"os"
 	"sync"
 
 	"charm.land/bubbles/v2/spinner"
@@ -39,6 +38,7 @@ type spinnerModel struct {
 	done         bool
 	finalMessage string
 	doneSymbol   string
+	interrupted  bool // true if the user ended the spinner with Ctrl+C
 }
 
 func newSpinnerModel(message string, cfg tui.SpinnerConfig) spinnerModel {
@@ -72,14 +72,11 @@ func (m spinnerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		if msg.String() == keyCtrlC {
 			m.done = true
+			m.interrupted = true
 			m.finalMessage = m.message
-			// Re-raise SIGINT so whoever installed a signal handler
-			// (typically the wizard engine) can cancel the outer context
-			// and abort the underlying work — tea.Quit alone only tears
-			// down the spinner, leaving fn() running.
-			if p, err := os.FindProcess(os.Getpid()); err == nil {
-				_ = p.Signal(os.Interrupt)
-			}
+			// No re-raise of SIGINT here: whether whoever wrapped the call
+			// aborts the guarded operation is decided via Interrupted(),
+			// typically wired by cmdutil.WithSpinner into the op's context.
 			return m, tea.Quit
 		}
 	}
@@ -121,9 +118,10 @@ func mapSpinnerStyle(s tui.SpinnerStyle) spinner.Spinner {
 // --- Handle ---
 
 type spinnerHandle struct {
-	program *tea.Program
-	once    sync.Once
-	done    chan struct{}
+	program     *tea.Program
+	once        sync.Once
+	done        chan struct{}
+	interrupted bool // written before done closes; safe to read after <-done
 }
 
 func (h *spinnerHandle) UpdateMessage(msg string) {
@@ -137,6 +135,13 @@ func (h *spinnerHandle) Stop(finalMessage string) {
 	})
 }
 
+// Interrupted blocks until the spinner program exits and reports whether the
+// user ended it with Ctrl+C.
+func (h *spinnerHandle) Interrupted() bool {
+	<-h.done
+	return h.interrupted
+}
+
 // Spinner implements tui.Status.
 func (p *Prompter) Spinner(ctx context.Context, message string, opts ...tui.SpinnerOption) (tui.SpinnerHandle, error) {
 	cfg := tui.ResolveSpinnerConfig(opts)
@@ -148,14 +153,17 @@ func (p *Prompter) Spinner(ctx context.Context, message string, opts ...tui.Spin
 		tea.WithContext(ctx),
 	)
 
-	done := make(chan struct{})
+	h := &spinnerHandle{
+		program: program,
+		done:    make(chan struct{}),
+	}
 	go func() {
-		defer close(done)
-		_, _ = program.Run()
+		defer close(h.done)
+		final, _ := program.Run()
+		if m, ok := final.(spinnerModel); ok {
+			h.interrupted = m.interrupted
+		}
 	}()
 
-	return &spinnerHandle{
-		program: program,
-		done:    done,
-	}, nil
+	return h, nil
 }

@@ -183,6 +183,10 @@ func (h *SpinnerHandle) Stop(finalMessage string) {
 	h.Stopped = true
 }
 
+// Interrupted always reports false: the test double never starts a program,
+// so there is nothing a user could have Ctrl+C'd.
+func (h *SpinnerHandle) Interrupted() bool { return false }
+
 // ProgressHandle is a no-op handle for testing.
 type ProgressHandle struct {
 	Percent      float64
@@ -205,6 +209,9 @@ func (h *ProgressHandle) Stop(finalMessage string) {
 	h.FinalMessage = finalMessage
 	h.Stopped = true
 }
+
+// Interrupted always reports false: the test double never starts a program.
+func (h *ProgressHandle) Interrupted() bool { return false }
 
 func (p *Prompter) Spinner(_ context.Context, _ string, _ ...tui.SpinnerOption) (tui.SpinnerHandle, error) {
 	return &SpinnerHandle{}, nil
