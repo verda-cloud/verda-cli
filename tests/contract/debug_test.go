@@ -47,18 +47,18 @@ func TestDebugRedaction(t *testing.T) {
 	})
 
 	// The SDK retries the token request form-encoded when the API answers the
-	// JSON attempt with 400. redactSensitiveJSON only matches JSON bodies, so
-	// the form body — including client_secret=... — is printed verbatim.
+	// JSON attempt with 400. Review H1: that body (incl. client_secret=...)
+	// must be redacted too, and the redacted marker proves the redactor ran
+	// (not merely that the body vanished).
 	t.Run("form-encoded token fallback", func(t *testing.T) {
 		t.Parallel()
-		// Kills the run today: review-2026-08-09.md H1 (verified by this test,
-		// which observed client_secret verbatim in stderr). The redaction fix is
-		// a separate PR; unskip when it lands.
-		t.Skip("review H1: form-encoded token retry bypasses --debug redaction")
 		srv := newServer(t)
 		srv.ForceFormTokenFallback(true)
 		r := runCLI(t, srv, "--debug", "-o", "json", "locations")
 		requireExit(t, r, 0)
 		assertNoSecrets(t, r)
+		if !strings.Contains(r.Stderr, "client_secret=<redacted>") {
+			t.Fatalf("expected form-body redaction marker in stderr, got none:\n%s", r.Stderr)
+		}
 	})
 }

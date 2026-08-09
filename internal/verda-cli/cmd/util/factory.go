@@ -44,15 +44,39 @@ const (
 )
 
 // sensitiveJSONFieldRe matches "field": "value" JSON entries whose values must
-// not appear in debug output (OAuth credentials, bearer tokens, etc.).
-// Value pattern allows escaped quotes (\") so values containing them are
-// redacted whole — a bare [^"]* would stop at the first escaped quote and
-// leak the remainder while emitting malformed JSON.
+// not appear in debug output (OAuth credentials, bearer tokens, provisioning
+// secrets — the key list mirrors the SDK's struct tags plus the API payloads
+// where verify-live testing saw them leak). Value pattern allows escaped
+// quotes (\") so values containing them are redacted whole — a bare [^"]*
+// would stop at the first escaped quote and leak the remainder while emitting
+// malformed JSON.
 var sensitiveJSONFieldRe = regexp.MustCompile(
-	`("(?:client_secret|access_token|refresh_token|id_token|password|api_key|bearer|authorization)")(\s*:\s*)"(?:[^"\\]|\\.)*"`)
+	`("(?:client_secret|secret_access_key|service_account_key|value_or_reference_to_secret|jupyter_token|access_token|refresh_token|id_token|password|api_key|bearer|authorization)")(\s*:\s*)"(?:[^"\\]|\\.)*"`)
+
+// sensitiveFormFieldRe matches name=value pairs in form-encoded bodies whose
+// values are secrets. The SDK retries /oauth2/token form-encoded when the API
+// rejects the JSON attempt with 400 — without this, --debug prints
+// client_secret verbatim exactly when the user captures logs for a bug
+// report (review H1).
+var sensitiveFormFieldRe = regexp.MustCompile(
+	`\b(client_secret|access_token|refresh_token|id_token|password|token)=[^&]*`)
 
 func redactSensitiveJSON(s string) string {
 	return sensitiveJSONFieldRe.ReplaceAllString(s, `$1$2"<redacted>"`)
+}
+
+func redactSensitiveForm(s string) string {
+	return sensitiveFormFieldRe.ReplaceAllString(s, `$1=<redacted>`)
+}
+
+// redactSensitiveBody picks a redactor by content type. Unknown types fall
+// back to the JSON redactor: the API speaks JSON, and the JSON pattern
+// harmlessly no-ops on non-JSON bytes.
+func redactSensitiveBody(contentType, s string) string {
+	if strings.HasPrefix(strings.ToLower(contentType), "application/x-www-form-urlencoded") {
+		return redactSensitiveForm(s)
+	}
+	return redactSensitiveJSON(s)
 }
 
 // Factory provides shared resources that are created once in the root command
@@ -154,7 +178,7 @@ func (t *debugTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		_, _ = fmt.Fprintf(t.out, "DEBUG:   %s: %s\n", k, strings.Join(req.Header[k], ", "))
 	}
 	if len(reqBody) > 0 {
-		_, _ = fmt.Fprintf(t.out, "DEBUG: request body: %s\n", redactSensitiveJSON(string(reqBody)))
+		_, _ = fmt.Fprintf(t.out, "DEBUG: request body: %s\n", redactSensitiveBody(req.Header.Get("Content-Type"), string(reqBody)))
 	}
 
 	resp, err := t.base.RoundTrip(req)
@@ -179,7 +203,7 @@ func (t *debugTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 	_, _ = fmt.Fprintf(t.out, "DEBUG: HTTP response %s\n", resp.Status)
 	if len(respBody) > 0 {
-		_, _ = fmt.Fprintf(t.out, "DEBUG: response body: %s\n", redactSensitiveJSON(string(respBody)))
+		_, _ = fmt.Fprintf(t.out, "DEBUG: response body: %s\n", redactSensitiveBody(resp.Header.Get("Content-Type"), string(respBody)))
 	}
 	return resp, nil
 }
