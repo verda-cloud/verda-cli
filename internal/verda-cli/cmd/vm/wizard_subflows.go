@@ -252,14 +252,20 @@ func promptAddStartupScript(ctx context.Context, prompter tui.Prompter, client *
 }
 
 func buildStorageChoices(volumes []verda.VolumeCreateRequest, existingIDs []string) []wizard.Choice {
-	choices := []wizard.Choice{
-		{Label: "None (skip)", Value: ""},
-		{Label: "+ Add new block volume", Value: addNewVolumeValue},
-		{Label: "+ Attach existing volume", Value: "__attach_existing__"},
+	choices := make([]wizard.Choice, 0, 3+len(volumes)+len(existingIDs))
+	hasVolumes := len(volumes) > 0 || len(existingIDs) > 0
+	if !hasVolumes {
+		// "None (skip)" only on the fresh menu — with volumes queued it would
+		// silently discard them (cursor rests on row 0); Done or Esc instead.
+		choices = append(choices, wizard.Choice{Label: "None (skip)", Value: ""})
 	}
+	choices = append(choices,
+		wizard.Choice{Label: "+ Add new block volume", Value: addNewVolumeValue},
+		wizard.Choice{Label: "+ Attach existing volume", Value: "__attach_existing__"},
+	)
 
 	// Show already-added volumes.
-	if len(volumes) > 0 || len(existingIDs) > 0 {
+	if hasVolumes {
 		for _, v := range volumes {
 			choices = append(choices, wizard.Choice{
 				Label: fmt.Sprintf("  New: %s (%dGB %s)", v.Name, v.Size, v.Type),
