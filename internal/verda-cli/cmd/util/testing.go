@@ -19,9 +19,9 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/verda-cloud/verda-cli/pkg/tui"
+	tuitest "github.com/verda-cloud/verda-cli/pkg/tui/testing"
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
-	"github.com/verda-cloud/verdagostack/pkg/tui"
-	tuitest "github.com/verda-cloud/verdagostack/pkg/tui/testing"
 
 	clioptions "github.com/verda-cloud/verda-cli/internal/verda-cli/options"
 )

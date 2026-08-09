@@ -21,8 +21,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/verda-cloud/verda-cli/pkg/tui/wizard"
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
-	"github.com/verda-cloud/verdagostack/pkg/tui/wizard"
 )
 
 // apiCache holds data fetched from the API, shared across wizard steps

@@ -24,7 +24,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/verda-cloud/verdagostack/pkg/tui"
+	"github.com/verda-cloud/verda-cli/pkg/tui"
 )
 
 // IsPromptCancel reports whether err represents a clean prompter exit

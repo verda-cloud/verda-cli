@@ -17,7 +17,7 @@ package util
 import (
 	"context"
 
-	"github.com/verda-cloud/verdagostack/pkg/tui"
+	"github.com/verda-cloud/verda-cli/pkg/tui"
 )
 
 // WithSpinner runs fn while showing a spinner message. If status is nil or the

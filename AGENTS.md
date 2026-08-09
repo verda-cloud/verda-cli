@@ -33,7 +33,7 @@ Skipping these steps leads to pattern violations, broken dual-mode, and pricing 
 - **Preserve dual mode** — every command must work interactive AND non-interactive. Never build one without the other
 - **Interactive hint bar** — every direct `prompter.Select(...)` outside the wizard engine must pass `tui.WithShowHints(true)` (and the equivalent option on `MultiSelect`) so the prompt renders its key hints below the choices. Wizard steps are exempt — the composite already renders the hint bar
 - **Ctrl+C exits immediately, no confirmation** — use `cmdutil.IsPromptCancel(err)` to detect either Esc or Ctrl+C and return cleanly. When a flow needs different behavior per key (e.g. a "Back to list / Exit" gate where Esc means back), split with `IsPromptInterrupt(err)` (Ctrl+C) and `IsPromptBack(err)` (Esc). Never show an "Exit?" confirmation dialog — Unix users expect Ctrl+C to be terminal
-- **Never modify `verdagostack`** directly — describe needed changes for the maintainer
+- **`pkg/` is in-tree** — the TUI core (`pkg/tui*`), `pkg/log`, `pkg/version` are part of this repo; edit them directly
 - **Commit only when asked** — don't auto-commit
 
 ## Risky Areas — Slow Down
@@ -44,7 +44,6 @@ Skipping these steps leads to pattern violations, broken dual-mode, and pricing 
 | `options/credentials.go` | Break auth = break everything | Test all profiles, expired tokens |
 | Agent mode (`--agent`) | JSON contract change = break downstream | Check structured error format |
 | Wizard steps | Step ordering, cache invalidation | Map dependencies before coding |
-| `verdagostack` types | Shared across repos | Don't modify, describe changes needed |
 
 ## Done Checklist
 

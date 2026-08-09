@@ -28,7 +28,7 @@ import (
 	"time"
 
 	clioptions "github.com/verda-cloud/verda-cli/internal/verda-cli/options"
-	"github.com/verda-cloud/verdagostack/pkg/version"
+	"github.com/verda-cloud/verda-cli/pkg/version"
 )
 
 // VersionCache holds the result of the last version check so we can avoid

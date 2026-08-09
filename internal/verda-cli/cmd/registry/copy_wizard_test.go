@@ -25,7 +25,7 @@ import (
 
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/options"
-	tuitest "github.com/verda-cloud/verdagostack/pkg/tui/testing"
+	tuitest "github.com/verda-cloud/verda-cli/pkg/tui/testing"
 )
 
 // readCaptureRegistry records the ref passed to Read, then errors so the copy

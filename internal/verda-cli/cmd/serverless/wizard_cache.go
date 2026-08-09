@@ -18,8 +18,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/verda-cloud/verda-cli/pkg/tui"
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
-	"github.com/verda-cloud/verdagostack/pkg/tui"
 )
 
 // withFetchSpinner runs fn while showing a spinner labeled msg. If status is

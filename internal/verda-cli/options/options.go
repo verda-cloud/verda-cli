@@ -23,7 +23,7 @@ import (
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 
-	"github.com/verda-cloud/verdagostack/pkg/log"
+	"github.com/verda-cloud/verda-cli/pkg/log"
 )
 
 const FlagConfig = "config"

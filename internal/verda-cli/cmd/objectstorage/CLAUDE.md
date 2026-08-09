@@ -85,6 +85,6 @@ Do NOT escape the whole `bucket/key` as a single string -- S3 rejects a pre-esca
 
 - `cmdutil` (`internal/verda-cli/cmd/util`) -- Factory, IOStreams, `DebugJSON`, `WriteStructured`, `AgentError` helpers, `LongDesc`, `Examples`
 - `options` -- `S3Credentials`, `LoadS3CredentialsForProfile`, `DefaultCredentialsFilePath`, `EnsureVerdaDir`
-- `verdagostack/pkg/tui/wizard` -- only imported by `configure.go` for the credential-setup wizard
+- `pkg/tui/wizard` -- only imported by `configure.go` for the credential-setup wizard
 - AWS SDK v2 -- `aws`, `aws/signer/v4`, `config`, `credentials`, `feature/s3/manager`, `service/s3`, `service/s3/types`, `smithy-go`
 - `charm.land/lipgloss/v2` -- destructive-action warning styles in `rb.go`, `rm.go`

@@ -24,7 +24,7 @@ import (
 
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 
-	tuitest "github.com/verda-cloud/verdagostack/pkg/tui/testing"
+	tuitest "github.com/verda-cloud/verda-cli/pkg/tui/testing"
 )
 
 func TestUninstallCopy(t *testing.T) {

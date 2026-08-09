@@ -18,8 +18,8 @@ import (
 	"context"
 	"strings"
 
+	"github.com/verda-cloud/verda-cli/pkg/tui"
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
-	"github.com/verda-cloud/verdagostack/pkg/tui"
 )
 
 // promptEnvVar collects one environment-variable entry interactively. Returns

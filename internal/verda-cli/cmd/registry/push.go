@@ -26,7 +26,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/spf13/cobra"
-	"github.com/verda-cloud/verdagostack/pkg/tui"
+	"github.com/verda-cloud/verda-cli/pkg/tui"
 
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 

@@ -9,7 +9,7 @@
 ## Domain-Specific Logic
 
 ### Version Resolution
-- Current version from `version.Get().GitVersion` (from `verdagostack/pkg/version`)
+- Current version from `version.Get().GitVersion` (from `pkg/version`)
 - Auto-prepends `v` prefix if missing from `--target` flag
 - Skips update if target == current
 
@@ -33,7 +33,7 @@
 
 ## Relationships
 - Imports `cmdutil` (`internal/verda-cli/cmd/util`) for Factory, IOStreams, DebugJSON, LongDesc, Examples
-- Imports `version` from `verdagostack/pkg/version` for current version info
+- Imports `version` from `pkg/version` for current version info
 - Does NOT use the Verda API client -- only GitHub API via raw HTTP
 - No dependency on the Verda SDK (`verdacloud-sdk-go`) at all
 - Uses standard library only for HTTP, archive handling, and file operations

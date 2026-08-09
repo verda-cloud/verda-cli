@@ -32,7 +32,7 @@
 ## Relationships
 - `cmdutil.Factory` / `cmdutil.IOStreams` -- standard dependency injection
 - `options` package -- `VerdaDir()`, `DefaultCredentialsFilePath()`, `LoadSharedCredentialsForProfile()`, `EnsureVerdaDir()`, `WriteSecureFile()`
-- `verdagostack/pkg/tui/wizard` -- wizard engine and step definitions
-- `verdagostack/pkg/tui/bubbletea` -- `HintStyle()` for wizard hint bar
+- `pkg/tui/wizard` -- wizard engine and step definitions
+- `pkg/tui/bubbletea` -- `HintStyle()` for wizard hint bar
 - `gopkg.in/ini.v1` -- INI file read/write for credentials
 - `go.yaml.in/yaml/v3` -- YAML read/write for config

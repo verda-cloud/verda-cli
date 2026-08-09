@@ -25,6 +25,7 @@ internal/verda-cli/
     README.md                 # Usage examples, flags, architecture notes
   options/                    # Global CLI options, credentials
 internal/skills/              # Embedded AI skill files (go:embed)
+pkg/                          # In-tree TUI core, log, version (formerly verdagostack)
 ```
 
 ### Per-Command Documentation
@@ -56,13 +57,15 @@ Each command directory has its own `CLAUDE.md` (domain knowledge) and `README.md
 ### Core Patterns
 
 - **Factory** (`cmd/util/factory.go`): DI for Prompter, Status, VerdaClient, Debug, AgentMode, OutputFormat
-- **Wizard engine** (`verdagostack/pkg/tui/wizard`): Multi-step interactive flows
+- **Wizard engine** (`pkg/tui/wizard`): Multi-step interactive flows
 - **Lazy client** (`clientFunc`): API client resolved on first use, not at init
 - **API cache** (`apiCache`): Shared across wizard steps to avoid redundant calls
 
-### Local Dependencies
+### TUI / Log / Version packages (`pkg/`)
 
-- `verdagostack` replaced locally: `replace github.com/verda-cloud/verdagostack => ../verdagostack`
+- `pkg/tui` (+ `bubbletea`, `wizard`, `testing`), `pkg/log`, `pkg/version` live in-tree —
+  edit them directly like any other code in this repo (they were copied from
+  `verdagostack` v1.4.2, which this repo no longer depends on)
 - Bubble Tea v2 (`charm.land/bubbletea/v2`), lipgloss v2 (`charm.land/lipgloss/v2`)
 - Never use v1 imports — they won't compile
 

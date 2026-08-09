@@ -18,8 +18,8 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/verda-cloud/verdagostack/pkg/tui/bubbletea"
-	"github.com/verda-cloud/verdagostack/pkg/tui/wizard"
+	"github.com/verda-cloud/verda-cli/pkg/tui/bubbletea"
+	"github.com/verda-cloud/verda-cli/pkg/tui/wizard"
 )
 
 const (

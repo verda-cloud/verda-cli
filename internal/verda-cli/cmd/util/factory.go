@@ -25,10 +25,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/verda-cloud/verda-cli/pkg/tui"
+	_ "github.com/verda-cloud/verda-cli/pkg/tui/bubbletea" // registers bubbletea TUI backend
+	"github.com/verda-cloud/verda-cli/pkg/version"
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
-	"github.com/verda-cloud/verdagostack/pkg/tui"
-	_ "github.com/verda-cloud/verdagostack/pkg/tui/bubbletea" // registers bubbletea TUI backend
-	"github.com/verda-cloud/verdagostack/pkg/version"
 
 	clioptions "github.com/verda-cloud/verda-cli/internal/verda-cli/options"
 )

@@ -20,7 +20,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/verda-cloud/verdagostack/pkg/tui/wizard"
+	"github.com/verda-cloud/verda-cli/pkg/tui/wizard"
 )
 
 // buildBatchjobCreateFlow returns the wizard flow for `verda batchjob create`.

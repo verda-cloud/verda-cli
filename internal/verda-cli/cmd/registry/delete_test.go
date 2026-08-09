@@ -22,7 +22,7 @@ import (
 	"testing"
 
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
-	tuitest "github.com/verda-cloud/verdagostack/pkg/tui/testing"
+	tuitest "github.com/verda-cloud/verda-cli/pkg/tui/testing"
 )
 
 // runDeleteForTest exercises the real flag-parsing path so test argv

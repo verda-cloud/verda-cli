@@ -9,7 +9,7 @@ builds:
     binary: verda
     main: ./cmd/verda/
     ldflags:
-      - -s -w -X github.com/verda-cloud/verdagostack/pkg/version.gitVersion={{ .Version }}
+      - -s -w -X github.com/verda-cloud/verda-cli/pkg/version.gitVersion={{ .Version }}
     env:
       - CGO_ENABLED=0
     goos:

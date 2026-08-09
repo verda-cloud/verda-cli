@@ -26,7 +26,7 @@ import (
 	"gopkg.in/ini.v1"
 
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
-	tuitest "github.com/verda-cloud/verdagostack/pkg/tui/testing"
+	tuitest "github.com/verda-cloud/verda-cli/pkg/tui/testing"
 )
 
 // newTestStreams returns IOStreams backed by buffers, with `stdin` providing

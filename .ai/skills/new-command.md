@@ -164,7 +164,7 @@ where Esc steps back one prompt while Ctrl+C exits the whole flow.
 
 **Multi-step wizards — ALWAYS use the shared wizard engine.** Do NOT hand-roll a
 step loop. Every multi-step interactive flow goes through
-`github.com/verda-cloud/verdagostack/pkg/tui/wizard` so they all share one look
+`github.com/verda-cloud/verda-cli/pkg/tui/wizard` so they all share one look
 (progress bar + hint bar), Esc=back, and Ctrl+C handling. Reference flows:
 `cmd/s3/wizard.go` (`buildConfigureFlow`), `cmd/s3/move_wizard.go`
 (`buildMoveFlow`), `cmd/vm/wizard.go`.
@@ -307,7 +307,7 @@ The pager auto-detects: prints directly if content fits terminal, otherwise show
 
 - `cmdutil "github/verda-cloud/verda-cli/internal/verda-cli/cmd/util"` -- Factory, IOStreams, DebugJSON, helpers
 - `"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"` -- SDK client and types
-- `"github.com/verda-cloud/verdagostack/pkg/tui"` -- Prompter, Status, pager options
+- `"github.com/verda-cloud/verda-cli/pkg/tui"` -- Prompter, Status, pager options
 - `"charm.land/lipgloss/v2"` -- Terminal styling
 - `"github.com/spf13/cobra"` -- Command framework
 
