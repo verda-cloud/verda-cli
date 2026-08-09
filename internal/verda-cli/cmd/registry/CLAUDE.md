@@ -164,8 +164,8 @@ Before each `Write`, we `Head` the destination ref:
 
 - `cmdutil` (`internal/verda-cli/cmd/util`) -- `Factory`, `IOStreams`, `DebugJSON`, `WriteStructured`, `AgentError`, `NewConfirmationRequiredError`, `LongDesc`, `Examples`, `UsageErrorf`, exit-code constants.
 - `options` -- `RegistryCredentials`, `LoadRegistryCredentialsForProfile`, `WriteRegistryCredentialsToProfile`, `DefaultCredentialsFilePath`, `EnsureVerdaDir`.
-- `verdagostack/pkg/tui/wizard` -- imported by `configure.go` only (the credential-setup wizard).
-- `verdagostack/pkg/tui` -- `WithConfirmDefault` for the overwrite prompt in `copy`.
+- `pkg/tui/wizard` -- imported by `configure.go` only (the credential-setup wizard).
+- `pkg/tui` -- `WithConfirmDefault` for the overwrite prompt in `copy`.
 - `google/go-containerregistry` -- `pkg/v1`, `pkg/v1/remote`, `pkg/v1/remote/transport`, `pkg/v1/daemon`, `pkg/v1/layout`, `pkg/v1/tarball`, `pkg/name`, `pkg/authn` (plus `pkg/registry` as the in-process test server in `*_test.go`).
 - `charm.land/bubbletea/v2`, `charm.land/lipgloss/v2` -- progress view, picker, and wizard styling.
 - `github.com/charmbracelet/x/term` -- `IsTerminal` wired through `isTerminalFn`.
@@ -258,7 +258,7 @@ Harbor returns HTTP 412 when a project policy — **Tag Immutability** or **Tag 
 
 1. Outer picker: select a repository (or Exit).
 2. Inner menu: "Delete image(s) from X", "Delete repository X (all images)", "Back to repository list", "Exit".
-3. The image-delete sub-flow uses `prompter.MultiSelect` with a label that surfaces the **Ctrl+A** "select all" keystroke — the bubbletea `MultiSelect` already supports it natively (see `verdagostack/pkg/tui/bubbletea/multiselect.go`), so we just advertise it in the prompt label and tests emulate it via `AddMultiSelect([]int{0, 1, ..., n-1})`.
+3. The image-delete sub-flow uses `prompter.MultiSelect` with a label that surfaces the **Ctrl+A** "select all" keystroke — the bubbletea `MultiSelect` already supports it natively (see `pkg/tui/bubbletea/multiselect.go`), so we just advertise it in the prompt label and tests emulate it via `AddMultiSelect([]int{0, 1, ..., n-1})`.
 4. The image batch runs sequentially (Harbor has no bulk-delete endpoint). Failures on individual artifacts are collected and reported at the end; survivors still get deleted — users generally want partial progress, not all-or-nothing.
 5. Error handling in the outer loop classifies via `isAccessDenied` (shared with `ls`): a `registry_access_denied` (Harbor 403) is a permission wall — surface the actionable error once and **return** (exit), rather than looping the user back into a picker that can only re-fail. This is the common case for credentials minted before the Harbor image permission was granted (the error text tells them to re-`configure` with a fresh credential). Transient (5xx) errors still print + `continue` so one flaky fetch doesn't eject the user.
 

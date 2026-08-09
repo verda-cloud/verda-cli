@@ -19,7 +19,7 @@ import (
 	"io"
 	"testing"
 
-	"github.com/verda-cloud/verdagostack/pkg/tui/wizard"
+	"github.com/verda-cloud/verda-cli/pkg/tui/wizard"
 )
 
 func TestBuildLoginFlowHappyPath(t *testing.T) {

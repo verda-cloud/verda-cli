@@ -22,9 +22,9 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
-	"github.com/verda-cloud/verdagostack/pkg/log"
-	"github.com/verda-cloud/verdagostack/pkg/tui/bubbletea"
-	"github.com/verda-cloud/verdagostack/pkg/version"
+	"github.com/verda-cloud/verda-cli/pkg/log"
+	"github.com/verda-cloud/verda-cli/pkg/tui/bubbletea"
+	"github.com/verda-cloud/verda-cli/pkg/version"
 
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/auth"
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/availability"
@@ -261,9 +261,8 @@ var ErrVersionRequested = errors.New("version requested")
 func versionOutput() string {
 	info := version.Get()
 	sdkVer := depVersion("github.com/verda-cloud/verdacloud-sdk-go")
-	stackVer := depVersion("github.com/verda-cloud/verdagostack")
-	return fmt.Sprintf("  Version:      %s\n  Platform:     %s\n  SDK:          %s\n  Verdagostack: %s\n",
-		info.GitVersion, info.Platform, sdkVer, stackVer)
+	return fmt.Sprintf("  Version:  %s\n  Platform: %s\n  SDK:      %s\n",
+		info.GitVersion, info.Platform, sdkVer)
 }
 
 func depVersion(modulePath string) string {

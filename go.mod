@@ -1,6 +1,6 @@
 module github.com/verda-cloud/verda-cli
 
-go 1.25.11
+go 1.25.12
 
 require (
 	charm.land/lipgloss/v2 v2.0.2
@@ -9,11 +9,11 @@ require (
 	github.com/spf13/pflag v1.0.10
 	github.com/spf13/viper v1.21.0
 	github.com/verda-cloud/verdacloud-sdk-go v1.4.2
-	github.com/verda-cloud/verdagostack v1.4.2
 	go.yaml.in/yaml/v3 v3.0.4
 )
 
 require (
+	charm.land/bubbles/v2 v2.1.0
 	charm.land/bubbletea/v2 v2.0.2
 	github.com/aws/aws-sdk-go-v2 v1.41.6
 	github.com/aws/aws-sdk-go-v2/config v1.32.16
@@ -24,11 +24,11 @@ require (
 	github.com/charmbracelet/x/term v0.2.2
 	github.com/google/go-containerregistry v0.21.5
 	github.com/mark3labs/mcp-go v0.47.0
+	go.uber.org/zap v1.27.1
 	gopkg.in/ini.v1 v1.67.1
 )
 
 require (
-	charm.land/bubbles/v2 v2.1.0 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.9 // indirect
@@ -70,7 +70,7 @@ require (
 	github.com/google/jsonschema-go v0.4.2 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
-	github.com/klauspost/compress v1.18.5 // indirect
+	github.com/klauspost/compress v1.18.7 // indirect
 	github.com/lucasb-eyer/go-colorful v1.3.0 // indirect
 	github.com/mattn/go-runewidth v0.0.21 // indirect
 	github.com/mitchellh/go-homedir v1.1.0 // indirect
@@ -93,12 +93,13 @@ require (
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.61.0 // indirect
-	go.opentelemetry.io/otel v1.43.0 // indirect
-	go.opentelemetry.io/otel/metric v1.43.0 // indirect
-	go.opentelemetry.io/otel/trace v1.43.0 // indirect
+	go.opentelemetry.io/otel v1.44.0 // indirect
+	go.opentelemetry.io/otel/metric v1.44.0 // indirect
+	go.opentelemetry.io/otel/sdk v1.43.0 // indirect
+	go.opentelemetry.io/otel/sdk/metric v1.43.0 // indirect
+	go.opentelemetry.io/otel/trace v1.44.0 // indirect
 	go.uber.org/multierr v1.10.0 // indirect
-	go.uber.org/zap v1.27.1 // indirect
-	golang.org/x/sync v0.20.0 // indirect
+	golang.org/x/sync v0.21.0 // indirect
 	golang.org/x/sys v0.45.0 // indirect
-	golang.org/x/text v0.36.0 // indirect
+	golang.org/x/text v0.39.0 // indirect
 )

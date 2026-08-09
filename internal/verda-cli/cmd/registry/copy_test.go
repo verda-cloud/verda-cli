@@ -34,7 +34,7 @@ import (
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/random"
 	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
-	tuitest "github.com/verda-cloud/verdagostack/pkg/tui/testing"
+	tuitest "github.com/verda-cloud/verda-cli/pkg/tui/testing"
 
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/options"

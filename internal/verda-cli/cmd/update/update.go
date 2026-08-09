@@ -33,7 +33,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/verda-cloud/verdagostack/pkg/version"
+	"github.com/verda-cloud/verda-cli/pkg/version"
 
 	skillscmd "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/skills"
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"

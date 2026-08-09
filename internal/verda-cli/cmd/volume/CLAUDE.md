@@ -45,5 +45,5 @@
 ## Relationships
 - Imports `cmdutil` (`internal/verda-cli/cmd/util`) for Factory, IOStreams, DebugJSON, LongDesc, Examples
 - Imports `verda` SDK (`verdacloud-sdk-go/pkg/verda`) for API types and client
-- Imports `tui` (`verdagostack/pkg/tui`) for Prompter interface and options (`WithDefault`, `WithConfirmDefault`, `WithPagerTitle`)
+- Imports `tui` (`pkg/tui`) for Prompter interface and options (`WithDefault`, `WithConfirmDefault`, `WithPagerTitle`)
 - Imports `lipgloss` v2 for styled terminal output (bold, dim, warning colors)

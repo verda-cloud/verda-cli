@@ -24,7 +24,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/spf13/cobra"
-	"github.com/verda-cloud/verdagostack/pkg/tui"
+	"github.com/verda-cloud/verda-cli/pkg/tui"
 
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )

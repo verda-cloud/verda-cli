@@ -21,7 +21,7 @@
 - In `add`, prompter errors return `nil` (not the error) -- intentional for Ctrl+C cancellation
 - Same cancellation pattern in `delete`
 - `add` imports `os` for `ReadFile` and `strings` for `TrimSpace` -- the only command in this package that reads files from disk
-- `add` imports `github.com/verda-cloud/verdagostack/pkg/tui` for `tui.WithEditorDefault` and `tui.WithFileExt` editor options
+- `add` imports `github.com/verda-cloud/verda-cli/pkg/tui` for `tui.WithEditorDefault` and `tui.WithFileExt` editor options
 - `delete` interactive mode uses two separate timeout contexts: one for listing, another for deleting
 - When no scripts exist, both `list` and `delete` print a friendly message and return `nil`
 
@@ -29,5 +29,5 @@
 - Depends on `cmdutil.Factory` for VerdaClient, Prompter, Status, Debug, Options
 - Depends on `cmdutil.IOStreams` for output routing
 - SDK dependency: `github.com/verda-cloud/verdacloud-sdk-go/pkg/verda` (in `add.go` for `CreateStartupScriptRequest`)
-- TUI dependency: `github.com/verda-cloud/verdagostack/pkg/tui` (in `add.go` for editor options)
+- TUI dependency: `github.com/verda-cloud/verda-cli/pkg/tui` (in `add.go` for editor options)
 - Uses `cmdutil.LongDesc`, `cmdutil.Examples`, `cmdutil.DebugJSON`, `cmdutil.DefaultSubCommandRun`

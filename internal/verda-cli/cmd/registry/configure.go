@@ -24,7 +24,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/verda-cloud/verdagostack/pkg/tui/wizard"
+	"github.com/verda-cloud/verda-cli/pkg/tui/wizard"
 
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/options"

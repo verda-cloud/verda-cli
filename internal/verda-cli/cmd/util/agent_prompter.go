@@ -17,7 +17,7 @@ package util
 import (
 	"context"
 
-	"github.com/verda-cloud/verdagostack/pkg/tui"
+	"github.com/verda-cloud/verda-cli/pkg/tui"
 )
 
 // agentPrompter implements tui.Prompter but returns structured errors for every

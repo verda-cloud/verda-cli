@@ -21,7 +21,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/verda-cloud/verdagostack/pkg/tui/wizard"
+	"github.com/verda-cloud/verda-cli/pkg/tui/wizard"
 )
 
 // Container-specific wizard steps. Steps shared with batchjob live in

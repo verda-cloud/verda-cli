@@ -24,8 +24,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
-	tuitest "github.com/verda-cloud/verdagostack/pkg/tui/testing"
-	"github.com/verda-cloud/verdagostack/pkg/tui/wizard"
+	tuitest "github.com/verda-cloud/verda-cli/pkg/tui/testing"
+	"github.com/verda-cloud/verda-cli/pkg/tui/wizard"
 
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )

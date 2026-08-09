@@ -23,8 +23,8 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/spf13/cobra"
+	"github.com/verda-cloud/verda-cli/pkg/tui"
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
-	"github.com/verda-cloud/verdagostack/pkg/tui"
 
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )

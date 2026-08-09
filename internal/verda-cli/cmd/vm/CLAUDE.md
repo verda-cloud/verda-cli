@@ -119,9 +119,9 @@ startup-script -> hostname -> description -> confirm-deploy
 
 ## Relationships
 
-- **wizard engine**: `verdagostack/pkg/tui/wizard` -- provides `Flow`, `Step`, `Store`, `Engine`, `Choice`, prompt types
-- **tui package**: `verdagostack/pkg/tui` -- `Prompter`, `Status` interfaces, `WithDefault`, `WithConfirmDefault`, `WithEditorDefault`, `WithFileExt`, `WithMultiSelectDefaults` options
-- **bubbletea package**: `verdagostack/pkg/tui/bubbletea` -- `HintStyle()` for wizard hints
+- **wizard engine**: `pkg/tui/wizard` -- provides `Flow`, `Step`, `Store`, `Engine`, `Choice`, prompt types
+- **tui package**: `pkg/tui` -- `Prompter`, `Status` interfaces, `WithDefault`, `WithConfirmDefault`, `WithEditorDefault`, `WithFileExt`, `WithMultiSelectDefaults` options
+- **bubbletea package**: `pkg/tui/bubbletea` -- `HintStyle()` for wizard hints
 - **SDK**: `verdacloud-sdk-go/pkg/verda` -- all API client types, constants (`LocationFIN01`, `VolumeTypeNVMe`, `VolumeTypeHDD`, `SpotDiscontinue*`, `Status*`)
 - **cmdutil**: `cmd/util` -- `Factory`, `IOStreams`, `WithSpinner`, `RunWithSpinner`, `TemplatesBaseDir`, `DebugJSON`, `UsageErrorf`, `ValidateHostname`, `GenerateHostname`, `LongDesc`, `Examples`, `DefaultSubCommandRun`
 - **Factory dependencies**: `f.VerdaClient()`, `f.Prompter()`, `f.Status()`, `f.Debug()`, `f.Options().Timeout`, `f.OutputFormat()`, `f.AgentMode()`

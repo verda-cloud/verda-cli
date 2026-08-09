@@ -33,7 +33,7 @@ Skipping these steps leads to pattern violations, broken dual-mode, and pricing 
 - **Preserve dual mode** — every command must work interactive AND non-interactive. Never build one without the other
 - **Interactive hint bar** — every direct `prompter.Select(...)` outside the wizard engine must pass `tui.WithShowHints(true)` (and the equivalent option on `MultiSelect`) so the prompt renders its key hints below the choices. Wizard steps are exempt — the composite already renders the hint bar
 - **Ctrl+C exits immediately, no confirmation** — use `cmdutil.IsPromptCancel(err)` to detect either Esc or Ctrl+C and return cleanly. When a flow needs different behavior per key (e.g. a "Back to list / Exit" gate where Esc means back), split with `IsPromptInterrupt(err)` (Ctrl+C) and `IsPromptBack(err)` (Esc). Never show an "Exit?" confirmation dialog — Unix users expect Ctrl+C to be terminal
-- **Never modify `verdagostack`** directly — describe needed changes for the maintainer
+- **`pkg/` is in-tree** — the TUI core (`pkg/tui*`), `pkg/log`, `pkg/version` are part of this repo; edit them directly
 - **Commit only when asked** — don't auto-commit
 
 ## Risky Areas — Slow Down
@@ -44,7 +44,6 @@ Skipping these steps leads to pattern violations, broken dual-mode, and pricing 
 | `options/credentials.go` | Break auth = break everything | Test all profiles, expired tokens |
 | Agent mode (`--agent`) | JSON contract change = break downstream | Check structured error format |
 | Wizard steps | Step ordering, cache invalidation | Map dependencies before coding |
-| `verdagostack` types | Shared across repos | Don't modify, describe changes needed |
 
 ## Done Checklist
 
@@ -57,47 +56,3 @@ Skipping these steps leads to pattern violations, broken dual-mode, and pricing 
 - [ ] No leftover debug code, TODOs, or commented-out blocks
 
 If `make lint` reports issues, fix them *before* announcing completion. See `CLAUDE.md` § "Go House Style" for the patterns that prevent the common hits (http.NoBody, American spelling, reused constants, rangeValCopy, nilerr annotations, etc.).
-
-<!-- gitnexus:start -->
-# GitNexus — Code Intelligence
-
-This project is indexed by GitNexus as **verda-cli** (7546 symbols, 19146 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
-
-> If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
-
-## Always Do
-
-- **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run `gitnexus_impact({target: "symbolName", direction: "upstream"})` and report the blast radius (direct callers, affected processes, risk level) to the user.
-- **MUST run `gitnexus_detect_changes()` before committing** to verify your changes only affect expected symbols and execution flows.
-- **MUST warn the user** if impact analysis returns HIGH or CRITICAL risk before proceeding with edits.
-- When exploring unfamiliar code, use `gitnexus_query({query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
-- When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `gitnexus_context({name: "symbolName"})`.
-
-## Never Do
-
-- NEVER edit a function, class, or method without first running `gitnexus_impact` on it.
-- NEVER ignore HIGH or CRITICAL risk warnings from impact analysis.
-- NEVER rename symbols with find-and-replace — use `gitnexus_rename` which understands the call graph.
-- NEVER commit changes without running `gitnexus_detect_changes()` to check affected scope.
-
-## Resources
-
-| Resource | Use for |
-|----------|---------|
-| `gitnexus://repo/verda-cli/context` | Codebase overview, check index freshness |
-| `gitnexus://repo/verda-cli/clusters` | All functional areas |
-| `gitnexus://repo/verda-cli/processes` | All execution flows |
-| `gitnexus://repo/verda-cli/process/{name}` | Step-by-step execution trace |
-
-## CLI
-
-| Task | Read this skill file |
-|------|---------------------|
-| Understand architecture / "How does X work?" | `.claude/skills/gitnexus/gitnexus-exploring/SKILL.md` |
-| Blast radius / "What breaks if I change X?" | `.claude/skills/gitnexus/gitnexus-impact-analysis/SKILL.md` |
-| Trace bugs / "Why is X failing?" | `.claude/skills/gitnexus/gitnexus-debugging/SKILL.md` |
-| Rename / extract / split / refactor | `.claude/skills/gitnexus/gitnexus-refactoring/SKILL.md` |
-| Tools, resources, schema reference | `.claude/skills/gitnexus/gitnexus-guide/SKILL.md` |
-| Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
-
-<!-- gitnexus:end -->

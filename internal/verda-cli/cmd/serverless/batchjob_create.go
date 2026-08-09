@@ -21,8 +21,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/verda-cloud/verda-cli/pkg/tui/wizard"
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
-	"github.com/verda-cloud/verdagostack/pkg/tui/wizard"
 
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )

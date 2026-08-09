@@ -22,8 +22,8 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+	pkgversion "github.com/verda-cloud/verda-cli/pkg/version"
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
-	pkgversion "github.com/verda-cloud/verdagostack/pkg/version"
 )
 
 // clientFunc is a function that returns a Verda client on demand.
