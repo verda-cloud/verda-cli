@@ -440,7 +440,10 @@ func runDeleteInteractive(ctx context.Context, f cmdutil.Factory, ioStreams cmdu
 
 		idx, err := prompter.Select(ctx, registryBreadcrumb(creds.Endpoint, ""), labels, tui.WithShowHints(true))
 		if err != nil {
-			return nil //nolint:nilerr // intentional: prompter cancel is a clean exit
+			if cmdutil.IsPromptCancel(err) {
+				return nil // Prompter cancel (Ctrl-C, Esc) is a clean exit.
+			}
+			return err
 		}
 		if idx == len(repos) {
 			return nil
@@ -496,7 +499,10 @@ func runDeleteRepoMenu(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil
 		idx, err := prompter.Select(ctx,
 			registryBreadcrumb(creds.Endpoint, repo.Name), choices, tui.WithShowHints(true))
 		if err != nil {
-			return true, nil //nolint:nilerr // intentional: prompter cancel is a clean exit
+			if cmdutil.IsPromptCancel(err) {
+				return true, nil // Prompter cancel (Ctrl-C, Esc) exits the command.
+			}
+			return false, err
 		}
 		switch idx {
 		case menuImages:
@@ -549,8 +555,11 @@ func runDeleteImagesInteractive(ctx context.Context, f cmdutil.Factory, ioStream
 		"Select image(s) to delete",
 		labels, tui.WithMultiSelectShowHints(true))
 	if err != nil {
-		// User canceled the picker — back to the menu.
-		return nil //nolint:nilerr // intentional: prompter cancel is a clean exit
+		if cmdutil.IsPromptCancel(err) {
+			// User canceled the picker — back to the menu.
+			return nil
+		}
+		return err
 	}
 	if len(indices) == 0 {
 		_, _ = fmt.Fprintln(ioStreams.ErrOut, "No images selected.")

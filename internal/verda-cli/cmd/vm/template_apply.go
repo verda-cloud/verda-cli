@@ -124,7 +124,10 @@ func pickTemplate(ctx context.Context, f cmdutil.Factory, baseDir string) (*temp
 
 	idx, err := f.Prompter().Select(ctx, "Select a template", labels, tui.WithShowHints(true))
 	if err != nil {
-		return nil, nil //nolint:nilerr // user canceled
+		if cmdutil.IsPromptCancel(err) {
+			return nil, nil // user canceled
+		}
+		return nil, err
 	}
 
 	return template.LoadFromPath(entries[idx].Path)

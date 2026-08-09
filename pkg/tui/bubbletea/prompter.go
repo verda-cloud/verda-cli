@@ -21,6 +21,7 @@ import (
 	"os"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/term"
 
 	"github.com/verda-cloud/verda-cli/pkg/tui"
 )
@@ -40,6 +41,12 @@ type runResult struct {
 // returns as tea.ErrInterrupted from program.Run(). The model never sees
 // the key event. This method detects that and sets the interrupted flag.
 func (p *Prompter) runProgram(ctx context.Context, model tea.Model) runResult {
+	// Without terminal stdin (pipe, redirect, /dev/null) a prompt can never
+	// receive keys and bubbletea would redraw forever — fail fast instead.
+	if f, ok := p.in.(*os.File); ok && !term.IsTerminal(f.Fd()) {
+		return runResult{err: tui.ErrNoTerminal}
+	}
+
 	program := tea.NewProgram(model,
 		tea.WithInput(p.in),
 		tea.WithOutput(p.out),

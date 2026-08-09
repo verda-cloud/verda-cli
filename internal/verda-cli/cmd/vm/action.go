@@ -238,29 +238,21 @@ func runAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 	var action instanceAction
 
 	if opts.Action != "" {
-		var resolveErr error
-		action, resolveErr = resolveAction(opts.Action, validActions)
-		if resolveErr != nil {
-			return resolveErr
+		var err error
+		action, err = resolveAction(opts.Action, validActions)
+		if err != nil {
+			return err
 		}
 	} else {
 		// Interactive: show instance summary and prompt for action.
-		_, _ = fmt.Fprint(ioStreams.Out, renderInstanceCard(inst))
-
-		actionLabels := make([]string, 0, len(validActions)+1)
-		for _, a := range validActions {
-			actionLabels = append(actionLabels, a.Label)
-		}
-		actionLabels = append(actionLabels, "Cancel")
-
-		actionIdx, err := prompter.Select(ctx, "Select action", actionLabels, tui.WithShowHints(true))
+		picked, err := selectAction(ctx, ioStreams, prompter, inst, validActions)
 		if err != nil {
-			return nil
+			return err
 		}
-		if actionIdx == len(validActions) { // Cancel
-			return nil
+		if picked == nil {
+			return nil // User canceled.
 		}
-		action = validActions[actionIdx]
+		action = *picked
 	}
 
 	// Special handling for delete — needs volume selection sub-flow.
@@ -278,7 +270,14 @@ func runAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 	}
 	if isDestructive && !f.AgentMode() {
 		confirmed, err := confirmDestructive(ctx, ioStreams, prompter, &action, inst)
-		if err != nil || !confirmed {
+		if err != nil {
+			if cmdutil.IsPromptCancel(err) {
+				_, _ = fmt.Fprintln(ioStreams.ErrOut, "Canceled.")
+				return nil
+			}
+			return err
+		}
+		if !confirmed {
 			_, _ = fmt.Fprintln(ioStreams.ErrOut, "Canceled.")
 			return nil
 		}
@@ -414,13 +413,40 @@ func selectInstance(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IO
 
 	idx, err := f.Prompter().Select(ctx, "Select instance (type to filter)", labels, tui.WithShowHints(true))
 	if err != nil {
-		return "", nil //nolint:nilerr // User pressed Esc/Ctrl+C during prompt.
+		if cmdutil.IsPromptCancel(err) {
+			return "", nil // User pressed Esc/Ctrl+C during prompt.
+		}
+		return "", err
 	}
 	if idx == len(instances) {
 		return "", nil
 	}
 
 	return instances[idx].ID, nil
+}
+
+// selectAction shows the instance summary and prompts for an action.
+// Returns nil when the user cancels or picks "Cancel".
+func selectAction(ctx context.Context, ioStreams cmdutil.IOStreams, prompter tui.Prompter, inst *verda.Instance, validActions []instanceAction) (*instanceAction, error) {
+	_, _ = fmt.Fprint(ioStreams.Out, renderInstanceCard(inst))
+
+	actionLabels := make([]string, 0, len(validActions)+1)
+	for _, a := range validActions {
+		actionLabels = append(actionLabels, a.Label)
+	}
+	actionLabels = append(actionLabels, "Cancel")
+
+	actionIdx, err := prompter.Select(ctx, "Select action", actionLabels, tui.WithShowHints(true))
+	if err != nil {
+		if cmdutil.IsPromptCancel(err) {
+			return nil, nil // User pressed Esc/Ctrl+C.
+		}
+		return nil, err
+	}
+	if actionIdx == len(validActions) { // Cancel
+		return nil, nil
+	}
+	return &validActions[actionIdx], nil
 }
 
 // runDeleteFlow handles the delete action with volume selection.
@@ -453,7 +479,10 @@ func runDeleteFlow(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOS
 
 		indices, err := prompter.MultiSelect(ctx, "Select volumes to delete (optional)", labels)
 		if err != nil {
-			return nil
+			if cmdutil.IsPromptCancel(err) {
+				return nil // User pressed Esc/Ctrl+C.
+			}
+			return err
 		}
 		for _, idx := range indices {
 			volumeIDs = append(volumeIDs, volumes[idx].ID)
@@ -471,7 +500,14 @@ func runDeleteFlow(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOS
 		warnStyle.Render("This action cannot be undone."))
 
 	confirmed, err := prompter.Confirm(ctx, fmt.Sprintf("Delete %s?", inst.Hostname))
-	if err != nil || !confirmed {
+	if err != nil {
+		if cmdutil.IsPromptCancel(err) {
+			_, _ = fmt.Fprintln(ioStreams.ErrOut, "Canceled.")
+			return nil
+		}
+		return err
+	}
+	if !confirmed {
 		_, _ = fmt.Fprintln(ioStreams.ErrOut, "Canceled.")
 		return nil
 	}

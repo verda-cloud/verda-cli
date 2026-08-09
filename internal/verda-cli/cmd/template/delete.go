@@ -24,6 +24,8 @@ import (
 
 // NewCmdDelete creates the template delete command.
 func NewCmdDelete(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
+	var yes bool
+
 	cmd := &cobra.Command{
 		Use:     "delete [resource/name]",
 		Aliases: []string{"rm"},
@@ -32,6 +34,7 @@ func NewCmdDelete(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 			Delete a saved resource configuration template.
 			Without arguments, shows an interactive picker with confirmation.
 			The argument must be in resource/name format (e.g. vm/gpu-training).
+			Agent mode requires the template argument and --yes.
 		`),
 		Example: cmdutil.Examples(`
 			# Interactive picker
@@ -42,20 +45,30 @@ func NewCmdDelete(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 
 			# Short alias
 			verda tmpl rm vm/gpu-training
+
+			# Agent mode
+			verda --agent template delete vm/gpu-training --yes
 		`),
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 1 {
-				return runDelete(cmd, f, ioStreams, args[0])
+				return runDelete(cmd, f, ioStreams, args[0], yes)
 			}
-			return runDeleteInteractive(cmd, f, ioStreams)
+			return runDeleteInteractive(cmd, f, ioStreams, yes)
 		},
 	}
+
+	cmd.Flags().BoolVar(&yes, "yes", false, "Skip confirmation for destructive actions (required in agent mode)")
 
 	return cmd
 }
 
-func runDelete(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, ref string) error {
+func runDelete(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, ref string, yes bool) error {
+	// Agent mode never prompts: deleting without --yes is an explicit error.
+	if f.AgentMode() && !yes {
+		return cmdutil.NewConfirmationRequiredError("delete")
+	}
+
 	resource, name, err := parseRef(ref)
 	if err != nil {
 		return err
@@ -72,26 +85,42 @@ func runDelete(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 	}
 
 	// Confirm deletion.
-	prompter := f.Prompter()
-	confirmed, err := prompter.Confirm(cmd.Context(), fmt.Sprintf("Delete template %s/%s?", resource, name))
-	if err != nil {
-		_, _ = fmt.Fprintln(ioStreams.ErrOut, "Canceled.")
-		return nil //nolint:nilerr // user cancellation (Ctrl+C) is not an error
-	}
-	if !confirmed {
-		_, _ = fmt.Fprintln(ioStreams.ErrOut, "Canceled.")
-		return nil
+	if !yes {
+		prompter := f.Prompter()
+		confirmed, err := prompter.Confirm(cmd.Context(), fmt.Sprintf("Delete template %s/%s?", resource, name))
+		if err != nil {
+			if cmdutil.IsPromptCancel(err) {
+				_, _ = fmt.Fprintln(ioStreams.ErrOut, "Canceled.")
+				return nil
+			}
+			return err
+		}
+		if !confirmed {
+			_, _ = fmt.Fprintln(ioStreams.ErrOut, "Canceled.")
+			return nil
+		}
 	}
 
 	if err := Delete(baseDir, resource, name); err != nil {
 		return err
 	}
 
+	if f.AgentMode() {
+		result := map[string]string{
+			"resource": resource,
+			"name":     name,
+			"action":   "delete",
+			"status":   "completed",
+		}
+		_, _ = cmdutil.WriteStructured(ioStreams.Out, f.OutputFormat(), result)
+		return nil
+	}
+
 	_, _ = fmt.Fprintf(ioStreams.Out, "Deleted template: %s/%s\n", resource, name)
 	return nil
 }
 
-func runDeleteInteractive(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams) error {
+func runDeleteInteractive(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, yes bool) error {
 	entry, err := pickTemplateEntry(cmd, f)
 	if err != nil {
 		return err
@@ -99,5 +128,5 @@ func runDeleteInteractive(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdut
 	if entry == nil {
 		return nil // user canceled
 	}
-	return runDelete(cmd, f, ioStreams, entry.Resource+"/"+entry.Name)
+	return runDelete(cmd, f, ioStreams, entry.Resource+"/"+entry.Name, yes)
 }

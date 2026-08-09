@@ -17,7 +17,10 @@ package util
 import (
 	"context"
 	"errors"
+	"io"
 	"testing"
+
+	clioptions "github.com/verda-cloud/verda-cli/internal/verda-cli/options"
 )
 
 func TestAgentPrompter_ReturnsAgentError(t *testing.T) {
@@ -50,5 +53,43 @@ func TestAgentPrompter_ReturnsAgentError(t *testing.T) {
 				t.Errorf("code = %q, want INTERACTIVE_PROMPT_BLOCKED", ae.Code)
 			}
 		})
+	}
+}
+
+// The factory is constructed during command-tree building, before cobra parses
+// flags and before opts.Complete() resolves VERDA_AGENT. Prompter() must
+// therefore resolve the agent prompter lazily at call time (C2 regression test).
+func TestFactoryPrompter_AgentSetAfterConstruction(t *testing.T) {
+	opts := clioptions.NewOptions()
+	f := NewFactory(opts, io.Discard)
+
+	opts.Agent = true
+
+	_, err := f.Prompter().Confirm(context.Background(), "sure?")
+	if err == nil {
+		t.Fatal("expected INTERACTIVE_PROMPT_BLOCKED, got nil")
+	}
+	var ae *AgentError
+	if !errors.As(err, &ae) {
+		t.Fatalf("expected *AgentError, got %T: %v", err, err)
+	}
+	if ae.Code != "INTERACTIVE_PROMPT_BLOCKED" {
+		t.Errorf("code = %q, want INTERACTIVE_PROMPT_BLOCKED", ae.Code)
+	}
+	if ae.ExitCode != ExitBadArgs {
+		t.Errorf("exit code = %d, want %d", ae.ExitCode, ExitBadArgs)
+	}
+
+	if f.Status() != nil {
+		t.Error("expected nil Status in agent mode (no spinners on the JSON surface)")
+	}
+}
+
+func TestFactoryPrompter_InteractiveByDefault(t *testing.T) {
+	opts := clioptions.NewOptions()
+	f := NewFactory(opts, io.Discard)
+
+	if _, blocked := f.Prompter().(*agentPrompter); blocked {
+		t.Error("non-agent factory must return the interactive prompter")
 	}
 }

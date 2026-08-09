@@ -35,6 +35,7 @@ type createOptions struct {
 	Size     int
 	Type     string
 	Location string
+	Yes      bool
 	Wait     cmdutil.WaitOptions
 }
 
@@ -48,13 +49,14 @@ func NewCmdCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 		Long: cmdutil.LongDesc(`
 			Create a new block storage volume. If flags are omitted,
 			an interactive prompt guides you through the options.
+			Agent mode requires all flags and --yes.
 		`),
 		Example: cmdutil.Examples(`
 			# Interactive
 			verda volume create
 
 			# Non-interactive
-			verda volume create --name my-vol --size 100 --type NVMe --location FIN-01
+			verda volume create --name my-vol --size 100 --type NVMe --location FIN-01 --yes
 		`),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -67,6 +69,7 @@ func NewCmdCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 	flags.IntVar(&opts.Size, "size", 0, "Volume size in GiB")
 	flags.StringVar(&opts.Type, "type", "", "Volume type (default: NVMe)")
 	flags.StringVar(&opts.Location, "location", "", "Location code, e.g. FIN-01")
+	flags.BoolVar(&opts.Yes, "yes", false, "Skip confirmation (required in agent mode)")
 	opts.Wait.AddFlags(flags, false) // --wait defaults to false for volume create
 
 	return cmd
@@ -74,6 +77,11 @@ func NewCmdCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 
 //nolint:gocyclo // Interactive CLI command with multiple prompt steps — inherently complex.
 func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *createOptions) error {
+	// Agent mode never prompts: creating a billable volume without --yes is an explicit error.
+	if f.AgentMode() && !opts.Yes {
+		return cmdutil.NewConfirmationRequiredError("create volume")
+	}
+
 	client, err := f.VerdaClient()
 	if err != nil {
 		return err
@@ -109,48 +117,40 @@ func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 	// Name.
 	if opts.Name == "" {
 		name, err := prompter.TextInput(ctx, "Volume name")
-		if err != nil || strings.TrimSpace(name) == "" {
-			return nil
+		if err != nil {
+			if cmdutil.IsPromptCancel(err) {
+				return nil // User pressed Esc/Ctrl+C.
+			}
+			return err
+		}
+		if strings.TrimSpace(name) == "" {
+			return nil // Blank input cancels.
 		}
 		opts.Name = strings.TrimSpace(name)
 	}
 
 	// Size.
 	if opts.Size == 0 {
-		sizeStr, err := prompter.TextInput(ctx, "Size in GiB", tui.WithDefault("100"))
-		if err != nil || strings.TrimSpace(sizeStr) == "" {
-			return nil
+		size, err := promptSize(ctx, prompter)
+		if err != nil {
+			return err
 		}
-		size, err := strconv.Atoi(strings.TrimSpace(sizeStr))
-		if err != nil || size <= 0 {
-			return errors.New("size must be a positive integer")
+		if size == 0 {
+			return nil // Canceled or blank input.
 		}
 		opts.Size = size
 	}
 
 	// Location.
 	if opts.Location == "" {
-		var sp interface{ Stop(string) }
-		if status := f.Status(); status != nil {
-			sp, _ = status.Spinner(ctx, "Loading locations...")
-		}
-		locations, err := client.Locations.Get(ctx)
-		if sp != nil {
-			sp.Stop("")
-		}
+		location, err := promptLocation(ctx, f, prompter, client)
 		if err != nil {
-			return fmt.Errorf("fetching locations: %w", err)
+			return err
 		}
-
-		labels := make([]string, len(locations))
-		for i, loc := range locations {
-			labels[i] = fmt.Sprintf("%s (%s)", loc.Code, loc.Name)
+		if location == "" {
+			return nil // Canceled.
 		}
-		idx, err := prompter.Select(ctx, "Location", labels, tui.WithShowHints(true))
-		if err != nil {
-			return nil
-		}
-		opts.Location = locations[idx].Code
+		opts.Location = location
 	}
 
 	// Summary with pricing.
@@ -178,10 +178,19 @@ func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 	_, _ = fmt.Fprintf(ioStreams.ErrOut, "  %s  %s\n", bold.Render(fmt.Sprintf("%-30s", "Hourly")), bold.Render(priceStyle.Render(fmt.Sprintf("$%.4f/hr", hourly))))
 	_, _ = fmt.Fprintf(ioStreams.ErrOut, "  %s\n\n", dim.Render(strings.Repeat("─", 45)))
 
-	confirmed, err := prompter.Confirm(ctx, "Create volume?", tui.WithConfirmDefault(true))
-	if err != nil || !confirmed {
-		_, _ = fmt.Fprintln(ioStreams.ErrOut, "Canceled.")
-		return nil
+	if !opts.Yes {
+		confirmed, err := prompter.Confirm(ctx, "Create volume?", tui.WithConfirmDefault(true))
+		if err != nil {
+			if cmdutil.IsPromptCancel(err) {
+				_, _ = fmt.Fprintln(ioStreams.ErrOut, "Canceled.")
+				return nil
+			}
+			return err
+		}
+		if !confirmed {
+			_, _ = fmt.Fprintln(ioStreams.ErrOut, "Canceled.")
+			return nil
+		}
 	}
 
 	// Create.
@@ -208,7 +217,24 @@ func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 		return err
 	}
 
-	_, _ = fmt.Fprintf(ioStreams.Out, "Created volume: %s (%s)\n", opts.Name, volID)
+	if f.AgentMode() {
+		// Structured result. With --wait, the polled volume document below
+		// is the single agent-mode payload instead.
+		if !opts.Wait.Wait {
+			result := map[string]any{
+				"action":   "create",
+				"id":       volID,
+				"name":     opts.Name,
+				"size_gb":  opts.Size,
+				"type":     opts.Type,
+				"location": opts.Location,
+				"status":   "created",
+			}
+			_, _ = cmdutil.WriteStructured(ioStreams.Out, f.OutputFormat(), result)
+		}
+	} else {
+		_, _ = fmt.Fprintf(ioStreams.Out, "Created volume: %s (%s)\n", opts.Name, volID)
+	}
 
 	if opts.Wait.Wait {
 		vol, err := cmdutil.PollVolumeStatus(ctx, ioStreams.ErrOut, client, volID, opts.Wait, "detached")
@@ -222,4 +248,53 @@ func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 		}
 	}
 	return nil
+}
+
+// promptSize asks for the volume size in GiB. Returns (0, nil) when the user
+// cancels or submits blank input — both abort the create flow quietly.
+func promptSize(ctx context.Context, prompter tui.Prompter) (int, error) {
+	sizeStr, err := prompter.TextInput(ctx, "Size in GiB", tui.WithDefault("100"))
+	if err != nil {
+		if cmdutil.IsPromptCancel(err) {
+			return 0, nil // User pressed Esc/Ctrl+C.
+		}
+		return 0, err
+	}
+	if strings.TrimSpace(sizeStr) == "" {
+		return 0, nil // Blank input cancels.
+	}
+	size, err := strconv.Atoi(strings.TrimSpace(sizeStr))
+	if err != nil || size <= 0 {
+		return 0, errors.New("size must be a positive integer")
+	}
+	return size, nil
+}
+
+// promptLocation fetches available locations and asks the user to pick one.
+// Returns "" when the user cancels.
+func promptLocation(ctx context.Context, f cmdutil.Factory, prompter tui.Prompter, client *verda.Client) (string, error) {
+	var sp interface{ Stop(string) }
+	if status := f.Status(); status != nil {
+		sp, _ = status.Spinner(ctx, "Loading locations...")
+	}
+	locations, err := client.Locations.Get(ctx)
+	if sp != nil {
+		sp.Stop("")
+	}
+	if err != nil {
+		return "", fmt.Errorf("fetching locations: %w", err)
+	}
+
+	labels := make([]string, len(locations))
+	for i, loc := range locations {
+		labels[i] = fmt.Sprintf("%s (%s)", loc.Code, loc.Name)
+	}
+	idx, err := prompter.Select(ctx, "Location", labels, tui.WithShowHints(true))
+	if err != nil {
+		if cmdutil.IsPromptCancel(err) {
+			return "", nil // User pressed Esc/Ctrl+C.
+		}
+		return "", err
+	}
+	return locations[idx].Code, nil
 }

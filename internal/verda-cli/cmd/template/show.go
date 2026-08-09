@@ -176,7 +176,10 @@ func pickTemplateEntry(cmd *cobra.Command, f cmdutil.Factory) (*Entry, error) {
 
 	idx, err := f.Prompter().Select(cmd.Context(), "Select a template", labels, tui.WithShowHints(true))
 	if err != nil {
-		return nil, nil //nolint:nilerr // user canceled
+		if cmdutil.IsPromptCancel(err) {
+			return nil, nil // user canceled
+		}
+		return nil, err
 	}
 	return &entries[idx], nil
 }

@@ -192,19 +192,27 @@ func NewFactory(opts *clioptions.Options, debugOut io.Writer) Factory {
 	}
 	f.prompter = tui.Default()
 	f.status = tui.DefaultStatus()
-	if opts.Agent {
-		f.prompter = &agentPrompter{}
-		f.status = nil
-	}
 	return f
 }
 
 func (f *factoryImpl) ServerAddr() string           { return f.opts.Server }
 func (f *factoryImpl) HTTPClient() *http.Client     { return f.client }
 func (f *factoryImpl) Options() *clioptions.Options { return f.opts }
-func (f *factoryImpl) Prompter() tui.Prompter       { return f.prompter }
+
+// Prompter resolves the prompt implementation at call time: the factory is
+// built during command-tree construction, before flags are parsed and
+// opts.Complete() runs, so opts.Agent is never reliable in NewFactory.
+// In agent mode every prompt attempt must fail fast with a structured
+// INTERACTIVE_PROMPT_BLOCKED error instead of blocking on stdin.
+func (f *factoryImpl) Prompter() tui.Prompter {
+	if f.opts.Agent {
+		return &agentPrompter{}
+	}
+	return f.prompter
+}
+
 func (f *factoryImpl) Status() tui.Status {
-	if f.opts.Output != "table" {
+	if f.opts.Agent || f.opts.Output != "table" {
 		return nil
 	}
 	return f.status

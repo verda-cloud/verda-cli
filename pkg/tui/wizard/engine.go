@@ -16,6 +16,7 @@ package wizard
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -27,6 +28,11 @@ import (
 	"github.com/verda-cloud/verda-cli/pkg/tui"
 	"github.com/verda-cloud/verda-cli/pkg/tui/bubbletea"
 )
+
+// ErrCancelled is returned by Engine.Run when the user aborts the wizard
+// (Ctrl+C, or Esc with no step to go back to). Callers use errors.Is to map
+// it to a clean exit while propagating real engine/loader failures.
+var ErrCancelled = errors.New("wizard cancelled")
 
 // stepState represents the lifecycle state of a step during execution.
 type stepState int
@@ -415,13 +421,13 @@ func (e *Engine) handlePromptResult(result promptResult, step Step, choices []Ch
 			}
 		}
 		_, _ = fmt.Fprintln(e.out())
-		return false, fmt.Errorf("wizard cancelled")
+		return false, ErrCancelled
 	case ActionBack:
 		if canGoBack {
 			e.rewindOne()
 		} else {
 			_, _ = fmt.Fprintln(e.out())
-			return false, fmt.Errorf("wizard cancelled")
+			return false, ErrCancelled
 		}
 		return false, nil
 	}

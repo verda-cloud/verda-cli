@@ -75,6 +75,37 @@ func TestDeleteAgentModeRequiresYes(t *testing.T) {
 	}
 }
 
+// Single-volume delete must also require --yes in agent mode — no silent
+// confirmation bypass (the gate must fire without any API client).
+func TestDeleteAgentModeSingleRequiresYes(t *testing.T) {
+	t.Parallel()
+
+	for _, args := range [][]string{
+		{"volume", "delete", "--id", "vol-123"},
+		{"volume", "delete", "vol-123"},
+	} {
+		var buf bytes.Buffer
+		ioStreams := cmdutil.IOStreams{Out: &buf, ErrOut: &buf}
+		f := &cmdutil.TestFactory{AgentModeOverride: true}
+
+		root := &cobra.Command{Use: "verda", SilenceUsage: true, SilenceErrors: true}
+		root.AddCommand(NewCmdVolume(f, ioStreams))
+		root.SetArgs(args)
+
+		err := root.Execute()
+		if err == nil {
+			t.Fatalf("%v: expected error: agent mode delete requires --yes", args)
+		}
+		ae := cmdutil.ClassifyError(err)
+		if ae.Code != "CONFIRMATION_REQUIRED" {
+			t.Fatalf("%v: code = %q, want CONFIRMATION_REQUIRED (err: %v)", args, ae.Code, err)
+		}
+		if !strings.Contains(err.Error(), "requires --yes in agent mode") {
+			t.Fatalf("%v: unexpected error: %v", args, err)
+		}
+	}
+}
+
 func TestDeleteStatusRequiresAll(t *testing.T) {
 	t.Parallel()
 

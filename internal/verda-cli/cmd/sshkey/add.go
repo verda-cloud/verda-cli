@@ -75,7 +75,10 @@ func runAdd(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, 
 	if name == "" {
 		name, err = prompter.TextInput(ctx, "SSH key name")
 		if err != nil {
-			return nil
+			if cmdutil.IsPromptCancel(err) {
+				return nil // User pressed Esc/Ctrl+C.
+			}
+			return err
 		}
 		if name == "" {
 			return errors.New("name is required")
@@ -86,7 +89,10 @@ func runAdd(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, 
 	if publicKey == "" {
 		publicKey, err = prompter.TextInput(ctx, "Public key (paste)")
 		if err != nil {
-			return nil
+			if cmdutil.IsPromptCancel(err) {
+				return nil // User pressed Esc/Ctrl+C.
+			}
+			return err
 		}
 		if publicKey == "" {
 			return errors.New("public key is required")

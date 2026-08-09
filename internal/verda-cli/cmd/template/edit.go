@@ -102,8 +102,10 @@ func runEdit(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams,
 
 		idx, selErr := prompter.Select(ctx, "Edit field", labels, tui.WithSelectDefault(len(fields)), tui.WithPageSize(len(labels)), tui.WithShowHints(true))
 		if selErr != nil {
-			// Ctrl+C — save what we have
-			break
+			if cmdutil.IsPromptCancel(selErr) {
+				break // Ctrl+C/Esc — save what we have
+			}
+			return selErr
 		}
 
 		if idx == len(fields) {
@@ -139,7 +141,10 @@ func buildFieldMenu(tmpl *Template) []editableField {
 				choices := []string{"on-demand", "spot"}
 				idx, err := f.Prompter().Select(ctx, "Billing type", choices, tui.WithShowHints(true))
 				if err != nil {
-					return nil //nolint:nilerr // user canceled
+					if cmdutil.IsPromptCancel(err) {
+						return nil // user canceled
+					}
+					return err
 				}
 				t.BillingType = choices[idx]
 				if t.BillingType == "spot" {
@@ -155,7 +160,10 @@ func buildFieldMenu(tmpl *Template) []editableField {
 				choices := []string{"gpu", "cpu"}
 				idx, err := f.Prompter().Select(ctx, "Kind", choices, tui.WithShowHints(true))
 				if err != nil {
-					return nil //nolint:nilerr // user canceled
+					if cmdutil.IsPromptCancel(err) {
+						return nil // user canceled
+					}
+					return err
 				}
 				t.Kind = choices[idx]
 				// Clear instance type and image when kind changes — they
@@ -193,7 +201,10 @@ func buildFieldMenu(tmpl *Template) []editableField {
 				}
 				val, err := f.Prompter().TextInput(ctx, "OS volume size (GiB)", tui.WithDefault(current))
 				if err != nil {
-					return nil //nolint:nilerr // user canceled
+					if cmdutil.IsPromptCancel(err) {
+						return nil // user canceled
+					}
+					return err
 				}
 				if val != "" {
 					n, parseErr := strconv.Atoi(val)
@@ -232,7 +243,10 @@ func buildFieldMenu(tmpl *Template) []editableField {
 				}
 				val, err := f.Prompter().TextInput(ctx, "Hostname pattern ({random}, {location})", tui.WithDefault(hint))
 				if err != nil {
-					return nil //nolint:nilerr // user canceled
+					if cmdutil.IsPromptCancel(err) {
+						return nil // user canceled
+					}
+					return err
 				}
 				t.HostnamePattern = val
 				return nil
@@ -244,7 +258,10 @@ func buildFieldMenu(tmpl *Template) []editableField {
 			edit: func(ctx context.Context, f cmdutil.Factory, t *Template) error {
 				val, err := f.Prompter().TextInput(ctx, "Description", tui.WithDefault(t.Description))
 				if err != nil {
-					return nil //nolint:nilerr // user canceled
+					if cmdutil.IsPromptCancel(err) {
+						return nil // user canceled
+					}
+					return err
 				}
 				t.Description = val
 				return nil
@@ -304,8 +321,14 @@ func editInstanceType(ctx context.Context, f cmdutil.Factory, t *Template) error
 
 	choices = append(choices, "← Back")
 	idx, selErr := f.Prompter().Select(ctx, "Instance type", choices, tui.WithShowHints(true))
-	if selErr != nil || idx == len(values) {
-		return nil //nolint:nilerr // user canceled or back
+	if selErr != nil {
+		if cmdutil.IsPromptCancel(selErr) {
+			return nil // user canceled
+		}
+		return selErr
+	}
+	if idx == len(values) {
+		return nil // ← Back
 	}
 	t.InstanceType = values[idx]
 	return nil
@@ -330,7 +353,10 @@ func editLocation(ctx context.Context, f cmdutil.Factory, t *Template) error {
 
 	idx, selErr := f.Prompter().Select(ctx, "Location", choices, tui.WithShowHints(true))
 	if selErr != nil {
-		return nil //nolint:nilerr // user canceled
+		if cmdutil.IsPromptCancel(selErr) {
+			return nil // user canceled
+		}
+		return selErr
 	}
 	if idx == 0 {
 		t.Location = ""
@@ -366,7 +392,10 @@ func editImage(ctx context.Context, f cmdutil.Factory, t *Template) error {
 
 	idx, selErr := f.Prompter().Select(ctx, "Image", choices, tui.WithShowHints(true))
 	if selErr != nil {
-		return nil //nolint:nilerr // user canceled
+		if cmdutil.IsPromptCancel(selErr) {
+			return nil // user canceled
+		}
+		return selErr
 	}
 	t.Image = choices[idx]
 	return nil
@@ -403,7 +432,10 @@ func editSSHKeys(ctx context.Context, f cmdutil.Factory, t *Template) error {
 
 	selected, selErr := f.Prompter().MultiSelect(ctx, "SSH keys to inject", choices, tui.WithMultiSelectDefaults(defaults))
 	if selErr != nil {
-		return nil //nolint:nilerr // user canceled
+		if cmdutil.IsPromptCancel(selErr) {
+			return nil // user canceled
+		}
+		return selErr
 	}
 
 	t.SSHKeys = make([]string, len(selected))
@@ -432,7 +464,10 @@ func editStartupScript(ctx context.Context, f cmdutil.Factory, t *Template) erro
 
 	idx, selErr := f.Prompter().Select(ctx, "Startup script", choices, tui.WithShowHints(true))
 	if selErr != nil {
-		return nil //nolint:nilerr // user canceled
+		if cmdutil.IsPromptCancel(selErr) {
+			return nil // user canceled
+		}
+		return selErr
 	}
 
 	if idx == 0 {

@@ -92,6 +92,11 @@ func runDelete(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 		return cmdutil.NewConfirmationRequiredError("delete --all")
 	}
 
+	// Agent mode: single-volume delete requires --yes too (never prompts).
+	if opts.VolumeID != "" && f.AgentMode() && !opts.Yes {
+		return cmdutil.NewConfirmationRequiredError("delete")
+	}
+
 	client, err := f.VerdaClient()
 	if err != nil {
 		return err
@@ -121,12 +126,19 @@ func runSingleVolumeDelete(ctx context.Context, f cmdutil.Factory, ioStreams cmd
 
 	warnStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Bold(true)
 
-	if !skipConfirm && !f.AgentMode() {
+	if !skipConfirm {
 		_, _ = fmt.Fprintf(ioStreams.ErrOut, "\n  Deleted storage can be restored within 96 hours.\n")
 		_, _ = fmt.Fprintf(ioStreams.ErrOut, "\n  %s\n\n", warnStyle.Render("This action cannot be undone after the recovery period."))
 
 		confirmed, confirmErr := f.Prompter().Confirm(ctx, fmt.Sprintf("Delete %s (%dGB %s)?", vol.Name, vol.Size, vol.Type))
-		if confirmErr != nil || !confirmed {
+		if confirmErr != nil {
+			if cmdutil.IsPromptCancel(confirmErr) {
+				_, _ = fmt.Fprintln(ioStreams.ErrOut, "Canceled.")
+				return nil
+			}
+			return confirmErr
+		}
+		if !confirmed {
 			_, _ = fmt.Fprintln(ioStreams.ErrOut, "Canceled.")
 			return nil
 		}
@@ -150,6 +162,17 @@ func runSingleVolumeDelete(ctx context.Context, f cmdutil.Factory, ioStreams cmd
 	}
 	if err != nil {
 		return err
+	}
+
+	if f.AgentMode() {
+		result := map[string]string{
+			"id":     vol.ID,
+			"name":   vol.Name,
+			"action": "delete",
+			"status": "completed",
+		}
+		_, _ = cmdutil.WriteStructured(ioStreams.Out, f.OutputFormat(), result)
+		return nil
 	}
 
 	_, _ = fmt.Fprintf(ioStreams.Out, "Deleted: %s (%s)\n", vol.Name, vol.ID)
@@ -187,7 +210,10 @@ func runInteractiveVolumeDelete(ctx context.Context, f cmdutil.Factory, ioStream
 
 	indices, err := f.Prompter().MultiSelect(ctx, "Select volumes to delete", labels)
 	if err != nil {
-		return nil //nolint:nilerr // User pressed Esc/Ctrl+C.
+		if cmdutil.IsPromptCancel(err) {
+			return nil // User pressed Esc/Ctrl+C.
+		}
+		return err
 	}
 	if len(indices) == 0 {
 		_, _ = fmt.Fprintln(ioStreams.ErrOut, "No volumes selected.")
@@ -242,7 +268,7 @@ func executeBatchVolumeDelete(ctx context.Context, f cmdutil.Factory, ioStreams 
 	redStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
 
 	// Show confirmation.
-	if !skipConfirm && !f.AgentMode() {
+	if !skipConfirm {
 		_, _ = fmt.Fprintf(ioStreams.ErrOut, "\n  About to delete %d volumes:\n", len(volumes))
 		for i := range volumes {
 			v := &volumes[i]
@@ -253,9 +279,16 @@ func executeBatchVolumeDelete(ctx context.Context, f cmdutil.Factory, ioStreams 
 		_, _ = fmt.Fprintf(ioStreams.ErrOut, "\n  %s\n\n", warnStyle.Render("This action cannot be undone after the recovery period."))
 
 		confirmed, confirmErr := f.Prompter().Confirm(ctx, fmt.Sprintf("Delete %d volumes?", len(volumes)))
-		if confirmErr != nil || !confirmed {
+		if confirmErr != nil {
+			if cmdutil.IsPromptCancel(confirmErr) {
+				_, _ = fmt.Fprintln(ioStreams.ErrOut, "Canceled.")
+				return nil // User pressed Esc/Ctrl+C during prompt.
+			}
+			return confirmErr
+		}
+		if !confirmed {
 			_, _ = fmt.Fprintln(ioStreams.ErrOut, "Canceled.")
-			return nil //nolint:nilerr // User pressed Esc/Ctrl+C during prompt.
+			return nil
 		}
 	}
 

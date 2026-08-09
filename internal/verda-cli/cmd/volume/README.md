@@ -5,7 +5,8 @@
 | Command | Description | Key Flags |
 |---------|-------------|-----------|
 | `verda volume list` | List all block storage volumes | `--status` |
-| `verda volume create` | Create a new block storage volume | `--name`, `--size`, `--type`, `--location` |
+| `verda volume create` | Create a new block storage volume | `--name`, `--size`, `--type`, `--location`, `--yes` |
+| `verda volume delete` | Delete one or more volumes (restorable via trash for 96h) | `[volume-id]`, `--id`, `--all`, `--status`, `--yes` |
 | `verda volume action` | Perform actions on a volume (detach, rename, resize, clone, delete) | `--id` |
 | `verda volume trash` | List deleted volumes in trash | (none) |
 
@@ -27,8 +28,10 @@ verda volume list --status attached
 verda volume create
 
 # Non-interactive
-verda volume create --name my-vol --size 100 --type NVMe --location FIN-01
+verda volume create --name my-vol --size 100 --type NVMe --location FIN-01 --yes
 ```
+
+A final confirmation prompt runs on a TTY unless `--yes` is passed. Agent mode (`--agent`) requires all flags plus `--yes` — without it the command fails with `CONFIRMATION_REQUIRED`; success prints a structured JSON result.
 
 ### action
 ```bash
@@ -39,6 +42,20 @@ verda volume action
 verda vol action --id abc-123
 ```
 
+### delete
+```bash
+# Interactive multi-select picker
+verda volume delete
+
+# Delete by ID (asks for confirmation on a TTY)
+verda volume delete vol-abc-123
+
+# Batch: delete all detached volumes without confirmation
+verda volume delete --all --status detached --yes
+```
+
+Deleted storage can be restored within 96 hours via `verda volume trash`. Agent mode (`--agent`) never prompts: both single (`--id` or positional) and batch (`--all`) deletes require `--yes` — without it the command fails with `CONFIRMATION_REQUIRED`; success prints a structured JSON result.
+
 ### trash
 ```bash
 verda volume trash
@@ -48,7 +65,7 @@ verda vol trash
 ## Interactive vs Non-Interactive
 
 ### create
-All four flags (`--name`, `--size`, `--type`, `--location`) can be provided for fully non-interactive mode. Any missing flag triggers an interactive prompt for that field. Type defaults to NVMe (HDD is deprecated and no longer offered; NVMe pricing is shown in the confirmation summary), size defaults to 100 GiB, location is fetched from the API and offered as a selection.
+All four flags (`--name`, `--size`, `--type`, `--location`) can be provided for fully non-interactive mode. Any missing flag triggers an interactive prompt for that field. Type defaults to NVMe (HDD is deprecated and no longer offered; NVMe pricing is shown in the confirmation summary), size defaults to 100 GiB, location is fetched from the API and offered as a selection. The pricing summary confirmation is skipped with `--yes`; agent mode requires `--yes`.
 
 ### action
 If `--id` is omitted, an interactive volume picker is shown. The action itself is always selected interactively. Destructive actions (detach, delete) require confirmation. Rename, resize, and clone prompt for additional input via a `Prepare` callback before execution.
