@@ -99,6 +99,8 @@ linters:
       # import-path rewrites). Style/performance heuristics that fight the
       # Bubble Tea idiom (value-receiver models, min/max param names in public
       # option types) are relaxed here; correctness linters still apply.
+      # prealloc: flagged differently across golangci-lint versions (CI pins
+      # v2.5.0, local newer) — keep pkg/ out of that skew.
       - path: pkg/
         linters:
           - goconst
@@ -108,6 +110,7 @@ linters:
           - nestif
           - nilerr
           - perfsprint
+          - prealloc
           - predeclared
           - revive
       - linters:
