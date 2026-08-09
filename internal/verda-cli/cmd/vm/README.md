@@ -139,7 +139,7 @@ Destructive actions (Shutdown, Force shutdown, Delete) show confirmation prompts
 - **vm.go** -- Parent command definition, registers subcommands and shortcut commands
 - **create.go** -- `vm create` command, flag definitions, `createOptions` struct (with 5-stage mutation lifecycle), request building, contract normalization, volume spec parsing, kind validation
 - **wizard.go** -- 13 wizard step definitions using the wizard engine; `clientFunc` lazy client pattern; `WizardMode` (Deploy vs Template); `RunTemplateWizard`; step Default functions for pre-selection
-- **wizard_cache.go** -- `apiCache` struct for deduplicating API calls, `fetchLocations` (locations without availability), `loadAllLocations`/`loadAvailableLocations` (extracted location loaders), `ensurePricingCache`, pricing helpers (`volumeHourlyPrice`, `instanceUnits`), instance type matching (`matchesKind`, `formatGPU`, `formatMemory`)
+- **wizard_cache.go** -- `apiCache` struct for deduplicating API calls, `fetchLocations` (locations without availability), `loadAllLocations`/`loadAvailableLocations` (extracted location loaders), `ensurePricingCache`, instance type matching (`instanceUnits`, `matchesKind`, `formatGPU`, `formatMemory`) — volume price math lives in `cmdutil` (`VolumeHourlyPrice`/`VolumeMonthlyPrice`)
 - **wizard_subflows.go** -- Interactive sub-flows for SSH key creation, startup script creation, storage volume management; choice builders for multi-select prompts
 - **wizard_summary.go** -- `renderDeploymentSummary` with full cost breakdown (accepts `io.Writer`)
 - **template_apply.go** -- `resolveCreateInputs` orchestration, `applyTemplate`, `resolveTemplateNames` (with warnings), `printTemplateSummary`, `pickTemplate`

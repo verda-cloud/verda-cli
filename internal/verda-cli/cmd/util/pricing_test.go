@@ -15,83 +15,52 @@
 package util
 
 import (
-	"math"
 	"testing"
-
-	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
 )
 
-func TestInstanceBillableUnits(t *testing.T) {
+func TestVolumeHourlyPrice(t *testing.T) {
 	t.Parallel()
 
+	// Golden: staging 2026-08-09 — 500GB NVMe at $0.20/GB/mo bills $0.1370/hr.
 	tests := []struct {
-		name  string
-		inst  verda.Instance
-		units int
+		name         string
+		monthlyPerGB float64
+		sizeGB       int
+		want         float64
 	}{
+		{name: "500GB NVMe at $0.20/GB/mo", monthlyPerGB: 0.20, sizeGB: 500, want: 0.1370},
+		{name: "100GB NVMe at $0.10/GB/mo", monthlyPerGB: 0.10, sizeGB: 100, want: 0.0137},
+		{name: "exact 4-decimal division stays exact", monthlyPerGB: 0.73, sizeGB: 10, want: 0.0100},
+		{name: "zero size", monthlyPerGB: 0.20, sizeGB: 0, want: 0},
+		{name: "zero price", monthlyPerGB: 0, sizeGB: 500, want: 0},
 		{
-			name:  "GPU instance 4x",
-			inst:  verda.Instance{GPU: verda.InstanceGPU{NumberOfGPUs: 4}},
-			units: 4,
-		},
-		{
-			name:  "GPU instance 1x",
-			inst:  verda.Instance{GPU: verda.InstanceGPU{NumberOfGPUs: 1}},
-			units: 1,
-		},
-		{
-			name:  "CPU instance 8 cores",
-			inst:  verda.Instance{CPU: verda.InstanceCPU{NumberOfCores: 8}},
-			units: 8,
-		},
-		{
-			name:  "fallback to 1 when no GPU or CPU info",
-			inst:  verda.Instance{},
-			units: 1,
+			// Per-GB rounding would give ceil(0.20/730*1e4)/1e4 * 500 = 0.0003*500 = 0.15;
+			// the ceiling must apply after the size multiplication.
+			name:         "ceiling after size multiplication, not per GB",
+			monthlyPerGB: 0.20,
+			sizeGB:       500,
+			want:         0.1370,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := InstanceBillableUnits(&tt.inst)
-			if got != tt.units {
-				t.Fatalf("InstanceBillableUnits() = %d, want %d", got, tt.units)
+			got := VolumeHourlyPrice(tt.monthlyPerGB, tt.sizeGB)
+			if got != tt.want {
+				t.Fatalf("VolumeHourlyPrice(%v, %d) = %v, want %v", tt.monthlyPerGB, tt.sizeGB, got, tt.want)
 			}
 		})
 	}
 }
 
-func TestInstanceTotalHourlyCost(t *testing.T) {
+func TestVolumeMonthlyPrice(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name string
-		inst verda.Instance
-		want float64
-	}{
-		{
-			name: "GPU: $2.29/GPU * 4 GPUs = $9.16",
-			inst: verda.Instance{PricePerHour: 2.29, GPU: verda.InstanceGPU{NumberOfGPUs: 4}},
-			want: 9.16,
-		},
-		{
-			name: "CPU: $0.006975/vCPU * 8 vCPUs",
-			inst: verda.Instance{PricePerHour: 0.006975, CPU: verda.InstanceCPU{NumberOfCores: 8}},
-			want: 0.0558,
-		},
-		{
-			name: "single GPU",
-			inst: verda.Instance{PricePerHour: 2.29, GPU: verda.InstanceGPU{NumberOfGPUs: 1}},
-			want: 2.29,
-		},
+	// Golden: 500GB NVMe at $0.20/GB/mo → $100.00/mo.
+	if got := VolumeMonthlyPrice(0.20, 500); got != 100.0 {
+		t.Fatalf("VolumeMonthlyPrice(0.20, 500) = %v, want 100.0", got)
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := InstanceTotalHourlyCost(&tt.inst)
-			if math.Abs(got-tt.want) > 0.001 {
-				t.Fatalf("InstanceTotalHourlyCost() = %f, want %f", got, tt.want)
-			}
-		})
+	if got := VolumeMonthlyPrice(0.10, 100); got != 10.0 {
+		t.Fatalf("VolumeMonthlyPrice(0.10, 100) = %v, want 10.0", got)
 	}
 }

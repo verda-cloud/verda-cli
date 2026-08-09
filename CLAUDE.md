@@ -118,10 +118,11 @@ The repo lints with `golangci-lint` via `make lint` (included in `make test`). T
 
 ### Pricing — get this wrong and users get billed wrong:
 
-- Instance `price_per_hour` from API is **per-unit** (per-GPU or per-vCPU)
-- Total = `price_per_hour * units` — use `cmdutil.InstanceTotalHourlyCost(inst)`
-- Volume: `price_per_month_per_gb` — hourly = `ceil(monthly * size / 730 * 10000) / 10000`
-- Never display raw API price as "total" without multiplying
+- Instance `price_per_hour` from the API (instances AND instance-types endpoints) is the **TOTAL** hourly price of the instance. Never multiply by GPU/vCPU count. Verified live on staging 2026-08-09 (`temp/docs/c1-ondemand-instance.json`; review C1).
+- Burn rate = plain sum of instance `price_per_hour` totals (+ volume `base_hourly_cost`).
+- A per-unit price shown to the user is total **divided** by units (GPU count or vCPU count) — division only, and only for display.
+- Volume hourly: `cmdutil.VolumeHourlyPrice(monthlyPerGB, sizeGB)` = `ceil(monthlyPerGB * sizeGB / HoursInMonth * 10000) / 10000` — the only sanctioned formula (MCP and all CLI surfaces use it).
+- Volume monthly: `cmdutil.VolumeMonthlyPrice(monthlyPerGB, sizeGB)`; hourly→monthly estimates use `cmdutil.HoursInMonth` (730 = 365*24/12, matching the web frontend).
 
 ### Credentials
 

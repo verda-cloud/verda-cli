@@ -23,11 +23,11 @@
 ## Domain-Specific Logic
 
 ### Pricing (IMPORTANT)
-- `price_per_hour` from API is the **TOTAL** instance price, not per-GPU
-- Per-unit price = `totalPrice / instanceUnits(t)` where units = GPU count or vCPU count
+- `price_per_hour` from API is the **TOTAL** instance price, not per-GPU (verified live on staging 2026-08-09, see `temp/docs/c1-ondemand-instance.json`)
+- Per-unit display price = `totalPrice / instanceUnits(t)` where units = GPU count or vCPU count — division only, display only
 - Spot pricing uses `SpotPrice` field instead of `PricePerHour`
-- Volume hourly price: `ceil(monthlyPerGB * sizeGB / 730 * 10000) / 10000`
-- 730 = hours in month (365*24/12), matching web frontend constant `hoursInMonth`
+- Volume hourly price: `cmdutil.VolumeHourlyPrice(monthlyPerGB, sizeGB)` (canonical helper, do not re-implement)
+- `cmdutil.HoursInMonth` = 730 (365*24/12), matching web frontend constant `hoursInMonth`
 
 ### Contract Normalization
 - `normalizeContract()` accepts many aliases: `pay_as_go`, `pay-as-you-go`, `payg`, `spot`, `long_term`, etc.

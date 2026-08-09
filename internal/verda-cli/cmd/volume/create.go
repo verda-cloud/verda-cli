@@ -18,7 +18,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"strconv"
 	"strings"
 
@@ -110,8 +109,13 @@ func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 
 	// Volume type: NVMe is the only provisionable type (HDD deprecated), so we
 	// default it rather than prompt. Pricing is still shown in the summary below.
+	// An unknown type must fail loudly here — it would otherwise price at $0.
 	if opts.Type == "" {
 		opts.Type = verda.VolumeTypeNVMe
+	}
+	if _, ok := vtMap[opts.Type]; !ok {
+		return cmdutil.UsageErrorf(cmd, "invalid --type %q (valid types: %s)",
+			opts.Type, strings.Join(cmdutil.ValidVolumeTypeNames(vtMap), ", "))
 	}
 
 	// Name.
@@ -158,13 +162,9 @@ func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 	priceStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
 
-	var monthlyPerGB float64
-	if vt, ok := vtMap[opts.Type]; ok {
-		monthlyPerGB = vt.Price.PricePerMonthPerGB
-	}
-	const hoursInMonth = 730 // 365*24/12, matching web frontend
-	hourly := math.Ceil(monthlyPerGB*float64(opts.Size)/hoursInMonth*10000) / 10000
-	monthly := monthlyPerGB * float64(opts.Size)
+	monthlyPerGB := vtMap[opts.Type].Price.PricePerMonthPerGB
+	hourly := cmdutil.VolumeHourlyPrice(monthlyPerGB, opts.Size)
+	monthly := cmdutil.VolumeMonthlyPrice(monthlyPerGB, opts.Size)
 
 	_, _ = fmt.Fprintf(ioStreams.ErrOut, "\n  %s\n", bold.Render("Volume Summary"))
 	_, _ = fmt.Fprintf(ioStreams.ErrOut, "  %s\n\n", dim.Render(strings.Repeat("─", 45)))

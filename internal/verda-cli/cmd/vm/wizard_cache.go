@@ -17,7 +17,6 @@ package vm
 import (
 	"context"
 	"fmt"
-	"math"
 	"slices"
 	"strings"
 
@@ -112,14 +111,6 @@ func ensurePricingCache(ctx context.Context, getClient clientFunc, cache *apiCac
 			}
 		}
 	}
-}
-
-// hoursInMonth is 365*24/12 = 730, matching the web frontend.
-const hoursInMonth = 730
-
-// volumeHourlyPrice calculates hourly price: monthlyPerGB * size / 730, rounded up to 4 decimals.
-func volumeHourlyPrice(monthlyPerGB float64, sizeGB int) float64 {
-	return math.Ceil(monthlyPerGB*float64(sizeGB)/hoursInMonth*10000) / 10000
 }
 
 // --- Location loaders ---

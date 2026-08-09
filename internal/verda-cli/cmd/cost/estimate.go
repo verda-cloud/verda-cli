@@ -17,7 +17,6 @@ package cost
 import (
 	"context"
 	"fmt"
-	"math"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -27,11 +26,8 @@ import (
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
 
-const hoursInMonth = 730 // 365*24/12
-
 type estimateOptions struct {
 	InstanceType string
-	Location     string
 	IsSpot       bool
 	OSVolumeSize int
 	StorageSize  int
@@ -73,7 +69,6 @@ func newCmdEstimate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Comma
 
 	flags := cmd.Flags()
 	flags.StringVar(&opts.InstanceType, "type", "", "Instance type (required)")
-	flags.StringVar(&opts.Location, "location", "", "Location code for pricing")
 	flags.BoolVar(&opts.IsSpot, "spot", false, "Use spot pricing")
 	flags.IntVar(&opts.OSVolumeSize, "os-volume", 0, "OS volume size in GiB")
 	flags.IntVar(&opts.StorageSize, "storage", 0, "Additional storage size in GiB")
@@ -148,45 +143,18 @@ func runEstimate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStre
 			Description: instanceDescription(instType),
 			Hourly:      instanceHourly,
 			Daily:       instanceHourly * 24,
-			Monthly:     instanceHourly * hoursInMonth,
+			Monthly:     instanceHourly * cmdutil.HoursInMonth,
 		},
 	}
 
 	// Volume pricing (if needed).
 	if opts.OSVolumeSize > 0 || opts.StorageSize > 0 {
-		volTypes, err := client.VolumeTypes.GetAllVolumeTypes(ctx)
-		if err != nil {
-			return fmt.Errorf("fetching volume pricing: %w", err)
-		}
-		vtMap := make(map[string]verda.VolumeType, len(volTypes))
-		for _, vt := range volTypes {
-			vtMap[vt.Type] = vt
-		}
-
-		if opts.OSVolumeSize > 0 {
-			item := volumeCostItem("NVMe", opts.OSVolumeSize, vtMap)
-			estimate.OSVolume = &item
-		}
-		if opts.StorageSize > 0 {
-			item := volumeCostItem(opts.StorageType, opts.StorageSize, vtMap)
-			estimate.Storage = &item
+		if err := addVolumeItems(ctx, cmd, client, opts, &estimate); err != nil {
+			return err
 		}
 	}
 
-	// Compute totals.
-	estimate.Total.Hourly = estimate.Instance.Hourly
-	estimate.Total.Daily = estimate.Instance.Daily
-	estimate.Total.Monthly = estimate.Instance.Monthly
-	if estimate.OSVolume != nil {
-		estimate.Total.Hourly += estimate.OSVolume.Hourly
-		estimate.Total.Daily += estimate.OSVolume.Daily
-		estimate.Total.Monthly += estimate.OSVolume.Monthly
-	}
-	if estimate.Storage != nil {
-		estimate.Total.Hourly += estimate.Storage.Hourly
-		estimate.Total.Daily += estimate.Storage.Daily
-		estimate.Total.Monthly += estimate.Storage.Monthly
-	}
+	estimate.computeTotals()
 
 	cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), "Cost estimate:", estimate)
 
@@ -195,6 +163,35 @@ func runEstimate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStre
 	}
 
 	renderEstimate(ioStreams.Out, &estimate)
+	return nil
+}
+
+// addVolumeItems fills in the OS volume and storage line items.
+func addVolumeItems(ctx context.Context, cmd *cobra.Command, client *verda.Client, opts *estimateOptions, estimate *Estimate) error {
+	volTypes, err := client.VolumeTypes.GetAllVolumeTypes(ctx)
+	if err != nil {
+		return fmt.Errorf("fetching volume pricing: %w", err)
+	}
+	vtMap := make(map[string]verda.VolumeType, len(volTypes))
+	for _, vt := range volTypes {
+		vtMap[vt.Type] = vt
+	}
+
+	if opts.OSVolumeSize > 0 {
+		// OS volumes are always NVMe; a missing catalog entry is a bug, not user input.
+		item, err := volumeCostItem(verda.VolumeTypeNVMe, opts.OSVolumeSize, vtMap)
+		if err != nil {
+			return err
+		}
+		estimate.OSVolume = &item
+	}
+	if opts.StorageSize > 0 {
+		item, err := volumeCostItem(opts.StorageType, opts.StorageSize, vtMap)
+		if err != nil {
+			return cmdutil.UsageErrorf(cmd, "invalid --storage-type: %v", err)
+		}
+		estimate.Storage = &item
+	}
 	return nil
 }
 
@@ -207,18 +204,38 @@ func findInstanceType(types []verda.InstanceTypeInfo, name string) *verda.Instan
 	return nil
 }
 
-func volumeCostItem(volType string, sizeGB int, vtMap map[string]verda.VolumeType) LineItem {
-	var monthlyPerGB float64
-	if vt, ok := vtMap[volType]; ok {
-		monthlyPerGB = vt.Price.PricePerMonthPerGB
+// volumeCostItem prices a volume; an unknown type is an error (was: silent $0).
+func volumeCostItem(volType string, sizeGB int, vtMap map[string]verda.VolumeType) (LineItem, error) {
+	vt, ok := vtMap[volType]
+	if !ok {
+		return LineItem{}, fmt.Errorf("unknown volume type %q (valid types: %s)",
+			volType, strings.Join(cmdutil.ValidVolumeTypeNames(vtMap), ", "))
 	}
-	hourly := math.Ceil(monthlyPerGB*float64(sizeGB)/hoursInMonth*10000) / 10000
-	monthly := monthlyPerGB * float64(sizeGB)
+	monthlyPerGB := vt.Price.PricePerMonthPerGB
+	hourly := cmdutil.VolumeHourlyPrice(monthlyPerGB, sizeGB)
 	return LineItem{
 		Description: fmt.Sprintf("%dGB %s", sizeGB, volType),
 		Hourly:      hourly,
 		Daily:       hourly * 24,
-		Monthly:     monthly,
+		Monthly:     cmdutil.VolumeMonthlyPrice(monthlyPerGB, sizeGB),
+	}, nil
+}
+
+// computeTotals recomputes e.Total from the line items. The money path is
+// pinned by TestEstimateTotals.
+func (e *Estimate) computeTotals() {
+	e.Total = TotalItem{
+		Hourly:  e.Instance.Hourly,
+		Daily:   e.Instance.Daily,
+		Monthly: e.Instance.Monthly,
+	}
+	for _, item := range []*LineItem{e.OSVolume, e.Storage} {
+		if item == nil {
+			continue
+		}
+		e.Total.Hourly += item.Hourly
+		e.Total.Daily += item.Daily
+		e.Total.Monthly += item.Monthly
 	}
 }
 

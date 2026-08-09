@@ -16,9 +16,12 @@ package cost
 
 import (
 	"math"
+	"strings"
 	"testing"
 
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
+
+	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
 
 func TestVolumeCostItem(t *testing.T) {
@@ -29,16 +32,23 @@ func TestVolumeCostItem(t *testing.T) {
 		"HDD":  {Type: "HDD", Price: verda.VolumeTypePrice{PricePerMonthPerGB: 0.03}},
 	}
 
-	item := volumeCostItem("NVMe", 100, vtMap)
+	item, err := volumeCostItem("NVMe", 100, vtMap)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	// Monthly = 0.10 * 100 = $10.00
 	if math.Abs(item.Monthly-10.0) > 0.01 {
 		t.Fatalf("expected monthly $10.00, got $%.2f", item.Monthly)
 	}
-	// Hourly = ceil(0.10 * 100 / 730 * 10000) / 10000
+	// Spec formula: hourly = ceil(monthly*size/730*10000)/10000.
 	expectedHourly := math.Ceil(0.10*100/730*10000) / 10000
 	if math.Abs(item.Hourly-expectedHourly) > 0.0001 {
 		t.Fatalf("expected hourly $%.4f, got $%.4f", expectedHourly, item.Hourly)
+	}
+	// Cross-check the production helper agrees.
+	if item.Hourly != cmdutil.VolumeHourlyPrice(0.10, 100) {
+		t.Fatalf("hourly $%.4f disagrees with cmdutil.VolumeHourlyPrice $%.4f", item.Hourly, cmdutil.VolumeHourlyPrice(0.10, 100))
 	}
 	// Daily = hourly * 24
 	if math.Abs(item.Daily-item.Hourly*24) > 0.01 {
@@ -53,7 +63,10 @@ func TestVolumeCostItemHDD(t *testing.T) {
 		"HDD": {Type: "HDD", Price: verda.VolumeTypePrice{PricePerMonthPerGB: 0.03}},
 	}
 
-	item := volumeCostItem("HDD", 500, vtMap)
+	item, err := volumeCostItem("HDD", 500, vtMap)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	// Monthly = 0.03 * 500 = $15.00
 	if math.Abs(item.Monthly-15.0) > 0.01 {
@@ -64,11 +77,18 @@ func TestVolumeCostItemHDD(t *testing.T) {
 func TestVolumeCostItemUnknownType(t *testing.T) {
 	t.Parallel()
 
-	vtMap := map[string]verda.VolumeType{}
-	item := volumeCostItem("Unknown", 100, vtMap)
+	vtMap := map[string]verda.VolumeType{
+		"NVMe": {Type: "NVMe", Price: verda.VolumeTypePrice{PricePerMonthPerGB: 0.10}},
+	}
+	_, err := volumeCostItem("nvme", 100, vtMap)
 
-	if item.Monthly != 0 || item.Hourly != 0 {
-		t.Fatalf("expected zero pricing for unknown volume type, got hourly=$%.4f monthly=$%.2f", item.Hourly, item.Monthly)
+	// Unknown types (here: wrong case) must error and list the valid types —
+	// previously they silently priced at $0 into the estimate total.
+	if err == nil {
+		t.Fatal("expected error for unknown volume type, got nil")
+	}
+	if !strings.Contains(err.Error(), `"nvme"`) || !strings.Contains(err.Error(), "NVMe") {
+		t.Fatalf("error should name the invalid type and list valid types, got: %v", err)
 	}
 }
 
@@ -157,16 +177,13 @@ func TestEstimateTotals(t *testing.T) {
 		Storage:  &LineItem{Hourly: 0.0685, Daily: 1.644, Monthly: 50.00},
 	}
 
-	total := e.Instance.Hourly
-	if e.OSVolume != nil {
-		total += e.OSVolume.Hourly
-	}
-	if e.Storage != nil {
-		total += e.Storage.Hourly
-	}
+	e.computeTotals()
 
 	expected := 0.44 + 0.0137 + 0.0685
-	if math.Abs(total-expected) > 0.001 {
-		t.Fatalf("expected total hourly $%.4f, got $%.4f", expected, total)
+	if math.Abs(e.Total.Hourly-expected) > 0.001 {
+		t.Fatalf("expected total hourly $%.4f, got $%.4f", expected, e.Total.Hourly)
+	}
+	if e.Total.Monthly != 321.20+10.00+50.00 {
+		t.Fatalf("expected total monthly $381.20, got $%.2f", e.Total.Monthly)
 	}
 }

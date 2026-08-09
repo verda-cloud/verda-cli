@@ -14,9 +14,9 @@
 
 ### Pricing Calculation
 - `price_per_month_per_gb` comes from `VolumeType.Price.PricePerMonthPerGB`
-- `hoursInMonth = 730` (365*24/12), matching the web frontend
-- Hourly = `ceil(monthlyPerGB * size / 730 * 10000) / 10000`
-- Monthly = `monthlyPerGB * size`
+- Hourly = `cmdutil.VolumeHourlyPrice(monthlyPerGB, size)`; Monthly = `cmdutil.VolumeMonthlyPrice(monthlyPerGB, size)` — canonical shared helpers, do not re-implement
+- `cmdutil.HoursInMonth = 730` (365*24/12), matching the web frontend
+- Unknown `--type` fails with a usage error listing valid types (was: silent $0 pricing)
 - Volume types are keyed by `verda.VolumeTypeNVMe` and `verda.VolumeTypeHDD`
 
 ### Trash Recovery

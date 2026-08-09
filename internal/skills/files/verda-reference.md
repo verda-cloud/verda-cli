@@ -84,7 +84,7 @@ Note: `shutdown` alias is `stop`. `delete` alias is `rm`.
 | Command | Key Flags | Output Fields |
 |---------|-----------|---------------|
 | `verda cost balance -o json` | — | `amount`, `currency` |
-| `verda cost estimate -o json` | `--type` (required), `--os-volume`, `--storage`, `--storage-type`, `--spot`, `--location` | `total.hourly`, `instance.hourly`, `os_volume.hourly` |
+| `verda cost estimate -o json` | `--type` (required), `--os-volume`, `--storage`, `--storage-type`, `--spot` | `total.hourly`, `instance.hourly`, `os_volume.hourly` |
 | `verda cost running -o json` | — | `instances[]` (each: `hostname`, `hourly`, `daily`, `monthly`), `total.hourly` |
 
 ## Status (Low Priority)

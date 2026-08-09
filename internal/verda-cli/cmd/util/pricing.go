@@ -14,38 +14,37 @@
 
 package util
 
-import "github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
+import (
+	"math"
+	"sort"
 
-// InstanceBillableUnits returns the number of billable units for an instance.
-// GPU instances are billed per GPU; CPU instances are billed per vCPU.
-func InstanceBillableUnits(inst *verda.Instance) int {
-	if inst.GPU.NumberOfGPUs > 0 {
-		return inst.GPU.NumberOfGPUs
-	}
-	if inst.CPU.NumberOfCores > 0 {
-		return inst.CPU.NumberOfCores
-	}
-	return 1
+	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
+)
+
+// HoursInMonth converts an hourly rate to a monthly estimate: 365*24/12,
+// matching the web frontend's hoursInMonth.
+const HoursInMonth = 730
+
+// VolumeHourlyPrice converts volume pricing (monthlyPerGB per GiB) to the
+// hourly rate for a sizeGB volume: monthlyPerGB*sizeGB spread over the month,
+// rounded up to 4 decimals. The ceiling is applied AFTER multiplying by size —
+// per-GB rounding would overstate the rate (match the web frontend exactly).
+func VolumeHourlyPrice(monthlyPerGB float64, sizeGB int) float64 {
+	return math.Ceil(monthlyPerGB*float64(sizeGB)/HoursInMonth*10000) / 10000
 }
 
-// InstanceTypeBillableUnits returns the number of billable units for an instance type.
-// GPU types are billed per GPU; CPU types are billed per vCPU.
-func InstanceTypeBillableUnits(t *verda.InstanceTypeInfo) int {
-	if t.GPU.NumberOfGPUs > 0 {
-		return t.GPU.NumberOfGPUs
-	}
-	if t.CPU.NumberOfCores > 0 {
-		return t.CPU.NumberOfCores
-	}
-	return 1
+// VolumeMonthlyPrice returns the monthly price of a sizeGB volume.
+func VolumeMonthlyPrice(monthlyPerGB float64, sizeGB int) float64 {
+	return monthlyPerGB * float64(sizeGB)
 }
 
-// InstanceTotalHourlyCost returns the total hourly cost for an instance.
-//
-// The API field PricePerHour is the per-unit price:
-//   - GPU instances: price per GPU (multiply by GPU count)
-//   - CPU instances: price per vCPU (multiply by vCPU count)
-func InstanceTotalHourlyCost(inst *verda.Instance) float64 {
-	pricePerUnit := float64(inst.PricePerHour)
-	return pricePerUnit * float64(InstanceBillableUnits(inst))
+// ValidVolumeTypeNames returns the sorted type names of a volume-type catalog,
+// for error messages that list the accepted values.
+func ValidVolumeTypeNames(vtMap map[string]verda.VolumeType) []string {
+	names := make([]string, 0, len(vtMap))
+	for name := range vtMap {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
