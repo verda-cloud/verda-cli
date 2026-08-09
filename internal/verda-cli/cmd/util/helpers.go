@@ -82,10 +82,26 @@ func CheckErr(err error) {
 	os.Exit(1)
 }
 
+// UsageError marks flag/argument misuse (bad values, invalid combinations).
+// In agent mode main classifies it as VALIDATION_ERROR with exit code 2 —
+// bad input, distinct from server-side failures (docs/agent-errors.md).
+type UsageError struct {
+	msg  string
+	hint string
+}
+
+// Error returns the message plus the human --help hint.
+func (e *UsageError) Error() string { return e.msg + e.hint }
+
+// Message returns the bare message, without the --help hint (agent envelope).
+func (e *UsageError) Message() string { return e.msg }
+
 // UsageErrorf creates a formatted usage error that hints the user to run --help.
 func UsageErrorf(cmd *cobra.Command, format string, args ...any) error {
-	msg := fmt.Sprintf(format, args...)
-	return fmt.Errorf("%s\nSee '%s --help' for help and examples", msg, cmd.CommandPath())
+	return &UsageError{
+		msg:  fmt.Sprintf(format, args...),
+		hint: fmt.Sprintf("\nSee '%s --help' for help and examples", cmd.CommandPath()),
+	}
 }
 
 // DefaultSubCommandRun prints help when a parent command is invoked without a subcommand.

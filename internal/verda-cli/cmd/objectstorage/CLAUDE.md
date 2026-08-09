@@ -40,6 +40,10 @@ Package-level `clientBuilder` in `helper.go` is swapped in tests via the `withFa
 - `rb`, `rm`: require `prompter.Confirm()` unless `--yes`. In agent mode without `--yes`, return `cmdutil.NewConfirmationRequiredError`.
 - `mv`, `cp`, `sync`: NO prompt (matches `aws s3`; the user committed by typing the verb).
 - `sync --delete`: also no prompt (AWS convention -- `--delete` is opt-in already).
+- Prompts run on `cmd.Context()` (never the `--timeout`-bounded listing ctx); the delete/abort phase after the prompt re-bounds a fresh ctx so think-time can't drain it (same two-ctx split as sshkey/startupscript delete).
+
+### Context discipline (cp/mv/sync)
+Bulk transfers are data-plane: they run on `cmd.Context()` (Ctrl+C), never the per-request `--timeout` — see the comment in `cp.go runCp`. Only enumeration (ListObjectsV2 via `enumerateS3`/`listAllKeys`) re-bounds a `WithTimeout` ctx around the listing.
 
 ### Batching and pagination
 - `rb --force` and `rm --recursive` use `DeleteObjects` in batches of `maxDeleteBatch = 1000` (defined in `rb.go`).

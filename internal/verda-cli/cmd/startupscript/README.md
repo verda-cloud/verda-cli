@@ -6,7 +6,7 @@
 |---------|-------------|-----------|
 | `verda startup-script list` | List all startup scripts (Name, ID, Created) | _(none)_ |
 | `verda startup-script add` | Add a startup script | `--name`, `--file`, `--script` |
-| `verda startup-script delete` | Delete a startup script | `--id` |
+| `verda startup-script delete` | Delete a startup script | `--id`, `--yes` |
 
 ## Usage Examples
 
@@ -35,6 +35,9 @@ verda startup-script delete
 
 # Non-interactive
 verda startup-script delete --id abc-123
+
+# Agent mode (structured result, no prompts)
+verda --agent startup-script delete --id abc-123 --yes
 ```
 
 ## Interactive vs Non-Interactive
@@ -42,10 +45,10 @@ verda startup-script delete --id abc-123
 | Command | Non-interactive flags | Prompted when missing |
 |---------|----------------------|----------------------|
 | `add` | `--name`, `--file` or `--script` | Name via text input; script source via select ("Load from file" / "Paste content") |
-| `delete` | `--id` | Fetches all scripts, presents select list, then confirms |
+| `delete` | `--id`, `--yes` | Fetches all scripts, presents select list, then confirms |
 | `list` | _(always non-interactive)_ | N/A |
 
-All destructive actions (`delete`) require confirmation even in non-interactive mode.
+Destructive deletes ask for confirmation interactively; pass `--yes` to skip it. In agent mode (`--agent`), `--id` and `--yes` are required — without `--yes` the command fails with `CONFIRMATION_REQUIRED`, and success prints a structured JSON result.
 
 ## Architecture Notes
 

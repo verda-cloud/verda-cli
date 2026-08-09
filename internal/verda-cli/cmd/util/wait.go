@@ -112,7 +112,9 @@ func Poll(ctx context.Context, w io.Writer, interval time.Duration, opts WaitOpt
 }
 
 // PollInstanceStatus polls an instance until it reaches one of the expected
-// statuses (or a terminal status).
+// statuses (or a terminal status). A terminal failure status (error,
+// not_found) is returned as an error — the operation did not succeed even
+// though polling is done, and agents key on the exit code.
 func PollInstanceStatus(ctx context.Context, w io.Writer, client *verda.Client, instanceID string, opts WaitOptions, expectStatus ...string) (*verda.Instance, error) {
 	target := ""
 	if len(expectStatus) > 0 {
@@ -127,17 +129,32 @@ func PollInstanceStatus(ctx context.Context, w io.Writer, client *verda.Client, 
 		}
 		lastInst = inst
 		msg := InstanceStatusMessage(inst.Status)
+		failed := inst.Status == verda.StatusError || inst.Status == verda.StatusNotFound
 		if target != "" {
-			return msg, inst.Status == target || inst.Status == verda.StatusError || inst.Status == verda.StatusNotFound, nil
+			if inst.Status == target {
+				return msg, true, nil
+			}
+			if failed {
+				return msg, false, fmt.Errorf("instance %s in failed status %q while waiting for %q", instanceID, inst.Status, target)
+			}
+			return msg, false, nil
 		}
-		return msg, InstanceTerminalStatuses[inst.Status], nil
+		if InstanceTerminalStatuses[inst.Status] {
+			if failed {
+				return msg, false, fmt.Errorf("instance %s in failed status %q", instanceID, inst.Status)
+			}
+			return msg, true, nil
+		}
+		return msg, false, nil
 	}
 
 	_, err := Poll(ctx, w, 5*time.Second, opts, pollFn)
 	return lastInst, err
 }
 
-// PollVolumeStatus polls a volume until it reaches one of the expected statuses.
+// PollVolumeStatus polls a volume until it reaches one of the expected
+// statuses. A failed status (canceled, deleted, error) stops polling
+// immediately with an error instead of burning the full timeout.
 func PollVolumeStatus(ctx context.Context, w io.Writer, client *verda.Client, volumeID string, opts WaitOptions, expectStatus ...string) (*verda.Volume, error) {
 	target := ""
 	if len(expectStatus) > 0 {
@@ -151,10 +168,16 @@ func PollVolumeStatus(ctx context.Context, w io.Writer, client *verda.Client, vo
 			return "", false, fmt.Errorf("polling volume: %w", err)
 		}
 		lastVol = vol
-		if target != "" {
-			return vol.Status, vol.Status == target, nil
+		if target != "" && vol.Status == target {
+			return vol.Status, true, nil
 		}
-		return vol.Status, VolumeTerminalStatuses[vol.Status], nil
+		if VolumeFailedStatuses[vol.Status] {
+			return vol.Status, false, fmt.Errorf("volume %s in failed status %q", volumeID, vol.Status)
+		}
+		if target == "" && VolumeTerminalStatuses[vol.Status] {
+			return vol.Status, true, nil
+		}
+		return vol.Status, false, nil
 	}
 
 	_, err := Poll(ctx, w, 5*time.Second, opts, pollFn)

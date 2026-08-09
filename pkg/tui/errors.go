@@ -19,3 +19,8 @@ import "errors"
 // ErrInterrupted is returned when the user presses Ctrl+C (hard cancel).
 // Distinct from context.Canceled which indicates Esc (soft cancel / go back).
 var ErrInterrupted = errors.New("interrupted")
+
+// ErrNoTerminal is returned when a prompt is attempted without a terminal on
+// stdin (pipe, redirect, /dev/null). A Bubble Tea prompt can never receive
+// key input there and would redraw forever, so prompters fail fast instead.
+var ErrNoTerminal = errors.New("interactive prompt requires a terminal: stdin is not a TTY (pass flags to run non-interactively)")

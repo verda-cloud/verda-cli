@@ -58,6 +58,6 @@ func (p *Prompter) Table(_ context.Context, columns []string, rows [][]string, o
 	s.Selected = lipgloss.NewStyle()
 	t.SetStyles(s)
 
-	_, err := fmt.Fprintln(p.out, t.View())
+	_, err := fmt.Fprintln(p.dataOut, t.View())
 	return err
 }

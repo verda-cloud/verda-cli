@@ -75,10 +75,14 @@ shows the order of precedence (highest first):
 | `VERDA_AGENT` | Enable agent mode (`1` or `true`) |
 | `VERDA_HOME` | Base directory for config (default `~/.verda`) |
 
-### Explicit Profile Override
+### Explicit Profile Selection
 
-When `--auth.profile` is passed explicitly, the credentials file values for that
-profile override env vars and config file values — but CLI flags still win.
+`--auth.profile` / `VERDA_PROFILE` choose WHICH credentials file section
+supplies missing values — they do not promote stored values over inline
+sources. Per field, the precedence table above always applies: CLI flag >
+config file (including `VERDA_AUTH_CLIENT_ID` / `VERDA_AUTH_CLIENT_SECRET` via
+viper's env binding) > `VERDA_CLIENT_ID` / `VERDA_CLIENT_SECRET` > credentials
+file. The selected profile additionally pins its own `verda_base_url`.
 
 For example:
 
@@ -86,12 +90,13 @@ For example:
 # Env var is set
 export VERDA_CLIENT_ID=env-id
 
-# Explicit profile overrides the env var
-verda compute list --auth.profile=staging
-# → uses client ID from [staging] in ~/.verda/credentials, not env-id
+# Inline env still wins; [staging] only fills unset fields
+verda vm list --auth.profile=staging
+# → uses env-id (prior behavior silently used [staging]'s client ID —
+#   fixed after a wrong-account report)
 
-# But a CLI flag always wins
-verda compute list --auth.profile=staging --auth.client-id=flag-id
+# A CLI flag wins over everything
+verda vm list --auth.profile=staging --auth.client-id=flag-id
 # → uses flag-id
 ```
 

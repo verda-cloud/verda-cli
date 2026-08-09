@@ -16,6 +16,7 @@ package wizard
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -353,6 +354,66 @@ func TestEngine_EmptyRequired_AtFirstStep_ReturnsError(t *testing.T) {
 	}
 }
 
+// Regression: transition() used to zero rewindCount on every reset, so the
+// auto-rewind guard never fired — a step whose loader always returns empty
+// choices bounced the user back to the prior step forever (only Ctrl+C
+// escaped). The guard must trip after maxRewindsPerStep attempts whether the
+// step rewinds via a declared DependsOn or the rewindOne fallback.
+func TestEngine_EmptyChoices_RewindGuardTerminates(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		dependsOn []string
+	}{
+		{name: "declared dependency", dependsOn: []string{"region"}},
+		{name: "no dependency (rewindOne fallback)"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			loaderCalls := 0
+			flow := &Flow{
+				Name: "test",
+				Steps: []Step{
+					{
+						Name:     "region",
+						Prompt:   SelectPrompt,
+						Required: true,
+						Loader:   StaticChoices(Choice{Label: "Finland", Value: "FIN-01"}),
+						Setter:   func(v any) {},
+					},
+					{
+						Name:      "gpu",
+						Prompt:    SelectPrompt,
+						Required:  true,
+						DependsOn: tc.dependsOn,
+						Loader: func(_ context.Context, _ tui.Prompter, _ tui.Status, _ *Store) ([]Choice, error) {
+							loaderCalls++
+							if loaderCalls > maxRewindsPerStep+2 {
+								// Breaks the loop if the guard regresses, so the
+								// test fails on the error instead of hanging.
+								return nil, fmt.Errorf("loader called %d times: rewind guard did not trip", loaderCalls)
+							}
+							return []Choice{}, nil
+						},
+						Setter: func(v any) {},
+					},
+				},
+			}
+
+			// One selectResult per re-ask of the region step; the guard must
+			// trip before the loader safety break kicks in.
+			engine := newTestEngine([]promptResult{
+				selectResult(0), selectResult(0), selectResult(0), selectResult(0), selectResult(0),
+			}, WithOutput(io.Discard))
+			err := engine.Run(context.Background(), flow)
+			if err == nil || !strings.Contains(err.Error(), "no options available after") {
+				t.Fatalf("expected rewind guard error, got %v", err)
+			}
+			if loaderCalls != maxRewindsPerStep+1 {
+				t.Errorf("expected %d loader calls before guard trips, got %d", maxRewindsPerStep+1, loaderCalls)
+			}
+		})
+	}
+}
+
 func TestEngine_ValidationError_RepromptsUntilValid(t *testing.T) {
 	var size string
 
@@ -670,8 +731,13 @@ func TestEngine_EscOnFirstStep_Cancels(t *testing.T) {
 
 	engine := newTestEngine([]promptResult{backResult()})
 	err := engine.Run(context.Background(), flow)
-	if err == nil || !strings.Contains(err.Error(), "wizard cancelled") {
-		t.Fatalf("expected 'wizard cancelled', got %v", err)
+	// Esc on the first step must classify as a soft cancel (context.Canceled)
+	// under the ErrCancelled umbrella — cmdutil.IsPromptBack/Cancel key on it.
+	if !errors.Is(err, ErrCancelled) || !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected Esc cancel (ErrCancelled wrapping context.Canceled), got %v", err)
+	}
+	if errors.Is(err, tui.ErrInterrupted) {
+		t.Fatal("Esc cancel must not classify as Ctrl+C (tui.ErrInterrupted)")
 	}
 }
 
@@ -691,8 +757,13 @@ func TestEngine_CtrlC_Exits(t *testing.T) {
 
 	engine := newTestEngine([]promptResult{exitResult()})
 	err := engine.Run(context.Background(), flow)
-	if err == nil || !strings.Contains(err.Error(), "wizard cancelled") {
-		t.Fatalf("expected 'wizard cancelled', got %v", err)
+	// Ctrl+C must classify as a hard interrupt (tui.ErrInterrupted) under the
+	// ErrCancelled umbrella — cmdutil.IsPromptInterrupt/Cancel key on it.
+	if !errors.Is(err, ErrCancelled) || !errors.Is(err, tui.ErrInterrupted) {
+		t.Fatalf("expected Ctrl+C cancel (ErrCancelled wrapping tui.ErrInterrupted), got %v", err)
+	}
+	if errors.Is(err, context.Canceled) {
+		t.Fatal("Ctrl+C cancel must not classify as soft back (context.Canceled)")
 	}
 }
 

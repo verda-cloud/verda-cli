@@ -38,7 +38,7 @@ jobs:
           cache: true
 
       - name: Install git-cliff
-        run: pip install git-cliff
+        run: pip install "git-cliff==2.13.1"
 
       - name: Install goreleaser
         uses: goreleaser/goreleaser-action@v6

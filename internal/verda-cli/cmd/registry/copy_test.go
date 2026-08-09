@@ -17,6 +17,7 @@ package registry
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -25,6 +26,7 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -1662,5 +1664,210 @@ func (r *tagFailingRegistry) Head(_ context.Context, _ string) (*v1.Descriptor, 
 			{Code: transport.ManifestUnknownErrorCode, Message: "not found"},
 		},
 		StatusCode: http.StatusNotFound,
+	}
+}
+
+// ---------- per-host source keychain regression (review H3) ----------
+
+// recordedKeychain resolves per-host from a fixed map and records the
+// RegistryStr() of every Resolve call, so tests can assert the command asked
+// for the SOURCE host's credentials -- and never Docker Hub's.
+type recordedKeychain struct {
+	mu       sync.Mutex
+	perHost  map[string]authn.Authenticator
+	resolves []string
+}
+
+func (k *recordedKeychain) Resolve(r authn.Resource) (authn.Authenticator, error) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	k.resolves = append(k.resolves, r.RegistryStr())
+	if a, ok := k.perHost[r.RegistryStr()]; ok {
+		return a, nil
+	}
+	return authn.Anonymous, nil
+}
+
+// gatedRegistry fronts the in-memory ggcr registry with a Basic-auth gate.
+// /v2/* requests are recorded; when basicHdr is non-empty they must carry
+// exactly that Authorization value or get a 401 Basic challenge (a private
+// registry). Empty basicHdr accepts anything (a public registry) -- the
+// recordings then show which credentials the client attached unprovoked
+// (review H3: pre-fix, ggcr's basicTransport attached the resolved Docker
+// Hub credential to every request against any source host).
+type gatedRegistry struct {
+	host     string
+	basicHdr string
+
+	mu       sync.Mutex
+	seenAuth []string
+}
+
+func newGatedRegistry(t *testing.T, basicUser, basicPass string) *gatedRegistry {
+	t.Helper()
+	g := &gatedRegistry{}
+	if basicUser != "" {
+		g.basicHdr = "Basic " + base64.StdEncoding.EncodeToString([]byte(basicUser+":"+basicPass))
+	}
+	inner := ggcrregistry.New()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasPrefix(r.URL.Path, "/v2") {
+			inner.ServeHTTP(w, r)
+			return
+		}
+		hdr := r.Header.Get("Authorization")
+		g.mu.Lock()
+		g.seenAuth = append(g.seenAuth, hdr)
+		g.mu.Unlock()
+		if g.basicHdr != "" && hdr != g.basicHdr {
+			w.Header().Set("WWW-Authenticate", `Basic realm="gated"`)
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		inner.ServeHTTP(w, r)
+	}))
+	t.Cleanup(srv.Close)
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatalf("parse gated registry URL: %v", err)
+	}
+	g.host = u.Host
+	return g
+}
+
+// primeGated pushes a random image into the gated source using the given
+// source-side authenticator (going through the challenge/token flow, so the
+// fixture exercises the same auth machinery the copy will).
+func primeGated(t *testing.T, src *gatedRegistry, ref string, auth authn.Authenticator) v1.Image {
+	t.Helper()
+	r := newGGCRRegistryForSource(auth, RetryConfig{})
+	img, err := random.Image(1024, 1)
+	if err != nil {
+		t.Fatalf("random.Image: %v", err)
+	}
+	if err := r.Write(context.Background(), src.host+"/"+ref, img, WriteOptions{}); err != nil {
+		t.Fatalf("prime gated source: %v", err)
+	}
+	return img
+}
+
+// TestCopy_DockerConfigResolvesCredsForSourceHost: the docker-config keychain
+// holds credentials for a private ghcr-style host under THAT host's key. The
+// copy must succeed and the keychain must be resolved with the source host --
+// pre-fix resolution keyed on authn.DefaultAuthKey (Docker Hub), missed, and
+// the private token endpoint rejected the anonymous fetch (review H3).
+func TestCopy_DockerConfigResolvesCredsForSourceHost(t *testing.T) {
+	const user, pass = "ghcr-user", "ghcr-secret"
+	src := newGatedRegistry(t, user, pass)
+	dstHost := testServer(t)
+	writeCopyCredsFile(t, dstHost, "proj")
+
+	kc := &recordedKeychain{perHost: map[string]authn.Authenticator{
+		src.host: authn.FromConfig(authn.AuthConfig{Username: user, Password: pass}),
+	}}
+	withSourceKeychain(t, kc)
+
+	srcImg := primeGated(t, src, "ns/app:v1", authn.FromConfig(authn.AuthConfig{Username: user, Password: pass}))
+
+	f := cmdutil.NewTestFactory(nil)
+	streams, out, _ := copyStreams("")
+
+	srcArg := src.host + "/ns/app:v1"
+	dstArg := dstHost + "/proj/app:v1"
+	if err := runCopyForTest(t, f, streams, srcArg, dstArg); err != nil {
+		t.Fatalf("copy from private source with host-keyed creds: %v\nout: %s", err, out.String())
+	}
+
+	dstReg := newGGCRRegistry(testCreds(dstHost))
+	desc, err := dstReg.Head(context.Background(), dstArg)
+	if err != nil {
+		t.Fatalf("Head(dst): %v", err)
+	}
+	want, _ := srcImg.Digest()
+	if desc.Digest != want {
+		t.Fatalf("digest mismatch: got %s, want %s", desc.Digest, want)
+	}
+
+	if len(kc.resolves) == 0 {
+		t.Fatal("keychain never resolved -- --src-auth docker-config should consult it")
+	}
+	for _, host := range kc.resolves {
+		if host != src.host {
+			t.Errorf("keychain resolved for %q, want only source host %q (Hub key would leak creds)", host, src.host)
+		}
+	}
+
+	src.mu.Lock()
+	defer src.mu.Unlock()
+	wantBasic := "Basic " + base64.StdEncoding.EncodeToString([]byte(user+":"+pass))
+	var sawCreds bool
+	for _, hdr := range src.seenAuth {
+		if hdr == wantBasic {
+			sawCreds = true
+		}
+	}
+	if !sawCreds {
+		t.Errorf("private source never received the host-keyed credentials; Authorization seen: %q", src.seenAuth)
+	}
+}
+
+// TestCopy_DockerConfigNeverSendsHubCredsToForeignHost: with only a Docker
+// Hub login in the keychain, a copy from any other registry must run
+// anonymous -- the Hub credential must never be presented to a non-Hub host
+// (review H3: scope-confusion leak). The token endpoint accepts anonymous
+// pulls; the assertion is on what the keychain was asked and what crossed
+// the wire, so the test discriminates even though the copy succeeds either
+// way.
+func TestCopy_DockerConfigNeverSendsHubCredsToForeignHost(t *testing.T) {
+	const hubUser, hubPass = "hub-user", "hub-secret"
+	hubHdr := "Basic " + base64.StdEncoding.EncodeToString([]byte(hubUser+":"+hubPass))
+	hubAuth := authn.FromConfig(authn.AuthConfig{Username: hubUser, Password: hubPass})
+
+	src := newGatedRegistry(t, "", "") // anonymous token fetches allowed
+	dstHost := testServer(t)
+	writeCopyCredsFile(t, dstHost, "proj")
+
+	// Real DefaultKeychain with a Hub login answers both the bare host and
+	// the legacy v1 key; seed the same host->cred association under both so
+	// resolve behavior matches what ggcr would do with a real docker config.
+	kc := &recordedKeychain{perHost: map[string]authn.Authenticator{
+		"index.docker.io":    hubAuth,
+		authn.DefaultAuthKey: hubAuth,
+	}}
+	withSourceKeychain(t, kc)
+
+	srcImg := primeGated(t, src, "ns/app:v2", authn.Anonymous)
+
+	f := cmdutil.NewTestFactory(nil)
+	streams, out, _ := copyStreams("")
+
+	srcArg := src.host + "/ns/app:v2"
+	dstArg := dstHost + "/proj/app:v2"
+	if err := runCopyForTest(t, f, streams, srcArg, dstArg); err != nil {
+		t.Fatalf("anonymous copy from public source: %v\nout: %s", err, out.String())
+	}
+
+	dstReg := newGGCRRegistry(testCreds(dstHost))
+	desc, err := dstReg.Head(context.Background(), dstArg)
+	if err != nil {
+		t.Fatalf("Head(dst): %v", err)
+	}
+	want, _ := srcImg.Digest()
+	if desc.Digest != want {
+		t.Fatalf("digest mismatch: got %s, want %s", desc.Digest, want)
+	}
+
+	for _, host := range kc.resolves {
+		if host == "index.docker.io" || host == authn.DefaultAuthKey {
+			t.Fatalf("keychain resolved the Docker Hub entry for a copy from %q -- Hub creds would be sent to a foreign host", host)
+		}
+	}
+
+	src.mu.Lock()
+	defer src.mu.Unlock()
+	for _, hdr := range src.seenAuth {
+		if hdr == hubHdr {
+			t.Fatalf("Docker Hub credential presented to %q (scope confusion); Authorization seen: %q", src.host, src.seenAuth)
+		}
 	}
 }

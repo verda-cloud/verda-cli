@@ -45,9 +45,11 @@ var validSpotPolicies = map[string]struct{}{
 //
 // Stage 2 — Template application (applyTemplate):
 //
-//	Overwrites empty fields with template values. Sets billingTypeSet,
+//	Fills fields the user did not pass explicitly (cobra Flags().Changed is
+//	the authority — flags always beat template values). Sets billingTypeSet,
 //	locationSet, storageSkip, startupScriptSkip coordination flags.
-//	Expands HostnamePattern into Hostname.
+//	Expands HostnamePattern into Hostname (the location step re-expands
+//	{location} against the effective location if the wizard runs).
 //
 // Stage 3 — Name resolution (resolveTemplateNames):
 //
@@ -197,7 +199,10 @@ func NewCmdCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 	_ = flags.MarkHidden("ssh-key-id")
 	_ = flags.MarkHidden("startup-script-id")
 	_ = flags.MarkHidden("spot")
-	opts.Wait.AddFlags(flags, !f.AgentMode()) // agents should poll with vm describe instead of blocking
+	// AgentMode is always false at registration: the factory is built during
+	// command-tree construction, before flags are parsed. The agent no-wait
+	// default is applied in runCreate instead.
+	opts.Wait.AddFlags(flags, true)
 
 	return cmd
 }
@@ -226,10 +231,14 @@ func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 
 	cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), "Request payload:", req)
 
+	// Agent mode returns after issuance unless --wait was passed explicitly: the
+	// flag default is locked in at command construction, before --agent is parsed.
+	wait := opts.Wait.Wait && (!f.AgentMode() || cmd.Flags().Changed("wait"))
+
 	createCtx, createCancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
 	defer createCancel()
 
-	instance, err := cmdutil.WithSpinner(createCtx, f.Status(), "Creating VM instance...", func() (*verda.Instance, error) {
+	instance, err := cmdutil.WithSpinner(createCtx, f.Status(), "Creating VM instance...", func(ctx context.Context) (*verda.Instance, error) {
 		return client.Instances.Create(createCtx, req)
 	})
 	if err != nil {
@@ -241,7 +250,7 @@ func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 		if werr != nil {
 			return werr
 		}
-		if opts.Wait.Wait {
+		if wait {
 			_, err = cmdutil.PollInstanceStatus(cmd.Context(), nil, client, instance.ID, opts.Wait)
 			return err
 		}
@@ -249,7 +258,7 @@ func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 	}
 
 	// Show live status view, polling until the instance reaches a terminal state.
-	if !opts.Wait.Wait {
+	if !wait {
 		_, _ = fmt.Fprintf(ioStreams.Out, "Created instance: %s (%s)\n", instance.Hostname, instance.ID)
 		return nil
 	}
@@ -283,7 +292,7 @@ func missingCreateFlags(opts *createOptions) []string {
 
 func runWizard(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *createOptions) error {
 	flow := buildCreateFlow(ctx, f.VerdaClient, opts, WizardModeDeploy)
-	engine := wizard.NewEngine(f.Prompter(), f.Status(), wizard.WithOutput(ioStreams.ErrOut), wizard.WithExitConfirmation())
+	engine := wizard.NewEngine(f.Prompter(), f.Status(), wizard.WithOutput(ioStreams.ErrOut))
 	return engine.Run(ctx, flow)
 }
 
@@ -390,11 +399,11 @@ func validateKind(kind, instanceType string) error {
 	}
 
 	switch strings.ToLower(strings.TrimSpace(kind)) {
-	case "cpu":
+	case kindCPU:
 		if !strings.HasPrefix(strings.ToUpper(instanceType), "CPU.") {
 			return fmt.Errorf("--kind cpu does not match --instance-type %q", instanceType)
 		}
-	case "gpu":
+	case kindGPU:
 		if strings.HasPrefix(strings.ToUpper(instanceType), "CPU.") {
 			return fmt.Errorf("--kind gpu does not match --instance-type %q", instanceType)
 		}

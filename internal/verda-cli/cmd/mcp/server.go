@@ -17,8 +17,11 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
+	"strings"
+	"sync"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -31,9 +34,11 @@ type clientFunc func() (*verda.Client, error)
 
 // Server wraps the MCP protocol server and Verda SDK client.
 type Server struct {
-	client    *verda.Client
-	getClient clientFunc
-	mcpServer *server.MCPServer
+	client     *verda.Client
+	clientErr  error
+	clientOnce sync.Once
+	getClient  clientFunc
+	mcpServer  *server.MCPServer
 }
 
 // NewServer creates a new MCP server backed by the given Verda client.
@@ -65,17 +70,18 @@ func newServer(getClient clientFunc) *Server {
 	return s
 }
 
-// verdaClient returns the Verda SDK client, creating it on first call.
+// verdaClient returns the Verda SDK client, creating it exactly once.
+// mcp-go dispatches tool calls on a worker pool, so the lazy init must be
+// safe for concurrent first calls; a factory error is latched too (fix
+// credentials, then restart the server).
 func (s *Server) verdaClient() (*verda.Client, error) {
-	if s.client != nil {
-		return s.client, nil
+	s.clientOnce.Do(func() {
+		s.client, s.clientErr = s.getClient()
+	})
+	if s.clientErr != nil {
+		return nil, s.clientErr
 	}
-	c, err := s.getClient()
-	if err != nil {
-		return nil, err
-	}
-	s.client = c
-	return c, nil
+	return s.client, nil
 }
 
 // ServeStdio starts the MCP server on stdin/stdout.
@@ -93,6 +99,63 @@ func jsonResult(data any) (*mcp.CallToolResult, error) {
 	return mcp.NewToolResultText(string(b)), nil
 }
 
+// argError is a typed argument error carrying the CLI agent-contract code and
+// details (docs/agent-errors.md), rendered into MCP tool-error payloads.
+type argError struct {
+	code    string
+	message string
+	details map[string]any
+}
+
+func (e *argError) Error() string { return e.message }
+
+func missingArgError(name string) *argError {
+	return &argError{
+		code:    "MISSING_REQUIRED_FLAGS",
+		message: fmt.Sprintf("missing required argument %q", name),
+		details: map[string]any{"missing": []string{name}},
+	}
+}
+
+func invalidArgError(name, reason string) *argError {
+	return &argError{
+		code:    "VALIDATION_ERROR",
+		message: fmt.Sprintf("invalid value for %s: %s", name, reason),
+		details: map[string]any{"field": name, "reason": reason},
+	}
+}
+
+// confirmationRequiredError mirrors the CLI's agent-mode CONFIRMATION_REQUIRED
+// contract: destructive and billing tools refuse to run without confirm=true.
+func confirmationRequiredError(action string) *argError {
+	return &argError{
+		code:    "CONFIRMATION_REQUIRED",
+		message: fmt.Sprintf("action %q creates billing or destructive changes and requires an explicit confirm: true argument", action),
+		details: map[string]any{"action": action},
+	}
+}
+
+// toolErrorResult renders err as an MCP tool-error result. argErrors serialize
+// to the agent-contract JSON envelope ({"error": {code, message, details}}) so
+// agents can branch on code the same way as with `verda --agent` stderr.
+func toolErrorResult(err error) *mcp.CallToolResult {
+	var ae *argError
+	if !errors.As(err, &ae) {
+		return mcp.NewToolResultError(err.Error())
+	}
+	b, mErr := json.Marshal(map[string]any{
+		"error": map[string]any{
+			"code":    ae.code,
+			"message": ae.message,
+			"details": ae.details,
+		},
+	})
+	if mErr != nil {
+		return mcp.NewToolResultError(ae.message)
+	}
+	return mcp.NewToolResultError(string(b))
+}
+
 // args extracts the arguments map from a CallToolRequest.
 //
 //nolint:gocritic // hugeParam: handler signature is defined by mcp-go library.
@@ -104,64 +167,138 @@ func args(req mcp.CallToolRequest) map[string]any {
 func requiredString(a map[string]any, name string) (string, error) {
 	v, ok := a[name]
 	if !ok || v == nil {
-		return "", fmt.Errorf("missing required argument %q", name)
+		return "", missingArgError(name)
 	}
 	s, ok := v.(string)
-	if !ok || s == "" {
-		return "", fmt.Errorf("argument %q must be a non-empty string", name)
+	if !ok {
+		return "", invalidArgError(name, "must be a string, got "+jsonTypeName(v))
+	}
+	if s == "" {
+		return "", invalidArgError(name, "must be a non-empty string")
 	}
 	return s, nil
 }
 
-// optionalString extracts an optional string argument, returning "" if absent.
-func optionalString(a map[string]any, name string) string {
+// optionalString extracts an optional string argument. A present value of the
+// wrong type is rejected: mcp-go does no schema validation, so silent coercion
+// here (e.g. treating a number as "") hides caller bugs.
+func optionalString(a map[string]any, name string) (string, error) {
 	v, ok := a[name]
 	if !ok || v == nil {
-		return ""
+		return "", nil
 	}
-	s, _ := v.(string)
-	return s
+	s, ok := v.(string)
+	if !ok {
+		return "", invalidArgError(name, "must be a string, got "+jsonTypeName(v))
+	}
+	return s, nil
 }
 
 // optionalBool extracts an optional boolean argument, returning false if absent.
-func optionalBool(a map[string]any, name string) bool {
+func optionalBool(a map[string]any, name string) (bool, error) {
 	v, ok := a[name]
 	if !ok || v == nil {
-		return false
+		return false, nil
 	}
-	b, _ := v.(bool)
-	return b
+	b, ok := v.(bool)
+	if !ok {
+		return false, invalidArgError(name, "must be a boolean, got "+jsonTypeName(v))
+	}
+	return b, nil
+}
+
+// requiredInt extracts a required positive-integer argument.
+func requiredInt(a map[string]any, name string) (int, error) {
+	v, ok := a[name]
+	if !ok || v == nil {
+		return 0, missingArgError(name)
+	}
+	return strictInt(a, name, v)
 }
 
 // optionalInt extracts an optional integer argument, returning 0 if absent.
-func optionalInt(a map[string]any, name string) int {
+// JSON numbers arrive as float64; strings must be rejected, not coerced
+// ("500" silently becoming 0 was NEW-6 in the architecture review).
+func optionalInt(a map[string]any, name string) (int, error) {
 	v, ok := a[name]
 	if !ok || v == nil {
-		return 0
+		return 0, nil
 	}
-	// JSON numbers are float64
-	f, ok := v.(float64)
-	if !ok {
-		return 0
-	}
-	return int(f)
+	return strictInt(a, name, v)
 }
 
-// optionalStringSlice extracts an optional string array argument.
-func optionalStringSlice(a map[string]any, name string) []string {
+func strictInt(a map[string]any, name string, v any) (int, error) {
+	var f float64
+	switch n := v.(type) {
+	case float64:
+		f = n
+	case int:
+		f = float64(n)
+	default:
+		return 0, invalidArgError(name, "must be a number, got "+jsonTypeName(v))
+	}
+	i := int(f)
+	if float64(i) != f {
+		return 0, invalidArgError(name, "must be a whole number")
+	}
+	if i < 0 {
+		return 0, invalidArgError(name, "must not be negative")
+	}
+	return i, nil
+}
+
+// optionalEnum extracts an optional string argument restricted to the allowed
+// values; an out-of-set value is rejected with the allowed list.
+func optionalEnum(a map[string]any, name string, allowed ...string) (string, error) {
+	s, err := optionalString(a, name)
+	if err != nil || s == "" {
+		return "", err
+	}
+	for _, allow := range allowed {
+		if s == allow {
+			return s, nil
+		}
+	}
+	return "", invalidArgError(name, fmt.Sprintf("invalid value %q (valid: %s)", s, strings.Join(allowed, ", ")))
+}
+
+// optionalStringSlice extracts an optional string array argument. A non-array
+// value is rejected: silently dropping it would fall through to the "attach
+// all account keys" default in create_vm.
+func optionalStringSlice(a map[string]any, name string) ([]string, error) {
 	v, ok := a[name]
 	if !ok || v == nil {
-		return nil
+		return nil, nil
 	}
 	arr, ok := v.([]any)
 	if !ok {
-		return nil
+		return nil, invalidArgError(name, "must be an array of strings, got "+jsonTypeName(v))
 	}
 	result := make([]string, 0, len(arr))
-	for _, item := range arr {
-		if s, ok := item.(string); ok {
-			result = append(result, s)
+	for i, item := range arr {
+		s, ok := item.(string)
+		if !ok {
+			return nil, invalidArgError(name, fmt.Sprintf("element %d must be a string, got %s", i, jsonTypeName(item)))
 		}
+		result = append(result, s)
 	}
-	return result
+	return result, nil
+}
+
+// jsonTypeName names JSON-ish value kinds for type-mismatch messages.
+func jsonTypeName(v any) string {
+	switch v.(type) {
+	case string:
+		return "a string"
+	case bool:
+		return "a boolean"
+	case float64, int:
+		return "a number"
+	case []any:
+		return "an array"
+	case map[string]any:
+		return "an object"
+	default:
+		return fmt.Sprintf("%T", v)
+	}
 }

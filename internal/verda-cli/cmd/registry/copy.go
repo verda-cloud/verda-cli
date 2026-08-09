@@ -220,7 +220,7 @@ func runCopy(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams,
 	if err != nil {
 		return err
 	}
-	srcAuth, err := buildSourceAuth(opts, basicPassword)
+	srcAuth, err := buildSourceAuth(opts, srcRef, basicPassword)
 	if err != nil {
 		return err
 	}
@@ -247,11 +247,18 @@ func runCopyResolved(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IO
 	srcReg := sourceRegistryBuilder(srcAuth, retryCfg)
 	dstReg := buildClient(creds, retryCfg)
 
-	ctx, cancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
-	defer cancel()
+	// Control plane (Tags/Head/manifest reads) stays bounded by --timeout.
+	// The Read+Write transfer is data-plane: a multi-GB image legitimately
+	// outlives the request timeout, so it runs on cmd.Context() with Ctrl+C
+	// as the stop signal (review H2; mirrors objectstorage cp, and the
+	// wizard path's promise in copy_wizard.go). Prompts hang off cmd ctx.
+	apiCtx, apiCancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
+	defer apiCancel()
+	transferCtx, transferCancel := context.WithCancel(cmd.Context())
+	defer transferCancel()
 
 	if opts.AllTags {
-		return runCopyAllTagsFlow(ctx, cancel, cmd, f, ioStreams, srcReg, dstReg, srcRef, args, creds, opts)
+		return runCopyAllTagsFlow(apiCtx, transferCtx, transferCancel, cmd, f, ioStreams, srcReg, dstReg, srcRef, args, creds, opts)
 	}
 
 	dstRef, err := resolveCopyDestination(args, srcRef, creds)
@@ -263,12 +270,12 @@ func runCopyResolved(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IO
 	dstString := dstRef.String()
 
 	if opts.DryRun {
-		return runCopyDryRunSingle(ctx, srcReg, srcString, dstString, f, ioStreams)
+		return runCopyDryRunSingle(apiCtx, srcReg, srcString, dstString, f, ioStreams)
 	}
 
 	// Overwrite guard: inspect dst before writing. Dry-run skips this by
 	// design (it never writes; the user is asking "what would happen").
-	decision, derr := resolveOverwriteDecision(ctx, dstReg, dstString, opts, f, ioStreams)
+	decision, derr := resolveOverwriteDecision(apiCtx, cmd.Context(), dstReg, dstString, opts, f, ioStreams)
 	if derr != nil {
 		return derr
 	}
@@ -289,7 +296,7 @@ func runCopyResolved(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IO
 		return nil
 	}
 
-	result := performCopy(ctx, cancel, srcReg, dstReg, srcString, dstString, creds, opts, f, ioStreams)
+	result := performCopy(transferCtx, transferCancel, srcReg, dstReg, srcString, dstString, creds, opts, f, ioStreams)
 
 	if isStructuredFormat(f.OutputFormat()) {
 		payload := buildCopyPayload(srcString, dstString, result)
@@ -560,8 +567,11 @@ func readBasicSourcePassword(opts *copyOptions, stdin io.Reader) (string, error)
 // on --src-auth. The basic secret is supplied by the caller (stdin on the flag
 // path, a prompt in the wizard). docker-config routes through the swappable
 // sourceKeychainBuilder so tests can assert which keychain was selected without
-// driving a real credential store.
-func buildSourceAuth(opts *copyOptions, basicPassword string) (authn.Authenticator, error) {
+// driving a real credential store; srcRef pins the keychain lookup to the
+// source registry's host.
+//
+//nolint:gocritic // hugeParam: Ref is an immutable value type; contract uses value receivers uniformly (see refname.go).
+func buildSourceAuth(opts *copyOptions, srcRef Ref, basicPassword string) (authn.Authenticator, error) {
 	switch opts.SrcAuth {
 	case srcAuthAnonymous:
 		return authn.Anonymous, nil
@@ -587,15 +597,12 @@ func buildSourceAuth(opts *copyOptions, basicPassword string) (authn.Authenticat
 		}), nil
 
 	case srcAuthDockerConfig, "":
-		// The keychain needs a Resource (host) to resolve against. We
-		// don't have the srcRef here — keychain callers pass the
-		// reference at call time. remote.WithAuth accepts a plain
-		// Authenticator though, not a Keychain, so we return a
-		// thin keychainAuth adapter that resolves lazily from the
-		// configured sourceKeychainBuilder. In practice the keychain
-		// is consulted once per Read and applied to every request for
-		// that session.
-		return &keychainAuth{keychain: sourceKeychainBuilder}, nil
+		// Resolve per source-registry host so private ghcr/ECR/GCR/ACR
+		// sources get their docker-config creds AND the Docker Hub entry
+		// is never presented to a different host (review H3). srcRef.Host
+		// is already normalized by Parse (ggcr rewrites docker.io to
+		// index.docker.io, which is what the keychain keys on).
+		return &keychainAuth{keychain: sourceKeychainBuilder, host: srcRef.Host}, nil
 
 	default:
 		return nil, &cmdutil.AgentError{
@@ -606,37 +613,30 @@ func buildSourceAuth(opts *copyOptions, basicPassword string) (authn.Authenticat
 	}
 }
 
-// keychainAuth adapts authn.Keychain to the authn.Authenticator contract
-// by deferring resolution until Authorization() is called. The keychain
-// itself decides which credential (docker-config, helper, anonymous) to
-// return per-host. If resolution fails we fall back to anonymous so
-// public images remain pullable even when the keychain is misconfigured.
+// keychainAuth adapts authn.Keychain to the authn.Authenticator contract.
+// Resolution is pinned to the source registry's host: the keychain decides
+// which credential (docker-config entry, helper, anonymous) applies to THAT
+// host. If resolution misses we fall back to anonymous so public images
+// remain pullable even when the keychain is misconfigured.
 type keychainAuth struct {
 	keychain authn.Keychain
-	// resource is the host the authenticator is currently being used
-	// against. Populated lazily on first Authorization() call via a
-	// side-channel setResource hook invoked by the ggcr transport
-	// machinery through the remote.Option path. In practice ggcr
-	// passes a Resource to Keychain.Resolve directly — we embed that
-	// lookup inline in Authorization so we don't depend on newer
-	// ContextKeychain APIs.
+	// host is the source registry (authn.Resource.RegistryStr()) the
+	// authenticator resolves against. Without it, a plain Authenticator
+	// adapter would resolve the keychain's default resource — Docker Hub —
+	// and send the Hub credential to whatever registry it talks to
+	// (review H3: scope-confusion secret leak).
+	host string
 }
 
-// Authorization resolves the keychain at call time. For single-host
-// copies the adapter is effectively memoized because remote.Image
-// captures the resolved Authenticator after the first request; for
-// v1 we re-resolve on every call, which is cheap for DefaultKeychain
-// (file read is cached internally by ggcr).
+// Authorization resolves the keychain for the pinned source host. For
+// single-host copies that's memoization-safe: every call hits the same
+// registry. DefaultKeychain caches the config-file read internally, so
+// re-resolving per call is cheap.
 func (k *keychainAuth) Authorization() (*authn.AuthConfig, error) {
-	// ggcr's keychain-aware call sites go through remote.WithAuthFromKeychain
-	// rather than an Authenticator adapter like this one — but remote.WithAuth
-	// is simpler and avoids a second option slot, so we adapt here. The
-	// resolve-without-resource fallback below returns the Docker Hub entry
-	// (keychain's default) which is the common public-image case.
 	if k.keychain == nil {
 		return (&authn.AuthConfig{}), nil
 	}
-	auth, err := k.keychain.Resolve(keychainResource{host: authn.DefaultAuthKey})
+	auth, err := k.keychain.Resolve(keychainResource{host: k.host})
 	if err != nil || auth == nil {
 		return (&authn.AuthConfig{}), nil //nolint:nilerr // fall back to anonymous for public images
 	}
@@ -793,8 +793,12 @@ func renderCopyDryRun(ioStreams cmdutil.IOStreams, outputFormat string, rows []c
 // the environment can't prompt and --overwrite/--yes wasn't provided); the
 // error return carries agent-mode CONFIRMATION_REQUIRED or a surfaced Head
 // error.
+//
+// ctx bounds the Head call; promptCtx carries the user's think-time
+// (cmd.Context()) so a slow answer can't be killed by --timeout.
 func resolveOverwriteDecision(
 	ctx context.Context,
+	promptCtx context.Context,
 	dstReg Registry,
 	dstString string,
 	opts *copyOptions,
@@ -829,7 +833,7 @@ func resolveOverwriteDecision(
 	if !isTerminalFn(ioStreams.ErrOut) {
 		return overwriteSkip, nil
 	}
-	confirmed, cerr := f.Prompter().Confirm(ctx,
+	confirmed, cerr := f.Prompter().Confirm(promptCtx,
 		fmt.Sprintf("Destination %s exists. Overwrite?", dstString),
 		tui.WithConfirmDefault(false),
 	)
@@ -1072,10 +1076,14 @@ func assembleAllTagsResults(
 // shape, fetches the tag list, and delegates the fan-out to
 // runCopyAllTagsPool.
 //
+// apiCtx bounds the control-plane calls (Tags/Head); transferCtx drives the
+// pool's transfers and is what the TUI's cancel func aborts.
+//
 //nolint:gocritic // hugeParam: Ref is an immutable value type; contract uses value receivers uniformly (see refname.go).
 func runCopyAllTagsFlow(
-	ctx context.Context,
-	cancel context.CancelFunc,
+	apiCtx context.Context,
+	transferCtx context.Context,
+	transferCancel context.CancelFunc,
 	cmd *cobra.Command,
 	f cmdutil.Factory,
 	ioStreams cmdutil.IOStreams,
@@ -1105,7 +1113,7 @@ func runCopyAllTagsFlow(
 	// host (source refs must be fully qualified). Without the prefix,
 	// ggcr would either fall back to docker.io or emit a hostless URL.
 	srcRepoPath := srcRef.Host + "/" + srcRef.FullRepository()
-	tags, err := srcReg.Tags(ctx, srcRepoPath)
+	tags, err := srcReg.Tags(apiCtx, srcRepoPath)
 	if err != nil {
 		return translateError(err)
 	}
@@ -1114,19 +1122,19 @@ func runCopyAllTagsFlow(
 	}
 
 	if opts.DryRun {
-		return runCopyDryRunAllTags(ctx, f, ioStreams, srcReg, srcRef, dstBase, tags)
+		return runCopyDryRunAllTags(apiCtx, f, ioStreams, srcReg, srcRef, dstBase, tags)
 	}
 
 	// Pre-flight overwrite check: we inspect every dst ref first so we can
 	// short-circuit before any Write lands. In agent mode the very first
 	// existing dst raises CONFIRMATION_REQUIRED; in interactive mode the
 	// user decides per-tag, and declined tags are recorded as skipped.
-	skip, oerr := resolveAllTagsOverwrite(ctx, dstReg, dstBase, tags, opts, f, ioStreams)
+	skip, oerr := resolveAllTagsOverwrite(apiCtx, cmd.Context(), dstReg, dstBase, tags, opts, f, ioStreams)
 	if oerr != nil {
 		return oerr
 	}
 
-	results := assembleAllTagsResults(ctx, cancel, srcReg, dstReg, srcRef, dstBase, tags, skip, creds, opts, f, ioStreams)
+	results := assembleAllTagsResults(transferCtx, transferCancel, srcReg, dstReg, srcRef, dstBase, tags, skip, creds, opts, f, ioStreams)
 	summary := summarizeCopyResults(results)
 
 	if handled, err := writeAllTagsStructured(ioStreams, f.OutputFormat(), results, summary); handled {
@@ -1480,9 +1488,13 @@ func newPartialFailureError(s allTagsSummary) error {
 // surface the issue ASAP so the caller can decide once rather than racing
 // partial writes. Non-TTY non-agent callers get the safe default (skip).
 //
+// ctx bounds the per-tag Head calls; promptCtx carries user think-time
+// (cmd.Context(), see resolveOverwriteDecision).
+//
 //nolint:gocritic // hugeParam: Ref is an immutable value type; contract uses value receivers uniformly (see refname.go).
 func resolveAllTagsOverwrite(
 	ctx context.Context,
+	promptCtx context.Context,
 	dstReg Registry,
 	dstBase Ref,
 	tags []string,
@@ -1518,7 +1530,7 @@ func resolveAllTagsOverwrite(
 			skip[tag] = struct{}{}
 			continue
 		}
-		confirmed, cerr := f.Prompter().Confirm(ctx,
+		confirmed, cerr := f.Prompter().Confirm(promptCtx,
 			fmt.Sprintf("Destination %s exists. Overwrite?", dstRef),
 			tui.WithConfirmDefault(false),
 		)

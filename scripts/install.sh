@@ -3,14 +3,17 @@
 # Usage: curl -sSL https://raw.githubusercontent.com/verda-cloud/verda-cli/main/scripts/install.sh | sh
 #
 # Environment variables:
-#   VERDA_INSTALL_DIR  - Installation directory (default: ~/.verda/bin)
-#   VERDA_VERSION      - Specific version to install (default: latest)
+#   VERDA_INSTALL_DIR        - Installation directory (default: ~/.verda/bin)
+#   VERDA_VERSION            - Specific version to install (default: latest)
+#   VERDA_INSTALL_SKIP_VERIFY - Set to 1 to skip archive checksum verification (NOT recommended)
+#   VERDA_INSTALL_BASE_URL   - Override release asset base URL (testing only)
 
 set -e
 
 REPO="verda-cloud/verda-cli"
 BINARY="verda"
 INSTALL_DIR="${VERDA_INSTALL_DIR:-$HOME/.verda/bin}"
+BASE_URL="${VERDA_INSTALL_BASE_URL:-https://github.com/${REPO}/releases/download}"
 
 # Detect OS
 OS="$(uname -s)"
@@ -53,7 +56,9 @@ if [ "$OS" = "windows" ]; then
 fi
 
 FILENAME="${BINARY}_${VERSION_NUM}_${OS}_${ARCH}.${EXT}"
-URL="https://github.com/${REPO}/releases/download/${VERDA_VERSION}/${FILENAME}"
+URL="${BASE_URL}/${VERDA_VERSION}/${FILENAME}"
+SUMS_FILENAME="${BINARY}_${VERSION_NUM}_SHA256SUMS"
+SUMS_URL="${BASE_URL}/${VERDA_VERSION}/${SUMS_FILENAME}"
 
 echo "Installing Verda CLI ${VERDA_VERSION} (${OS}/${ARCH})..."
 echo "  From: ${URL}"
@@ -62,6 +67,13 @@ echo "  To:   ${INSTALL_DIR}/${BINARY}"
 # Create temp directory
 TMP_DIR=$(mktemp -d)
 trap 'rm -rf "$TMP_DIR"' EXIT
+
+fail_verify() {
+  echo "Error: $1"
+  echo "Installation aborted; nothing was installed."
+  echo "To bypass checksum verification (NOT recommended), re-run with VERDA_INSTALL_SKIP_VERIFY=1"
+  exit 1
+}
 
 # Download
 echo "Downloading..."
@@ -72,6 +84,32 @@ elif command -v wget >/dev/null 2>&1; then
 else
   echo "Error: curl or wget is required"
   exit 1
+fi
+
+# Verify the archive against the release's SHA256SUMS (fail closed).
+if [ "${VERDA_INSTALL_SKIP_VERIFY:-}" != "1" ]; then
+  echo "Verifying checksum..."
+  if command -v curl >/dev/null 2>&1; then
+    curl -sSfL "$SUMS_URL" -o "${TMP_DIR}/${SUMS_FILENAME}" || fail_verify "could not download checksum file from ${SUMS_URL}"
+  else
+    wget -q "$SUMS_URL" -O "${TMP_DIR}/${SUMS_FILENAME}" || fail_verify "could not download checksum file from ${SUMS_URL}"
+  fi
+
+  # The sums file lists every platform asset; check only this archive's line.
+  awk -v name="$FILENAME" '$2 == name' "${TMP_DIR}/${SUMS_FILENAME}" > "${TMP_DIR}/CHECKSUM"
+  if [ ! -s "${TMP_DIR}/CHECKSUM" ]; then
+    fail_verify "no checksum entry for ${FILENAME} in ${SUMS_FILENAME}"
+  fi
+
+  cd "$TMP_DIR"
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum -c CHECKSUM > /dev/null || fail_verify "checksum mismatch for ${FILENAME}"
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 -c CHECKSUM > /dev/null || fail_verify "checksum mismatch for ${FILENAME}"
+  else
+    fail_verify "no SHA-256 checksum tool available (need sha256sum or shasum)"
+  fi
+  echo "  Checksum OK."
 fi
 
 # Extract

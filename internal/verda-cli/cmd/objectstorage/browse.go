@@ -87,7 +87,7 @@ func runLsBrowser(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOSt
 // browseBuckets shows the bucket list. Returns (chosen bucket, exit, err);
 // exit is true when the user chose Exit / Ctrl+C / Esc at the root.
 func browseBuckets(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client API) (bucket string, exit bool, err error) {
-	out, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading buckets...", func() (*s3.ListBucketsOutput, error) {
+	out, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading buckets...", func(ctx context.Context) (*s3.ListBucketsOutput, error) {
 		return client.ListBuckets(ctx, &s3.ListBucketsInput{})
 	})
 	if err != nil {
@@ -121,7 +121,7 @@ func browseBuckets(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOS
 // Returns again=false to leave the browser entirely; again=true to keep
 // looping (cur may have been mutated to drill in/out).
 func browseLevel(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client API, cur *URI) (bool, error) {
-	payload, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading...", func() (objectsPayload, error) {
+	payload, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading...", func(ctx context.Context) (objectsPayload, error) {
 		return collectObjects(ctx, f, ioStreams, client, *cur, "/")
 	})
 	if err != nil {
@@ -397,7 +397,7 @@ func announceRename(ioStreams cmdutil.IOStreams, key, local string) {
 
 // browseInfo prints object metadata via HeadObject.
 func browseInfo(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client API, obj URI) error {
-	head, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading details...", func() (*s3.HeadObjectOutput, error) {
+	head, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading details...", func(ctx context.Context) (*s3.HeadObjectOutput, error) {
 		return client.HeadObject(ctx, &s3.HeadObjectInput{Bucket: aws.String(obj.Bucket), Key: aws.String(obj.Key)})
 	})
 	if err != nil {

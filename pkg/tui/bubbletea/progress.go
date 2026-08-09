@@ -41,6 +41,7 @@ type progressModel struct {
 	done         bool
 	finalMessage string
 	autoStop     bool
+	interrupted  bool // true if the user ended the bar with Ctrl+C
 }
 
 func newProgressModel(message string, cfg tui.ProgressConfig) progressModel {
@@ -105,6 +106,7 @@ func (m progressModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		if msg.String() == keyCtrlC {
 			m.done = true
+			m.interrupted = true
 			m.finalMessage = m.message
 			return m, tea.Quit
 		}
@@ -122,9 +124,10 @@ func (m progressModel) View() tea.View {
 // --- Handle ---
 
 type progressHandle struct {
-	program *tea.Program
-	once    sync.Once
-	done    chan struct{}
+	program     *tea.Program
+	once        sync.Once
+	done        chan struct{}
+	interrupted bool // written before done closes; safe to read after <-done
 }
 
 func (h *progressHandle) SetPercent(p float64) {
@@ -142,8 +145,18 @@ func (h *progressHandle) Stop(finalMessage string) {
 	})
 }
 
+// Interrupted blocks until the progress program exits and reports whether
+// the user ended it with Ctrl+C.
+func (h *progressHandle) Interrupted() bool {
+	<-h.done
+	return h.interrupted
+}
+
 // Progress implements tui.Status.
 func (p *Prompter) Progress(ctx context.Context, message string, opts ...tui.ProgressOption) (tui.ProgressHandle, error) {
+	if !rendersToTerminal(p.out) {
+		return silentProgress{}, nil
+	}
 	cfg := tui.ResolveProgressConfig(opts)
 	model := newProgressModel(message, cfg)
 
@@ -153,14 +166,17 @@ func (p *Prompter) Progress(ctx context.Context, message string, opts ...tui.Pro
 		tea.WithContext(ctx),
 	)
 
-	done := make(chan struct{})
+	h := &progressHandle{
+		program: program,
+		done:    make(chan struct{}),
+	}
 	go func() {
-		defer close(done)
-		_, _ = program.Run()
+		defer close(h.done)
+		final, _ := program.Run()
+		if m, ok := final.(progressModel); ok {
+			h.interrupted = m.interrupted
+		}
 	}()
 
-	return &progressHandle{
-		program: program,
-		done:    done,
-	}, nil
+	return h, nil
 }

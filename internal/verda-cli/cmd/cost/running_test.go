@@ -89,17 +89,16 @@ func TestRunningCostSummaryTotals(t *testing.T) {
 		},
 	}
 
-	var totalH, totalD, totalM float64
-	for _, inst := range s.Instances {
-		totalH += inst.Hourly
-		totalD += inst.Daily
-		totalM += inst.Monthly
-	}
+	// Assert the production aggregation, not a re-implemented inline sum.
+	s.computeTotals()
 
-	if totalH != 0.58 {
-		t.Fatalf("expected total hourly 0.58, got %f", totalH)
+	if s.Total.Hourly != 0.58 {
+		t.Fatalf("expected total hourly 0.58, got %f", s.Total.Hourly)
 	}
-	if totalD != 13.92 {
-		t.Fatalf("expected total daily 13.92, got %f", totalD)
+	if s.Total.Daily != 13.92 {
+		t.Fatalf("expected total daily 13.92, got %f", s.Total.Daily)
+	}
+	if s.Total.Monthly != 423.4 {
+		t.Fatalf("expected total monthly 423.4, got %f", s.Total.Monthly)
 	}
 }

@@ -16,7 +16,6 @@ package vm
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -34,12 +33,12 @@ import (
 func runBatchAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *actionOptions) error {
 	// Validation: --all cannot be combined with --id or a positional instance ID.
 	if opts.InstanceID != "" {
-		return errors.New("cannot combine --all with --id or positional instance ID")
+		return cmdutil.UsageErrorf(cmd, "cannot combine --all with --id or positional instance ID")
 	}
 
 	// Validation: --with-volumes is only valid for delete.
 	if opts.WithVolumes && opts.Action != verda.ActionDelete {
-		return errors.New("--with-volumes is only valid with the delete action")
+		return cmdutil.UsageErrorf(cmd, "--with-volumes is only valid with the delete action")
 	}
 
 	// Agent mode requires --yes for batch operations (always destructive at scale).
@@ -77,15 +76,11 @@ func runBatchAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOS
 
 	// Interactive confirmation.
 	if !f.AgentMode() {
-		_, _ = fmt.Fprint(ioStreams.ErrOut, formatBatchConfirmation(action.Label, instances))
-
-		if action.WarningMsg != "" {
-			warnStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Bold(true)
-			_, _ = fmt.Fprintf(ioStreams.ErrOut, "\n  %s\n\n", warnStyle.Render(action.WarningMsg))
+		confirmed, err := confirmBatchAction(ctx, f, ioStreams, &action, instances)
+		if err != nil {
+			return err
 		}
-
-		confirmed, confirmErr := f.Prompter().Confirm(ctx, fmt.Sprintf("Continue? (%s %d instances)", action.Label, len(instances)))
-		if confirmErr != nil || !confirmed {
+		if !confirmed {
 			_, _ = fmt.Fprintln(ioStreams.ErrOut, "Canceled.")
 			return nil
 		}
@@ -106,7 +101,7 @@ func runBatchAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOS
 	actionCtx, cancel := context.WithTimeout(ctx, f.Options().Timeout)
 	defer cancel()
 
-	results, err := cmdutil.WithSpinner(actionCtx, f.Status(), fmt.Sprintf("%s %d instances...", action.Label, len(instances)), func() ([]verda.InstanceActionResult, error) {
+	results, err := cmdutil.WithSpinner(actionCtx, f.Status(), fmt.Sprintf("%s %d instances...", action.Label, len(instances)), func(ctx context.Context) ([]verda.InstanceActionResult, error) {
 		return client.Instances.Action(actionCtx, verda.InstanceActionRequest{
 			Action: actionNameToAPI(opts.Action),
 			ID:     ids,
@@ -131,9 +126,13 @@ func runBatchDelete(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOS
 	deleteVolumes := opts.WithVolumes
 
 	// Interactive mode: prompt for volume deletion and confirm.
+	// confirmBatchDelete already maps prompt cancel to (false, false, nil).
 	if !f.AgentMode() {
 		confirmed, withVols, err := confirmBatchDelete(ctx, f, ioStreams, instances, opts.WithVolumes)
-		if err != nil || !confirmed {
+		if err != nil {
+			return err
+		}
+		if !confirmed {
 			_, _ = fmt.Fprintln(ioStreams.ErrOut, "Canceled.")
 			return nil
 		}
@@ -179,7 +178,7 @@ func runBatchDelete(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOS
 	deleteCtx, cancel := context.WithTimeout(ctx, f.Options().Timeout)
 	defer cancel()
 
-	results, err := cmdutil.WithSpinner(deleteCtx, f.Status(), fmt.Sprintf("Deleting %d instances...", len(instances)), func() ([]verda.InstanceActionResult, error) {
+	results, err := cmdutil.WithSpinner(deleteCtx, f.Status(), fmt.Sprintf("Deleting %d instances...", len(instances)), func(ctx context.Context) ([]verda.InstanceActionResult, error) {
 		return client.Instances.Action(deleteCtx, verda.InstanceActionRequest{
 			Action:    verda.ActionDelete,
 			ID:        ids,
@@ -201,6 +200,26 @@ func runBatchDelete(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOS
 	return nil
 }
 
+// confirmBatchAction prints the batch summary and action warning, then asks
+// the user to confirm. Returns (false, nil) when the user declines or cancels.
+func confirmBatchAction(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, action *instanceAction, instances []verda.Instance) (bool, error) {
+	_, _ = fmt.Fprint(ioStreams.ErrOut, formatBatchConfirmation(action.Label, instances))
+
+	if action.WarningMsg != "" {
+		warnStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Bold(true)
+		_, _ = fmt.Fprintf(ioStreams.ErrOut, "\n  %s\n\n", warnStyle.Render(action.WarningMsg))
+	}
+
+	confirmed, err := f.Prompter().Confirm(ctx, fmt.Sprintf("Continue? (%s %d instances)", action.Label, len(instances)))
+	if err != nil {
+		if cmdutil.IsPromptCancel(err) {
+			return false, nil // User pressed Esc/Ctrl+C.
+		}
+		return false, err
+	}
+	return confirmed, nil
+}
+
 // confirmBatchDelete runs the interactive confirmation flow for batch delete.
 // Returns (confirmed, deleteVolumes, error).
 func confirmBatchDelete(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, instances []verda.Instance, withVolumesFlag bool) (confirmed, deleteVolumes bool, _ error) {
@@ -220,7 +239,10 @@ func confirmBatchDelete(ctx context.Context, f cmdutil.Factory, ioStreams cmduti
 		var volErr error
 		deleteVolumes, volErr = prompter.Confirm(ctx, "Also delete all attached volumes?")
 		if volErr != nil {
-			return false, false, nil //nolint:nilerr // User pressed Esc/Ctrl+C during prompt.
+			if cmdutil.IsPromptCancel(volErr) {
+				return false, false, nil // User pressed Esc/Ctrl+C during prompt.
+			}
+			return false, false, volErr
 		}
 	}
 
@@ -234,7 +256,10 @@ func confirmBatchDelete(ctx context.Context, f cmdutil.Factory, ioStreams cmduti
 	var confirmErr error
 	confirmed, confirmErr = prompter.Confirm(ctx, fmt.Sprintf("Delete %d instances?", len(instances)))
 	if confirmErr != nil {
-		return false, false, nil //nolint:nilerr // User pressed Esc/Ctrl+C during prompt.
+		if cmdutil.IsPromptCancel(confirmErr) {
+			return false, false, nil // User pressed Esc/Ctrl+C during prompt.
+		}
+		return false, false, confirmErr
 	}
 	return confirmed, deleteVolumes, nil
 }
@@ -343,7 +368,10 @@ func selectInstances(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.I
 
 	indices, err := f.Prompter().MultiSelect(ctx, "Select instances", labels)
 	if err != nil {
-		return nil, nil //nolint:nilerr // User pressed Esc/Ctrl+C.
+		if cmdutil.IsPromptCancel(err) {
+			return nil, nil // User pressed Esc/Ctrl+C.
+		}
+		return nil, err
 	}
 	if len(indices) == 0 {
 		_, _ = fmt.Fprintln(ioStreams.ErrOut, "No instances selected.")
@@ -373,14 +401,11 @@ func runBatchWithInstances(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdu
 	}
 
 	// Confirmation.
-	_, _ = fmt.Fprint(ioStreams.ErrOut, formatBatchConfirmation(action.Label, instances))
-	if action.WarningMsg != "" {
-		warnStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Bold(true)
-		_, _ = fmt.Fprintf(ioStreams.ErrOut, "\n  %s\n\n", warnStyle.Render(action.WarningMsg))
+	confirmed, confirmErr := confirmBatchAction(ctx, f, ioStreams, &action, instances)
+	if confirmErr != nil {
+		return confirmErr
 	}
-
-	confirmed, confirmErr := f.Prompter().Confirm(ctx, fmt.Sprintf("Continue? (%s %d instances)", action.Label, len(instances)))
-	if confirmErr != nil || !confirmed {
+	if !confirmed {
 		_, _ = fmt.Fprintln(ioStreams.ErrOut, "Canceled.")
 		return nil
 	}
@@ -400,7 +425,7 @@ func runBatchWithInstances(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdu
 	actionCtx, cancel := context.WithTimeout(ctx, f.Options().Timeout)
 	defer cancel()
 
-	results, err := cmdutil.WithSpinner(actionCtx, f.Status(), fmt.Sprintf("%s %d instances...", action.Label, len(instances)), func() ([]verda.InstanceActionResult, error) {
+	results, err := cmdutil.WithSpinner(actionCtx, f.Status(), fmt.Sprintf("%s %d instances...", action.Label, len(instances)), func(ctx context.Context) ([]verda.InstanceActionResult, error) {
 		return client.Instances.Action(actionCtx, verda.InstanceActionRequest{
 			Action: actionNameToAPI(opts.Action),
 			ID:     ids,

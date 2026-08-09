@@ -51,19 +51,14 @@ func NewCmdUse(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 				profile = args[0]
 			} else {
 				// Interactive: list profiles and let user pick.
-				profiles, err := options.ListProfiles(path)
+				selected, err := selectProfile(cmd, f, path)
 				if err != nil {
 					return err
 				}
-				if len(profiles) == 0 {
-					return fmt.Errorf("no profiles found in %s — run 'verda auth login' first", path)
+				if selected == "" {
+					return nil // User pressed Esc/Ctrl+C.
 				}
-
-				idx, err := f.Prompter().Select(cmd.Context(), "Select profile", profiles, tui.WithShowHints(true))
-				if err != nil {
-					return nil //nolint:nilerr // User pressed Esc/Ctrl+C.
-				}
-				profile = profiles[idx]
+				profile = selected
 			}
 
 			// Validate that the profile exists in the credentials file.
@@ -86,6 +81,27 @@ func NewCmdUse(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 
 	cmd.Flags().StringVar(&credentialsFile, "credentials-file", "", "Path to the shared credentials file")
 	return cmd
+}
+
+// selectProfile lists profiles from the credentials file and prompts the user
+// to pick one. Returns "" when the user cancels the selection.
+func selectProfile(cmd *cobra.Command, f cmdutil.Factory, path string) (string, error) {
+	profiles, err := options.ListProfiles(path)
+	if err != nil {
+		return "", err
+	}
+	if len(profiles) == 0 {
+		return "", fmt.Errorf("no profiles found in %s — run 'verda auth login' first", path)
+	}
+
+	idx, err := f.Prompter().Select(cmd.Context(), "Select profile", profiles, tui.WithShowHints(true))
+	if err != nil {
+		if cmdutil.IsPromptCancel(err) {
+			return "", nil // User pressed Esc/Ctrl+C.
+		}
+		return "", err
+	}
+	return profiles[idx], nil
 }
 
 func writeActiveProfile(path, profile string) error {

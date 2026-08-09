@@ -10,7 +10,7 @@ Save, list, show, edit, and delete reusable resource configuration templates. Te
 | `verda template edit [resource/name]` | Edit specific fields of a template | _(none)_ |
 | `verda template list` | List all saved templates | `--type` |
 | `verda template show [resource/name]` | Display template details | `-o json` |
-| `verda template delete [resource/name]` | Delete a template (with confirmation) | _(none)_ |
+| `verda template delete [resource/name]` | Delete a template (with confirmation) | `--yes` |
 
 Aliases: `verda tmpl`, `verda tmpl ls` (list), `verda tmpl rm` (delete)
 

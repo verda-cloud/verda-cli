@@ -24,7 +24,11 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
+
+	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
+
+const confirmParamHint = "REQUIRED for any action that creates billed or irreversible changes: set true to confirm, after showing the user the exact target and cost. Without it the tool fails with CONFIRMATION_REQUIRED (mirrors --yes in the CLI agent contract)."
 
 func (s *Server) registerVMTools() {
 	s.mcpServer.AddTool(
@@ -45,10 +49,11 @@ func (s *Server) registerVMTools() {
 
 	s.mcpServer.AddTool(
 		mcp.NewTool("create_vm",
-			mcp.WithDescription("Create a new Verda Cloud VM instance. Required: instance_type, image, hostname. Optional: ssh_key_ids (if omitted, all account keys are attached), os_volume_size_gb (default 50), location (auto-picked if omitted). Use vm_availability to check stock and list_images for image options. Always show cost estimate and get user confirmation first."),
+			mcp.WithDescription("Create a new Verda Cloud VM instance (starts billing). REQUIRES confirm: true — estimate costs first (estimate_cost), show the user the type/location/price, and only then call with confirm: true; without it the tool fails with CONFIRMATION_REQUIRED. Required: instance_type, image, hostname, confirm. Optional: ssh_key_ids (if omitted, all account keys are attached), os_volume_size_gb (default 50), location (auto-picked if omitted). Use vm_availability to check stock and list_images for image options."),
 			mcp.WithString("instance_type", mcp.Required(), mcp.Description("Instance type, e.g. 1V100.6V or CPU.4V.16G")),
 			mcp.WithString("image", mcp.Required(), mcp.Description("OS image slug, e.g. ubuntu-24.04-cuda-12.8-open-docker")),
 			mcp.WithString("hostname", mcp.Required(), mcp.Description("Hostname for the new VM")),
+			mcp.WithBoolean("confirm", mcp.Required(), mcp.Description(confirmParamHint)),
 			mcp.WithString("location", mcp.Description("Location code. If omitted, automatically picks a location that has stock for the requested instance type.")),
 			mcp.WithString("description", mcp.Description("Human-readable description")),
 			mcp.WithNumber("os_volume_size_gb", mcp.Description("OS volume size in GiB (default 50)")),
@@ -57,7 +62,7 @@ func (s *Server) registerVMTools() {
 			mcp.WithBoolean("spot", mcp.Description("Request a spot instance")),
 			mcp.WithNumber("storage_size_gb", mcp.Description("Additional storage size in GiB")),
 			mcp.WithString("storage_type", mcp.Description("Storage type: NVMe or HDD (default NVMe)")),
-			mcp.WithBoolean("wait", mcp.Description("Wait for the VM to be ready (default true)")),
+			mcp.WithBoolean("wait", mcp.Description("Wait for the VM to be in 'running' status (default true)")),
 		),
 		s.handleCreateVM,
 	)
@@ -76,10 +81,11 @@ func (s *Server) registerVMTools() {
 
 	s.mcpServer.AddTool(
 		mcp.NewTool("vm_action",
-			mcp.WithDescription("Perform an action on a VM: start, shutdown, force_shutdown, hibernate, or delete. IMPORTANT: Always confirm with the user before destructive actions."),
+			mcp.WithDescription("Perform an action on a VM: start, shutdown, force_shutdown, hibernate, or delete. Destructive actions (shutdown, force_shutdown, hibernate, delete) REQUIRE confirm: true — confirm with the user first; without it the tool fails with CONFIRMATION_REQUIRED. Returns status 'accepted' once the API has accepted the action; pass wait: true to poll until the instance reaches its expected status and report status 'completed' (a failed transition, e.g. the instance entering 'error', is a tool error). delete is not polled and always returns 'accepted'."),
 			mcp.WithString("id", mcp.Required(), mcp.Description("Instance ID")),
 			mcp.WithString("action", mcp.Required(), mcp.Description("Action: start, shutdown, force_shutdown, hibernate, delete")),
-			mcp.WithBoolean("wait", mcp.Description("Wait for the action to complete (default true)")),
+			mcp.WithBoolean("confirm", mcp.Description("Set true to confirm destructive actions (shutdown, force_shutdown, hibernate, delete). Not needed for start.")),
+			mcp.WithBoolean("wait", mcp.Description("Poll until the instance reaches the action's expected status (default false: return 'accepted' immediately)")),
 		),
 		s.handleVMAction,
 	)
@@ -96,18 +102,34 @@ type availableInstance struct {
 	SpotPrice    float64 `json:"spot_price,omitempty"`
 }
 
-//nolint:gocritic // hugeParam: handler signature defined by mcp-go.
+//nolint:gocritic,gocyclo // hugeParam + complexity from strict per-argument type checks.
 func (s *Server) handleVMAvailability(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	a := args(req)
+	location, err := optionalString(a, "location")
+	if err != nil {
+		return toolErrorResult(err), nil
+	}
+	instanceType, err := optionalString(a, "instance_type")
+	if err != nil {
+		return toolErrorResult(err), nil
+	}
+	gpuOnly, err := optionalBool(a, "gpu_only")
+	if err != nil {
+		return toolErrorResult(err), nil
+	}
+	cpuOnly, err := optionalBool(a, "cpu_only")
+	if err != nil {
+		return toolErrorResult(err), nil
+	}
+	spot, err := optionalBool(a, "spot")
+	if err != nil {
+		return toolErrorResult(err), nil
+	}
+
 	client, err := s.verdaClient()
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
-
-	location := optionalString(args(req), "location")
-	instanceType := optionalString(args(req), "instance_type")
-	gpuOnly := optionalBool(args(req), "gpu_only")
-	cpuOnly := optionalBool(args(req), "cpu_only")
-	spot := optionalBool(args(req), "spot")
 
 	// Fetch instance types with pricing.
 	types, err := client.InstanceTypes.Get(ctx, "usd")
@@ -183,12 +205,16 @@ func (s *Server) handleVMAvailability(ctx context.Context, req mcp.CallToolReque
 
 //nolint:gocritic // hugeParam: handler signature defined by mcp-go.
 func (s *Server) handleListVMs(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	status, err := optionalString(args(req), "status")
+	if err != nil {
+		return toolErrorResult(err), nil
+	}
+
 	client, err := s.verdaClient()
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	status := optionalString(args(req), "status")
 	instances, err := client.Instances.Get(ctx, status)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
@@ -198,15 +224,16 @@ func (s *Server) handleListVMs(ctx context.Context, req mcp.CallToolRequest) (*m
 
 //nolint:gocritic // hugeParam: handler signature defined by mcp-go.
 func (s *Server) handleDescribeVM(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	id, err := requiredString(args(req), "id")
+	if err != nil {
+		return toolErrorResult(err), nil
+	}
+
 	client, err := s.verdaClient()
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	id, err := requiredString(args(req), "id")
-	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
-	}
 	inst, err := client.Instances.GetByID(ctx, id)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
@@ -216,40 +243,88 @@ func (s *Server) handleDescribeVM(ctx context.Context, req mcp.CallToolRequest) 
 
 //nolint:gocritic,gocyclo // hugeParam + complexity from auto-resolving location/SSH keys.
 func (s *Server) handleCreateVM(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	a := args(req)
+
+	instanceType, err := requiredString(a, "instance_type")
+	if err != nil {
+		return toolErrorResult(err), nil
+	}
+	image, err := requiredString(a, "image")
+	if err != nil {
+		return toolErrorResult(err), nil
+	}
+	hostname, err := requiredString(a, "hostname")
+	if err != nil {
+		return toolErrorResult(err), nil
+	}
+	location, err := optionalString(a, "location")
+	if err != nil {
+		return toolErrorResult(err), nil
+	}
+	description, err := optionalString(a, "description")
+	if err != nil {
+		return toolErrorResult(err), nil
+	}
+	scriptID, err := optionalString(a, "startup_script_id")
+	if err != nil {
+		return toolErrorResult(err), nil
+	}
+	osVolumeSize, err := optionalInt(a, "os_volume_size_gb")
+	if err != nil {
+		return toolErrorResult(err), nil
+	}
+	storageSize, err := optionalInt(a, "storage_size_gb")
+	if err != nil {
+		return toolErrorResult(err), nil
+	}
+	storageType, err := optionalEnum(a, "storage_type", verda.VolumeTypeNVMe, verda.VolumeTypeHDD)
+	if err != nil {
+		return toolErrorResult(err), nil
+	}
+	spot, err := optionalBool(a, "spot")
+	if err != nil {
+		return toolErrorResult(err), nil
+	}
+	wait, err := optionalBool(a, "wait")
+	if err != nil {
+		return toolErrorResult(err), nil
+	}
+	if _, present := a["wait"]; !present {
+		wait = true
+	}
+	confirm, err := optionalBool(a, "confirm")
+	if err != nil {
+		return toolErrorResult(err), nil
+	}
+	sshKeyInputs, err := optionalStringSlice(a, "ssh_key_ids")
+	if err != nil {
+		return toolErrorResult(err), nil
+	}
+
+	// Billing action: explicit confirmation required, mirroring --yes in the
+	// CLI agent contract. Gated before any API call.
+	if !confirm {
+		return toolErrorResult(confirmationRequiredError("create_vm")), nil
+	}
+
 	client, err := s.verdaClient()
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	instanceType, err := requiredString(args(req), "instance_type")
-	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
-	}
-	image, err := requiredString(args(req), "image")
-	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
-	}
-	hostname, err := requiredString(args(req), "hostname")
-	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
-	}
-
-	location := optionalString(args(req), "location")
 	if location == "" {
 		// Auto-pick a location that has stock for this instance type.
-		loc, err := s.findAvailableLocation(ctx, client, instanceType, optionalBool(args(req), "spot"))
+		loc, err := s.findAvailableLocation(ctx, client, instanceType, spot)
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		location = loc
 	}
-	description := optionalString(args(req), "description")
 	if description == "" {
 		description = hostname
 	}
 
 	// Resolve SSH key names to IDs, or use the most recent key as default.
-	sshKeyInputs := optionalStringSlice(args(req), "ssh_key_ids")
 	sshKeyIDs, err := s.resolveSSHKeyIDs(ctx, client, sshKeyInputs)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
@@ -275,15 +350,14 @@ func (s *Server) handleCreateVM(ctx context.Context, req mcp.CallToolRequest) (*
 		Description:  description,
 		LocationCode: location,
 		SSHKeyIDs:    sshKeyIDs,
-		IsSpot:       optionalBool(args(req), "spot"),
+		IsSpot:       spot,
 	}
 
-	if scriptID := optionalString(args(req), "startup_script_id"); scriptID != "" {
+	if scriptID != "" {
 		createReq.StartupScriptID = &scriptID
 	}
 
-	osVolumeSize := optionalInt(args(req), "os_volume_size_gb")
-	if osVolumeSize <= 0 {
+	if osVolumeSize == 0 {
 		osVolumeSize = 50
 	}
 	createReq.OSVolume = &verda.OSVolumeCreateRequest{
@@ -291,8 +365,7 @@ func (s *Server) handleCreateVM(ctx context.Context, req mcp.CallToolRequest) (*
 		Size: osVolumeSize,
 	}
 
-	if storageSize := optionalInt(args(req), "storage_size_gb"); storageSize > 0 {
-		storageType := optionalString(args(req), "storage_type")
+	if storageSize > 0 {
 		if storageType == "" {
 			storageType = verda.VolumeTypeNVMe
 		}
@@ -315,14 +388,6 @@ func (s *Server) handleCreateVM(ctx context.Context, req mcp.CallToolRequest) (*
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	// Wait for VM to be ready if requested (default true).
-	wait := true
-	if v, ok := args(req)["wait"]; ok {
-		if b, ok := v.(bool); ok {
-			wait = b
-		}
-	}
-
 	if wait {
 		inst, err = s.pollInstance(ctx, inst.ID, verda.StatusRunning, 5*time.Minute)
 		if err != nil {
@@ -342,45 +407,102 @@ func (s *Server) handleCreateVM(ctx context.Context, req mcp.CallToolRequest) (*
 	return jsonResult(result)
 }
 
+// vmAction describes a supported vm_action operation.
+type vmAction struct {
+	expectStatus string // polled target when wait=true; empty = not polled
+	destructive  bool   // requires confirm=true
+	exec         func(ctx context.Context, client *verda.Client, id string) error
+}
+
+// vmActions mirrors the CLI's vm action table (cmd/vm/action.go): ExpectStatus
+// and the destructive set (shutdown/force_shutdown/hibernate carry warnings
+// there; delete is special-cased) must stay in sync.
+var vmActions = map[string]vmAction{
+	verda.ActionStart: {
+		expectStatus: verda.StatusRunning,
+		exec:         func(ctx context.Context, c *verda.Client, id string) error { return c.Instances.Start(ctx, id) },
+	},
+	verda.ActionShutdown: {
+		expectStatus: verda.StatusOffline,
+		destructive:  true,
+		exec:         func(ctx context.Context, c *verda.Client, id string) error { return c.Instances.Shutdown(ctx, id) },
+	},
+	verda.ActionForceShutdown: {
+		expectStatus: verda.StatusOffline,
+		destructive:  true,
+		exec:         func(ctx context.Context, c *verda.Client, id string) error { return c.Instances.ForceShutdown(ctx, id) },
+	},
+	verda.ActionHibernate: {
+		expectStatus: verda.StatusOffline,
+		destructive:  true,
+		exec:         func(ctx context.Context, c *verda.Client, id string) error { return c.Instances.Hibernate(ctx, id) },
+	},
+	verda.ActionDelete: {
+		destructive: true,
+		exec: func(ctx context.Context, c *verda.Client, id string) error {
+			return c.Instances.Delete(ctx, []string{id}, nil, false)
+		},
+	},
+}
+
+// vmActionNames returns the sorted action names for error messages.
+func vmActionNames() string {
+	names := make([]string, 0, len(vmActions))
+	for name := range vmActions {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return strings.Join(names, ", ")
+}
+
 //nolint:gocritic // hugeParam: handler signature defined by mcp-go.
 func (s *Server) handleVMAction(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	a := args(req)
+
+	id, err := requiredString(a, "id")
+	if err != nil {
+		return toolErrorResult(err), nil
+	}
+	actionName, err := requiredString(a, "action")
+	if err != nil {
+		return toolErrorResult(err), nil
+	}
+	action, ok := vmActions[actionName]
+	if !ok {
+		return toolErrorResult(invalidArgError("action", fmt.Sprintf("invalid value %q (valid: %s)", actionName, vmActionNames()))), nil
+	}
+	wait, err := optionalBool(a, "wait")
+	if err != nil {
+		return toolErrorResult(err), nil
+	}
+	confirm, err := optionalBool(a, "confirm")
+	if err != nil {
+		return toolErrorResult(err), nil
+	}
+
+	if action.destructive && !confirm {
+		return toolErrorResult(confirmationRequiredError(actionName)), nil
+	}
+
 	client, err := s.verdaClient()
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	id, err := requiredString(args(req), "id")
-	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
-	}
-	action, err := requiredString(args(req), "action")
-	if err != nil {
+	if err := action.exec(ctx, client, id); err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	switch action {
-	case "start":
-		err = client.Instances.Start(ctx, id)
-	case "shutdown":
-		err = client.Instances.Shutdown(ctx, id)
-	case "force_shutdown":
-		err = client.Instances.ForceShutdown(ctx, id)
-	case "hibernate":
-		err = client.Instances.Hibernate(ctx, id)
-	case "delete":
-		err = client.Instances.Delete(ctx, []string{id}, nil, false)
-	default:
-		return mcp.NewToolResultError(fmt.Sprintf("unknown action %q: use start, shutdown, force_shutdown, hibernate, or delete", action)), nil
-	}
-
-	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
-	}
-
-	result := map[string]string{
-		"id":     id,
-		"action": action,
-		"status": "completed",
+	// Truthful default: the API accepted the action; nothing has completed yet.
+	result := map[string]any{"id": id, "action": actionName, "status": "accepted"}
+	if wait && action.expectStatus != "" {
+		inst, err := cmdutil.PollInstanceStatus(ctx, nil, client, id,
+			cmdutil.WaitOptions{Wait: true, Timeout: 5 * time.Minute}, action.expectStatus)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("action %q was accepted but the wait failed: %v", actionName, err)), nil
+		}
+		result["status"] = "completed"
+		result["instance_status"] = inst.Status
 	}
 	return jsonResult(result)
 }

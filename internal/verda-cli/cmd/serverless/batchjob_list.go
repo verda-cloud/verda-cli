@@ -48,7 +48,7 @@ func runBatchjobList(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IO
 	ctx, cancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
 	defer cancel()
 
-	jobs, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading batch-job deployments...", func() ([]verda.JobDeploymentShortInfo, error) {
+	jobs, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading batch-job deployments...", func(ctx context.Context) ([]verda.JobDeploymentShortInfo, error) {
 		return client.ServerlessJobs.GetJobDeployments(ctx)
 	})
 	if err != nil {

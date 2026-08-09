@@ -29,6 +29,11 @@ func main() {
 	if err := root.Execute(); errors.Is(err, cmd.ErrVersionRequested) {
 		// --version flag was handled; exit cleanly.
 		return
+	} else if cmdutil.IsPromptCancel(err) {
+		// User cancel (Ctrl+C / Esc from a prompt or wizard) — clean exit,
+		// no stderr noise. Real failures propagate below. Checked before the
+		// agent-mode branch so a cancel stays silent there too.
+		return
 	} else if err != nil {
 		// In agent mode, always emit structured JSON errors.
 		if opts.Agent || cmdutil.IsAgentError(err) {

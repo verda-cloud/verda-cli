@@ -17,7 +17,6 @@ package vm
 import (
 	"context"
 	"fmt"
-	"math"
 	"slices"
 	"strings"
 
@@ -114,19 +113,11 @@ func ensurePricingCache(ctx context.Context, getClient clientFunc, cache *apiCac
 	}
 }
 
-// hoursInMonth is 365*24/12 = 730, matching the web frontend.
-const hoursInMonth = 730
-
-// volumeHourlyPrice calculates hourly price: monthlyPerGB * size / 730, rounded up to 4 decimals.
-func volumeHourlyPrice(monthlyPerGB float64, sizeGB int) float64 {
-	return math.Ceil(monthlyPerGB*float64(sizeGB)/hoursInMonth*10000) / 10000
-}
-
 // --- Location loaders ---
 
 // loadAllLocations returns all locations with a skip option (for template mode).
 func loadAllLocations(ctx context.Context, cache *apiCache, getClient clientFunc) ([]wizard.Choice, error) {
-	choices := []wizard.Choice{{Label: "None (decide at deploy time)", Value: ""}}
+	choices := []wizard.Choice{{Label: "None (decide at deploy time)", Value: locationDecideLater}}
 	locMap, err := cache.fetchLocations(ctx, getClient)
 	if err != nil {
 		return nil, err

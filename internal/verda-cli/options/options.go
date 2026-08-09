@@ -172,30 +172,28 @@ func (o *Options) Complete() {
 		a.Profile = resolveDefaultProfile(a.CredentialsFile)
 	}
 
-	// --- 3. Resolve inline credentials (flags / env). ---
-	// Track which fields were set explicitly so they win over profile values.
-	flagClientID := a.ClientID != ""
+	// --- 3. Resolve inline credentials (flag > config file > env). ---
 	if a.ClientID == "" {
 		a.ClientID = viper.GetString("auth.client-id")
 	}
 	if a.ClientID == "" {
 		a.ClientID = os.Getenv("VERDA_CLIENT_ID")
 	}
-	flagClientSecret := a.ClientSecret != ""
 	if a.ClientSecret == "" {
 		a.ClientSecret = viper.GetString("auth.client-secret")
 	}
 	if a.ClientSecret == "" {
 		a.ClientSecret = os.Getenv("VERDA_CLIENT_SECRET")
 	}
-	flagToken := a.BearerToken != ""
 	if a.BearerToken == "" {
 		a.BearerToken = viper.GetString("auth.token")
 	}
 
 	// --- 4. Load from credentials file. ---
-	// When the profile was explicitly chosen, its credentials override any
-	// auto-resolved values — but explicit flags/env always win.
+	// Inline sources (flag, config file, env — incl. VERDA_AUTH_* spellings via
+	// viper's env binding) always win over the stored profile: the profile only
+	// fills fields still empty. Base URL is the exception — an explicitly
+	// selected profile pins its own verda_base_url.
 	missingRequired := a.ClientID == "" || a.ClientSecret == ""
 	if explicitProfile || missingRequired || a.BearerToken == "" {
 		shared, err := loadSharedCredentials(a.CredentialsFile, a.Profile)
@@ -204,13 +202,13 @@ func (o *Options) Complete() {
 			if shared.BaseURL != "" && (explicitProfile || o.Server == defaultBaseURL) {
 				o.Server = shared.BaseURL
 			}
-			if shared.ClientID != "" && (explicitProfile && !flagClientID || a.ClientID == "") {
+			if a.ClientID == "" {
 				a.ClientID = shared.ClientID
 			}
-			if shared.ClientSecret != "" && (explicitProfile && !flagClientSecret || a.ClientSecret == "") {
+			if a.ClientSecret == "" {
 				a.ClientSecret = shared.ClientSecret
 			}
-			if shared.BearerToken != "" && (explicitProfile && !flagToken || a.BearerToken == "") {
+			if a.BearerToken == "" {
 				a.BearerToken = shared.BearerToken
 			}
 		case (explicitProfile || missingRequired) && !os.IsNotExist(err):

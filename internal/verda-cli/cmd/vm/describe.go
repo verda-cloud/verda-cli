@@ -72,7 +72,7 @@ func runDescribe(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStre
 	ctx, cancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
 	defer cancel()
 
-	inst, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading instance...", func() (*verda.Instance, error) {
+	inst, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading instance...", func(ctx context.Context) (*verda.Instance, error) {
 		return client.Instances.GetByID(ctx, instanceID)
 	})
 	if err != nil {

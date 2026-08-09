@@ -83,7 +83,10 @@ func runAdd(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, 
 	if name == "" {
 		name, err = prompter.TextInput(ctx, "Script name")
 		if err != nil {
-			return nil
+			if cmdutil.IsPromptCancel(err) {
+				return nil // User pressed Esc/Ctrl+C.
+			}
+			return err
 		}
 		if name == "" {
 			return errors.New("name is required")
@@ -102,32 +105,12 @@ func runAdd(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, 
 		content = opts.Script
 	default:
 		// Interactive: ask user to load from file or paste content.
-		sourceIdx, err := prompter.Select(ctx, "Script source", []string{
-			"Load from file",
-			"Paste content",
-		}, tui.WithShowHints(true))
+		content, err = promptScriptContent(ctx, prompter)
 		if err != nil {
-			return nil
+			return err
 		}
-
-		switch sourceIdx {
-		case 0: // Load from file
-			path, err := prompter.TextInput(ctx, "File path")
-			if err != nil || strings.TrimSpace(path) == "" {
-				return nil
-			}
-			data, err := os.ReadFile(strings.TrimSpace(path))
-			if err != nil {
-				return fmt.Errorf("reading script file: %w", err)
-			}
-			content = string(data)
-		case 1: // Paste content
-			content, err = prompter.Editor(ctx, "Script content",
-				tui.WithEditorDefault("#!/bin/bash\n\n# Your startup script here\n"),
-				tui.WithFileExt(".sh"))
-			if err != nil {
-				return nil
-			}
+		if content == "" {
+			return nil // User canceled or left input blank.
 		}
 	}
 
@@ -158,4 +141,55 @@ func runAdd(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, 
 
 	_, _ = fmt.Fprintf(ioStreams.Out, "Added startup script: %s (%s)\n", script.Name, script.ID)
 	return nil
+}
+
+// promptScriptContent asks the user for the script source and collects the
+// content. Returns ("", nil) when the user cancels.
+func promptScriptContent(ctx context.Context, prompter tui.Prompter) (string, error) {
+	sourceIdx, err := prompter.Select(ctx, "Script source", []string{
+		"Load from file",
+		"Paste content",
+	}, tui.WithShowHints(true))
+	if err != nil {
+		if cmdutil.IsPromptCancel(err) {
+			return "", nil // User pressed Esc/Ctrl+C.
+		}
+		return "", err
+	}
+
+	if sourceIdx == 0 { // Load from file
+		return promptScriptFromFile(ctx, prompter)
+	}
+
+	// Paste content
+	content, err := prompter.Editor(ctx, "Script content",
+		tui.WithEditorDefault("#!/bin/bash\n\n# Your startup script here\n"),
+		tui.WithFileExt(".sh"))
+	if err != nil {
+		if cmdutil.IsPromptCancel(err) {
+			return "", nil // User pressed Esc/Ctrl+C.
+		}
+		return "", err
+	}
+	return content, nil
+}
+
+// promptScriptFromFile asks for a file path and reads the script from it.
+// Returns ("", nil) when the user cancels or leaves the path blank.
+func promptScriptFromFile(ctx context.Context, prompter tui.Prompter) (string, error) {
+	path, err := prompter.TextInput(ctx, "File path")
+	if err != nil {
+		if cmdutil.IsPromptCancel(err) {
+			return "", nil // User pressed Esc/Ctrl+C.
+		}
+		return "", err
+	}
+	if strings.TrimSpace(path) == "" {
+		return "", nil
+	}
+	data, err := os.ReadFile(strings.TrimSpace(path))
+	if err != nil {
+		return "", fmt.Errorf("reading script file: %w", err)
+	}
+	return string(data), nil
 }

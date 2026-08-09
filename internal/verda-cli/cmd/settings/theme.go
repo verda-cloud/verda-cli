@@ -15,6 +15,7 @@
 package settings
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 
@@ -64,6 +65,13 @@ func selectThemeWizard(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.
 
 	names := bubbletea.ThemeNames()
 	slices.Sort(names)
+
+	// The wizard engine drives its own terminal UI (it bypasses f.Prompter),
+	// so the factory's agentPrompter cannot block it — gate here instead.
+	if f.AgentMode() {
+		return cmdutil.NewPromptBlockedError("select", "Select theme", names)
+	}
+
 	choices := make([]wizard.Choice, len(names))
 	for i, name := range names {
 		t := bubbletea.Themes[name]
@@ -95,7 +103,10 @@ func selectThemeWizard(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.
 
 	engine := wizard.NewEngine(f.Prompter(), f.Status(), wizard.WithOutput(ioStreams.ErrOut))
 	if err := engine.Run(cmd.Context(), flow); err != nil {
-		return nil //nolint:nilerr // User pressed Esc/Ctrl+C.
+		if errors.Is(err, wizard.ErrCancelled) {
+			return nil // User pressed Esc/Ctrl+C — clean exit.
+		}
+		return err
 	}
 
 	if selected == "" || selected == current {

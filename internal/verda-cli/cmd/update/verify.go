@@ -49,8 +49,8 @@ func checksumURL(ver string) string {
 }
 
 // fetchChecksums downloads the checksum file from the given URL.
-func fetchChecksums(client *http.Client, url string) (string, error) {
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, url, http.NoBody)
+func fetchChecksums(ctx context.Context, client *http.Client, url string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 	if err != nil {
 		return "", fmt.Errorf("creating request: %w", err)
 	}
@@ -128,9 +128,41 @@ func findMatchingChecksum(body, goos, goarch string) (string, error) {
 	return "", fmt.Errorf("no checksum entry found for %s/%s", goos, goarch)
 }
 
+// findArchiveChecksum finds the expected hash for an exact archive artifact
+// name (e.g. "verda_1.0.0_linux_amd64.tar.gz") in a GoReleaser archive sums
+// file (verda_<VER>_SHA256SUMS). Unlike findMatchingChecksum (dist-dir keys
+// with variant suffixes), archive keys match exactly.
+func findArchiveChecksum(body, artifactName string) (string, error) {
+	for _, line := range strings.Split(body, "\n") {
+		hexStr, key, ok := parseChecksumLine(line)
+		if !ok {
+			continue
+		}
+		if key == artifactName {
+			return hexStr, nil
+		}
+	}
+	return "", fmt.Errorf("no checksum entry found for %q", artifactName)
+}
+
+// verifyArchiveChecksum checks data against the archive sums entry for
+// artifactName.
+func verifyArchiveChecksum(data []byte, sumsBody, artifactName string) error {
+	expected, err := findArchiveChecksum(sumsBody, artifactName)
+	if err != nil {
+		return err
+	}
+	sum := sha256.Sum256(data)
+	actual := hex.EncodeToString(sum[:])
+	if actual != expected {
+		return fmt.Errorf("checksum mismatch for %q: expected %s, got %s", artifactName, expected, actual)
+	}
+	return nil
+}
+
 // verifyBinary fetches the checksums and compares against the binary at binPath.
-func verifyBinary(client *http.Client, binPath, url, goos, goarch string) (*VerifyResult, error) {
-	body, err := fetchChecksums(client, url)
+func verifyBinary(ctx context.Context, client *http.Client, binPath, url, goos, goarch string) (*VerifyResult, error) {
+	body, err := fetchChecksums(ctx, client, url)
 	if err != nil {
 		return nil, err
 	}
@@ -154,8 +186,10 @@ func verifyBinary(client *http.Client, binPath, url, goos, goarch string) (*Veri
 }
 
 // runVerify is the top-level verify logic, writing output to out and warnings
-// to errOut. It uses the provided HTTP client for fetching checksums.
-func runVerify(out, errOut io.Writer, outputFormat string, client *http.Client, ver, goos, goarch string) error {
+// to errOut. It uses the provided HTTP client for fetching checksums. The ctx
+// carries the caller's deadline (Ctrl+C / --timeout); a bare background
+// context here could not be aborted (review: update --verify fetch).
+func runVerify(ctx context.Context, out, errOut io.Writer, outputFormat string, client *http.Client, ver, goos, goarch string) error {
 	bare := strings.TrimPrefix(ver, "v")
 	if bare == "0.0.0-dev" || bare == "" {
 		_, _ = fmt.Fprintf(errOut, "Warning: cannot verify a development build (%s)\n", ver)
@@ -172,7 +206,7 @@ func runVerify(out, errOut io.Writer, outputFormat string, client *http.Client, 
 	}
 
 	url := checksumURL(ver)
-	result, err := verifyBinary(client, binPath, url, goos, goarch)
+	result, err := verifyBinary(ctx, client, binPath, url, goos, goarch)
 	if err != nil {
 		return err
 	}

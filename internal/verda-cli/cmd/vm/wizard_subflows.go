@@ -46,8 +46,14 @@ func buildSSHKeyChoices(keys []verda.SSHKey) []wizard.Choice {
 
 func promptAddSSHKey(ctx context.Context, prompter tui.Prompter, client *verda.Client) (*verda.SSHKey, error) {
 	name, err := prompter.TextInput(ctx, "SSH key name")
-	if err != nil || strings.TrimSpace(name) == "" {
-		return nil, nil //nolint:nilerr // User canceled or left input blank.
+	if err != nil {
+		if cmdutil.IsPromptCancel(err) {
+			return nil, nil // User canceled.
+		}
+		return nil, err
+	}
+	if strings.TrimSpace(name) == "" {
+		return nil, nil // Blank input — back to menu.
 	}
 
 	// Ask for source: load from file or paste.
@@ -56,15 +62,24 @@ func promptAddSSHKey(ctx context.Context, prompter tui.Prompter, client *verda.C
 		"Paste content",
 	}, tui.WithShowHints(true))
 	if err != nil {
-		return nil, nil //nolint:nilerr // User canceled.
+		if cmdutil.IsPromptCancel(err) {
+			return nil, nil // User canceled.
+		}
+		return nil, err
 	}
 
 	var pubKey string
 	switch sourceIdx {
 	case 0: // Load from file
 		filePath, err := promptSSHKeyFilePath(ctx, prompter)
-		if err != nil || filePath == "" {
-			return nil, nil //nolint:nilerr // User canceled.
+		if err != nil {
+			if cmdutil.IsPromptCancel(err) {
+				return nil, nil // User canceled.
+			}
+			return nil, err
+		}
+		if filePath == "" {
+			return nil, nil // Blank input — back to menu.
 		}
 		data, err := os.ReadFile(filePath) //nolint:gosec // User-provided path from interactive prompt, validated by validateFilePath.
 		if err != nil {
@@ -74,8 +89,14 @@ func promptAddSSHKey(ctx context.Context, prompter tui.Prompter, client *verda.C
 		pubKey = string(data)
 	case 1: // Paste content
 		pubKey, err = prompter.TextInput(ctx, "Public key (paste)")
-		if err != nil || strings.TrimSpace(pubKey) == "" {
-			return nil, nil //nolint:nilerr // User canceled or left input blank.
+		if err != nil {
+			if cmdutil.IsPromptCancel(err) {
+				return nil, nil // User canceled.
+			}
+			return nil, err
+		}
+		if strings.TrimSpace(pubKey) == "" {
+			return nil, nil // Blank input — back to menu.
 		}
 	}
 
@@ -200,8 +221,14 @@ func buildStartupScriptChoices(scripts []verda.StartupScript) []wizard.Choice {
 
 func promptAddStartupScript(ctx context.Context, prompter tui.Prompter, client *verda.Client) (*verda.StartupScript, error) {
 	name, err := prompter.TextInput(ctx, "Script name")
-	if err != nil || strings.TrimSpace(name) == "" {
-		return nil, nil //nolint:nilerr // User canceled or left input blank.
+	if err != nil {
+		if cmdutil.IsPromptCancel(err) {
+			return nil, nil // User canceled.
+		}
+		return nil, err
+	}
+	if strings.TrimSpace(name) == "" {
+		return nil, nil // Blank input — back to menu.
 	}
 
 	// Ask for source: paste or load from file.
@@ -210,15 +237,24 @@ func promptAddStartupScript(ctx context.Context, prompter tui.Prompter, client *
 		"Paste content",
 	}, tui.WithShowHints(true))
 	if err != nil {
-		return nil, nil //nolint:nilerr // User canceled or left input blank.
+		if cmdutil.IsPromptCancel(err) {
+			return nil, nil // User canceled.
+		}
+		return nil, err
 	}
 
 	var content string
 	switch sourceIdx {
 	case 0: // Load from file
 		path, err := prompter.TextInput(ctx, "File path")
-		if err != nil || strings.TrimSpace(path) == "" {
-			return nil, nil //nolint:nilerr // User canceled or left input blank.
+		if err != nil {
+			if cmdutil.IsPromptCancel(err) {
+				return nil, nil // User canceled.
+			}
+			return nil, err
+		}
+		if strings.TrimSpace(path) == "" {
+			return nil, nil // Blank input — back to menu.
 		}
 		data, err := os.ReadFile(strings.TrimSpace(path))
 		if err != nil {
@@ -231,7 +267,10 @@ func promptAddStartupScript(ctx context.Context, prompter tui.Prompter, client *
 			tui.WithEditorDefault("#!/bin/bash\n\n# Your startup script here\n"),
 			tui.WithFileExt(".sh"))
 		if err != nil {
-			return nil, nil //nolint:nilerr // User canceled the editor; return to menu.
+			if cmdutil.IsPromptCancel(err) {
+				return nil, nil // User canceled the editor; return to menu.
+			}
+			return nil, err
 		}
 	}
 
@@ -300,14 +339,26 @@ func promptAddVolume(ctx context.Context, prompter tui.Prompter, store *wizard.S
 		defaultName = hostname + "-storage"
 	}
 	name, err := prompter.TextInput(ctx, "Volume name", tui.WithDefault(defaultName))
-	if err != nil || strings.TrimSpace(name) == "" {
-		return nil, nil //nolint:nilerr // User pressed Esc/Ctrl+C or left input blank.
+	if err != nil {
+		if cmdutil.IsPromptCancel(err) {
+			return nil, nil // User pressed Esc/Ctrl+C.
+		}
+		return nil, err
+	}
+	if strings.TrimSpace(name) == "" {
+		return nil, nil // Blank input — back to menu.
 	}
 
 	// Size
 	sizeStr, err := prompter.TextInput(ctx, "Size in GiB", tui.WithDefault("100"))
-	if err != nil || strings.TrimSpace(sizeStr) == "" {
-		return nil, nil //nolint:nilerr // User pressed Esc/Ctrl+C or left input blank.
+	if err != nil {
+		if cmdutil.IsPromptCancel(err) {
+			return nil, nil // User pressed Esc/Ctrl+C.
+		}
+		return nil, err
+	}
+	if strings.TrimSpace(sizeStr) == "" {
+		return nil, nil // Blank input — back to menu.
 	}
 	size, parseErr := strconv.Atoi(strings.TrimSpace(sizeStr))
 	if parseErr != nil || size <= 0 {
@@ -323,7 +374,7 @@ func promptAddVolume(ctx context.Context, prompter tui.Prompter, store *wizard.S
 }
 
 func promptAttachExisting(ctx context.Context, prompter tui.Prompter, status tui.Status, client *verda.Client) (string, error) {
-	volumes, err := cmdutil.WithSpinner(ctx, status, "Loading volumes...", func() ([]verda.Volume, error) {
+	volumes, err := cmdutil.WithSpinner(ctx, status, "Loading volumes...", func(ctx context.Context) ([]verda.Volume, error) {
 		return client.Volumes.ListVolumes(ctx)
 	})
 	if err != nil {
@@ -351,7 +402,10 @@ func promptAttachExisting(ctx context.Context, prompter tui.Prompter, status tui
 
 	idx, err := prompter.Select(ctx, "Select volume to attach", labels, tui.WithShowHints(true))
 	if err != nil {
-		return "", nil //nolint:nilerr // User canceled or left input blank.
+		if cmdutil.IsPromptCancel(err) {
+			return "", nil // User canceled.
+		}
+		return "", err
 	}
 	if idx == len(detached) { // "← Back"
 		return "", nil

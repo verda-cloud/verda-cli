@@ -75,6 +75,37 @@ func TestDeleteAgentModeRequiresYes(t *testing.T) {
 	}
 }
 
+// Single-volume delete must also require --yes in agent mode — no silent
+// confirmation bypass (the gate must fire without any API client).
+func TestDeleteAgentModeSingleRequiresYes(t *testing.T) {
+	t.Parallel()
+
+	for _, args := range [][]string{
+		{"volume", "delete", "--id", "vol-123"},
+		{"volume", "delete", "vol-123"},
+	} {
+		var buf bytes.Buffer
+		ioStreams := cmdutil.IOStreams{Out: &buf, ErrOut: &buf}
+		f := &cmdutil.TestFactory{AgentModeOverride: true}
+
+		root := &cobra.Command{Use: "verda", SilenceUsage: true, SilenceErrors: true}
+		root.AddCommand(NewCmdVolume(f, ioStreams))
+		root.SetArgs(args)
+
+		err := root.Execute()
+		if err == nil {
+			t.Fatalf("%v: expected error: agent mode delete requires --yes", args)
+		}
+		ae := cmdutil.ClassifyError(err)
+		if ae.Code != "CONFIRMATION_REQUIRED" {
+			t.Fatalf("%v: code = %q, want CONFIRMATION_REQUIRED (err: %v)", args, ae.Code, err)
+		}
+		if !strings.Contains(err.Error(), "requires --yes in agent mode") {
+			t.Fatalf("%v: unexpected error: %v", args, err)
+		}
+	}
+}
+
 func TestDeleteStatusRequiresAll(t *testing.T) {
 	t.Parallel()
 
@@ -140,5 +171,42 @@ func TestDeleteHasRmAlias(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("expected 'rm' alias for delete command")
+	}
+}
+
+// The review sites: usage/flag-misuse errors must classify as VALIDATION_ERROR
+// (exit 2) in agent mode — distinct from server-side failures.
+func TestDeleteUsageErrorsClassifyAsValidation(t *testing.T) {
+	t.Parallel()
+
+	newRoot := func(args ...string) *cobra.Command {
+		var buf bytes.Buffer
+		ioStreams := cmdutil.IOStreams{Out: &buf, ErrOut: &buf}
+		f := &cmdutil.TestFactory{AgentModeOverride: true, OutputFormatOverride: "json"}
+		root := &cobra.Command{Use: "verda", SilenceUsage: true, SilenceErrors: true}
+		root.AddCommand(NewCmdVolume(f, ioStreams))
+		root.SetArgs(args)
+		return root
+	}
+
+	cases := map[string][]string{
+		"status without all":   {"volume", "delete", "--status", "detached"},
+		"all combined with id": {"volume", "delete", "--all", "--id", "vol-1", "--yes"},
+	}
+	for name, args := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			err := newRoot(args...).Execute()
+			if err == nil {
+				t.Fatal("expected a usage error")
+			}
+			ae := cmdutil.ClassifyError(err)
+			if ae.Code != "VALIDATION_ERROR" {
+				t.Fatalf("code = %q, want VALIDATION_ERROR (err: %v)", ae.Code, err)
+			}
+			if ae.ExitCode != cmdutil.ExitBadArgs {
+				t.Fatalf("exit code = %d, want %d", ae.ExitCode, cmdutil.ExitBadArgs)
+			}
+		})
 	}
 }

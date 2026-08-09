@@ -18,9 +18,12 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
+
+	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
 
 func (s *Server) registerCostTools() {
@@ -39,14 +42,13 @@ func (s *Server) registerCostTools() {
 			mcp.WithNumber("storage_gb", mcp.Description("Additional storage size in GiB")),
 			mcp.WithString("storage_type", mcp.Description("Storage type: NVMe or HDD (default NVMe)")),
 			mcp.WithBoolean("spot", mcp.Description("Use spot pricing")),
-			mcp.WithString("location", mcp.Description("Location code for pricing")),
 		),
 		s.handleEstimateCost,
 	)
 
 	s.mcpServer.AddTool(
 		mcp.NewTool("get_running_costs",
-			mcp.WithDescription("Show costs of currently running instances"),
+			mcp.WithDescription("Show costs of currently running instances, including attached volumes"),
 		),
 		s.handleGetRunningCosts,
 	)
@@ -68,22 +70,35 @@ func (s *Server) handleGetBalance(ctx context.Context, _ mcp.CallToolRequest) (*
 
 //nolint:gocritic // hugeParam: handler signature defined by mcp-go.
 func (s *Server) handleEstimateCost(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	a := args(req)
+
+	instanceType, err := requiredString(a, "instance_type")
+	if err != nil {
+		return toolErrorResult(err), nil
+	}
+	spot, err := optionalBool(a, "spot")
+	if err != nil {
+		return toolErrorResult(err), nil
+	}
+	osVolumeGB, err := optionalInt(a, "os_volume_gb")
+	if err != nil {
+		return toolErrorResult(err), nil
+	}
+	storageGB, err := optionalInt(a, "storage_gb")
+	if err != nil {
+		return toolErrorResult(err), nil
+	}
+	storageType, err := optionalString(a, "storage_type")
+	if err != nil {
+		return toolErrorResult(err), nil
+	}
+	if storageType == "" {
+		storageType = verda.VolumeTypeNVMe
+	}
+
 	client, err := s.verdaClient()
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
-	}
-
-	instanceType, err := requiredString(args(req), "instance_type")
-	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
-	}
-
-	spot := optionalBool(args(req), "spot")
-	osVolumeGB := optionalInt(args(req), "os_volume_gb")
-	storageGB := optionalInt(args(req), "storage_gb")
-	storageType := optionalString(args(req), "storage_type")
-	if storageType == "" {
-		storageType = "NVMe"
 	}
 
 	// Get instance type pricing by fetching all types and filtering.
@@ -107,22 +122,12 @@ func (s *Server) handleEstimateCost(ctx context.Context, req mcp.CallToolRequest
 		instanceHourly = info.SpotPrice.Float64()
 	}
 
-	// Get volume pricing.
+	// Get volume pricing (shared cmdutil helper: same formula as the CLI).
 	var osVolumeHourly, storageHourly float64
 	if osVolumeGB > 0 || storageGB > 0 {
-		volTypes, err := client.VolumeTypes.GetAllVolumeTypes(ctx)
+		osVolumeHourly, storageHourly, err = volumeHourlyRates(ctx, client, osVolumeGB, storageGB, storageType)
 		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
-		}
-		for _, vt := range volTypes {
-			monthlyPerGB := vt.Price.PricePerMonthPerGB
-			hourlyPerGB := math.Ceil(monthlyPerGB/30/24*10000) / 10000
-			if vt.Type == "NVMe" && osVolumeGB > 0 {
-				osVolumeHourly = hourlyPerGB * float64(osVolumeGB)
-			}
-			if vt.Type == storageType && storageGB > 0 {
-				storageHourly = hourlyPerGB * float64(storageGB)
-			}
+			return toolErrorResult(err), nil
 		}
 	}
 
@@ -133,7 +138,7 @@ func (s *Server) handleEstimateCost(ctx context.Context, req mcp.CallToolRequest
 		"estimate": map[string]any{
 			"hourly":  round4(totalHourly),
 			"daily":   round4(totalHourly * 24),
-			"monthly": round4(totalHourly * 24 * 30),
+			"monthly": round4(totalHourly * cmdutil.HoursInMonth),
 			"breakdown": map[string]any{
 				"instance":  round4(instanceHourly),
 				"os_volume": round4(osVolumeHourly),
@@ -142,6 +147,38 @@ func (s *Server) handleEstimateCost(ctx context.Context, req mcp.CallToolRequest
 		},
 	}
 	return jsonResult(result)
+}
+
+// volumeHourlyRates prices the OS volume (always NVMe) and extra storage from
+// the API volume-type catalog. A type missing from the catalog fails loudly —
+// pricing it $0 would lie about cost (mirrors the CLI's volumeCostItem).
+func volumeHourlyRates(ctx context.Context, client *verda.Client, osVolumeGB, storageGB int, storageType string) (osHourly, storageHourly float64, err error) {
+	volTypes, err := client.VolumeTypes.GetAllVolumeTypes(ctx)
+	if err != nil {
+		return 0, 0, err
+	}
+	vtMap := make(map[string]verda.VolumeType, len(volTypes))
+	for _, vt := range volTypes {
+		vtMap[vt.Type] = vt
+	}
+
+	if osVolumeGB > 0 {
+		vt, ok := vtMap[verda.VolumeTypeNVMe]
+		if !ok {
+			return 0, 0, fmt.Errorf("volume type catalog has no %q entry; cannot price the OS volume (valid types: %s)",
+				verda.VolumeTypeNVMe, strings.Join(cmdutil.ValidVolumeTypeNames(vtMap), ", "))
+		}
+		osHourly = cmdutil.VolumeHourlyPrice(vt.Price.PricePerMonthPerGB, osVolumeGB)
+	}
+	if storageGB > 0 {
+		vt, ok := vtMap[storageType]
+		if !ok {
+			return 0, 0, invalidArgError("storage_type",
+				fmt.Sprintf("unknown volume type %q (valid types: %s)", storageType, strings.Join(cmdutil.ValidVolumeTypeNames(vtMap), ", ")))
+		}
+		storageHourly = cmdutil.VolumeHourlyPrice(vt.Price.PricePerMonthPerGB, storageGB)
+	}
+	return osHourly, storageHourly, nil
 }
 
 //nolint:gocritic // hugeParam: handler signature defined by mcp-go.
@@ -156,23 +193,55 @@ func (s *Server) handleGetRunningCosts(ctx context.Context, _ mcp.CallToolReques
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
+	// Volume pricing for attached-volume costs (mirrors `verda cost running`).
+	volTypes, err := client.VolumeTypes.GetAllVolumeTypes(ctx)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	vtMap := make(map[string]verda.VolumeType, len(volTypes))
+	for _, vt := range volTypes {
+		vtMap[vt.Type] = vt
+	}
+
 	type instanceCost struct {
 		ID           string  `json:"id"`
 		Hostname     string  `json:"hostname"`
 		InstanceType string  `json:"instance_type"`
 		HourlyCost   float64 `json:"hourly_cost"`
+		VolumeCount  int     `json:"volume_count"`
+		VolumeGB     int     `json:"volume_gb"`
+		VolumeHourly float64 `json:"volume_hourly"` // attached-volume share of hourly_cost
 	}
 
 	var totalHourly float64
 	costs := make([]instanceCost, 0, len(instances))
 	for i := range instances {
-		hourly := instances[i].PricePerHour.Float64()
+		instanceHourly := instances[i].PricePerHour.Float64()
+
+		var volCount, volGB int
+		var volHourly float64
+		for _, volID := range cmdutil.UniqueVolumeIDs(&instances[i]) {
+			vol, err := client.Volumes.GetVolume(ctx, volID)
+			if err != nil {
+				continue
+			}
+			volCount++
+			volGB += vol.Size
+			if vt, ok := vtMap[vol.Type]; ok {
+				volHourly += cmdutil.VolumeHourlyPrice(vt.Price.PricePerMonthPerGB, vol.Size)
+			}
+		}
+
+		hourly := instanceHourly + volHourly
 		totalHourly += hourly
 		costs = append(costs, instanceCost{
 			ID:           instances[i].ID,
 			Hostname:     instances[i].Hostname,
 			InstanceType: instances[i].InstanceType,
 			HourlyCost:   hourly,
+			VolumeCount:  volCount,
+			VolumeGB:     volGB,
+			VolumeHourly: round4(volHourly),
 		})
 	}
 

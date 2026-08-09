@@ -63,6 +63,8 @@ All commands: `--agent -o json` (except `verda ssh` and `verda auth show`).
 
 **Optional flags:** `--location` (default FIN-01), `--ssh-key` (repeatable, takes ID), `--is-spot`, `--os-volume-size` (GiB), `--storage-size` (GiB), `--storage-type` (NVMe/HDD), `--startup-script` (ID), `--contract` (PAY_AS_YOU_GO/SPOT/LONG_TERM), `--from` (template name), `--wait`, `--wait-timeout` (use 2m)
 
+**Agent-mode wait semantics:** in `--agent` mode, `vm create` and `vm action` return immediately after the API accepts the request (`status: "accepted"`). Add `--wait` to poll until the target state; the result then reports `completed`, or an error if the transition fails.
+
 ## VM Lifecycle
 
 | Command | Key Flags |
@@ -84,7 +86,7 @@ Note: `shutdown` alias is `stop`. `delete` alias is `rm`.
 | Command | Key Flags | Output Fields |
 |---------|-----------|---------------|
 | `verda cost balance -o json` | — | `amount`, `currency` |
-| `verda cost estimate -o json` | `--type` (required), `--os-volume`, `--storage`, `--storage-type`, `--spot`, `--location` | `total.hourly`, `instance.hourly`, `os_volume.hourly` |
+| `verda cost estimate -o json` | `--type` (required), `--os-volume`, `--storage`, `--storage-type`, `--spot` | `total.hourly`, `instance.hourly`, `os_volume.hourly` |
 | `verda cost running -o json` | — | `instances[]` (each: `hostname`, `hourly`, `daily`, `monthly`), `total.hourly` |
 
 ## Status (Low Priority)
@@ -107,10 +109,10 @@ Tell user to run in their terminal:
 |---------|-----------|
 | `verda ssh-key list -o json` | — |
 | `verda ssh-key add -o json` | `--name`, `--public-key` |
-| `verda ssh-key delete <id> -o json` | confirm first |
+| `verda ssh-key delete <id> --yes -o json` | `--yes` **required** in agent mode |
 | `verda startup-script list -o json` | — |
 | `verda startup-script add -o json` | `--name`, `--file` or `--script` |
-| `verda startup-script delete <id> -o json` | confirm first |
+| `verda startup-script delete <id> --yes -o json` | `--yes` **required** in agent mode |
 
 ## Templates (alias: `tmpl`)
 
@@ -135,8 +137,9 @@ Hostname patterns: `{random}` → random words, `{location}` → location code
 |---------|-----------|
 | `verda volume list -o json` | `--status` (attached, detached, ordered) |
 | `verda volume describe <id> -o json` | — |
-| `verda volume create -o json` | `--name`, `--size`, `--type` (NVMe/HDD), `--location` |
+| `verda volume create -o json` | `--name`, `--size`, `--type` (NVMe/HDD), `--location`, **`--yes`** (required in agent mode — volume creation is billable) |
 | `verda volume action <id>` | Actions: detach, rename, resize, clone, delete |
+| `verda volume delete --id <id> --yes -o json` | `--yes` **required** in agent mode |
 | `verda volume trash -o json` | Recoverable within 96 hours |
 
 ## Object Storage (S3)

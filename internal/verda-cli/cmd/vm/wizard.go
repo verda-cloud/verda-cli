@@ -27,6 +27,7 @@ import (
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
 
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
+	"github.com/verda-cloud/verda-cli/internal/verda-cli/template"
 )
 
 const (
@@ -42,6 +43,14 @@ const (
 	unitLabelVCPU = "vCPU"
 
 	billingTypeOnDemand = "on-demand"
+
+	// locationDecideLater is the template-mode location choice for
+	// "None (decide at deploy time)". In-memory only: the step Setter
+	// translates it to an unset location, so a saved template stays
+	// locationless and the deploy flow prompts for it. An empty Value would
+	// instead trip the engine's Default substitution for optional steps and
+	// silently persist the FIN-01 default (review H5).
+	locationDecideLater = "__decide_later__"
 )
 
 // clientFunc lazily resolves a Verda API client. This allows the wizard
@@ -92,7 +101,7 @@ func RunTemplateWizard(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil
 
 func runTemplateWizardWithOpts(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *createOptions) (*TemplateResult, error) {
 	flow := buildCreateFlow(ctx, f.VerdaClient, opts, WizardModeTemplate)
-	engine := wizard.NewEngine(f.Prompter(), f.Status(), wizard.WithOutput(ioStreams.ErrOut), wizard.WithExitConfirmation())
+	engine := wizard.NewEngine(f.Prompter(), f.Status(), wizard.WithOutput(ioStreams.ErrOut))
 	if err := engine.Run(ctx, flow); err != nil {
 		return nil, err
 	}
@@ -231,24 +240,30 @@ func stepContract(getClient clientFunc, opts *createOptions) wizard.Step {
 			if err != nil {
 				return choices, nil //nolint:nilerr // Non-fatal: just offer pay-as-you-go.
 			}
-			periods, err := cmdutil.WithSpinner(ctx, status, "Loading contract options...", func() ([]verda.LongTermPeriod, error) {
+			periods, err := cmdutil.WithSpinner(ctx, status, "Loading contract options...", func(ctx context.Context) ([]verda.LongTermPeriod, error) {
 				return client.LongTerm.GetInstancePeriods(ctx)
 			})
 			if err != nil {
 				return choices, nil //nolint:nilerr // Non-fatal: just offer pay-as-you-go.
 			}
 			for _, p := range periods {
-				if p.IsEnabled {
-					desc := ""
-					if p.DiscountPercentage > 0 {
-						desc = fmt.Sprintf("%.0f%% discount", p.DiscountPercentage)
-					}
-					choices = append(choices, wizard.Choice{
-						Label:       p.Name,
-						Value:       p.Code,
-						Description: desc,
-					})
+				if !p.IsEnabled {
+					continue
 				}
+				// POST /v1/instances takes no long-term durations, so drop
+				// period codes normalizeContract would reject at deploy time.
+				if _, err := normalizeContract(p.Code); err != nil {
+					continue
+				}
+				desc := ""
+				if p.DiscountPercentage > 0 {
+					desc = fmt.Sprintf("%.0f%% discount", p.DiscountPercentage)
+				}
+				choices = append(choices, wizard.Choice{
+					Label:       p.Name,
+					Value:       p.Code,
+					Description: desc,
+				})
 			}
 			return choices, nil
 		},
@@ -300,7 +315,7 @@ func stepInstanceType(getClient clientFunc, cache *apiCache, opts *createOptions
 			kind := c["kind"].(string)
 			isSpot := c["billing-type"] == billingTypeSpot
 
-			types, err := cmdutil.WithSpinner(ctx, status, "Loading instance types...", func() ([]verda.InstanceTypeInfo, error) {
+			types, err := cmdutil.WithSpinner(ctx, status, "Loading instance types...", func(ctx context.Context) ([]verda.InstanceTypeInfo, error) {
 				return client.InstanceTypes.Get(ctx, "usd")
 			})
 			if err != nil {
@@ -377,8 +392,20 @@ func stepLocation(getClient clientFunc, cache *apiCache, opts *createOptions, mo
 			return loadAvailableLocations(ctx, cache, getClient, isSpot, instType)
 		},
 		Setter: func(v any) {
-			if s := v.(string); s != "" {
-				opts.LocationCode = s
+			s := v.(string)
+			if s == locationDecideLater {
+				opts.LocationCode = "" // decide at deploy time; keep unset
+				return
+			}
+			if s == "" {
+				return
+			}
+			opts.LocationCode = s
+			// A template hostname pattern was expanded at apply time against
+			// the pre-wizard location; re-expand {location} against the
+			// effective one picked here so the confirm summary stays truthful.
+			if strings.Contains(opts.hostnamePattern, "{location}") && opts.Hostname != "" {
+				opts.Hostname = template.ExpandHostnamePattern(opts.hostnamePattern, s)
 			}
 		},
 		Resetter: func() { opts.LocationCode = verda.LocationFIN01 },
@@ -407,7 +434,7 @@ func stepImage(getClient clientFunc, opts *createOptions) wizard.Step {
 			}
 			// Filter images by instance type when available.
 			instType, _ := store.Collected()["instance-type"].(string)
-			images, err := cmdutil.WithSpinner(ctx, status, "Loading OS images...", func() ([]verda.Image, error) {
+			images, err := cmdutil.WithSpinner(ctx, status, "Loading OS images...", func(ctx context.Context) ([]verda.Image, error) {
 				if instType != "" {
 					return client.Images.GetImagesByInstanceType(ctx, instType)
 				}
@@ -595,7 +622,7 @@ func stepSSHKeys(getClient clientFunc, opts *createOptions) wizard.Step {
 			if err != nil {
 				return nil, err
 			}
-			keys, err := cmdutil.WithSpinner(ctx, status, "Loading SSH keys...", func() ([]verda.SSHKey, error) {
+			keys, err := cmdutil.WithSpinner(ctx, status, "Loading SSH keys...", func(ctx context.Context) ([]verda.SSHKey, error) {
 				return client.SSHKeys.GetAllSSHKeys(ctx)
 			})
 			if err != nil {
@@ -677,7 +704,7 @@ func stepStartupScript(getClient clientFunc, opts *createOptions) wizard.Step {
 			if err != nil {
 				return nil, err
 			}
-			scripts, err := cmdutil.WithSpinner(ctx, status, "Loading startup scripts...", func() ([]verda.StartupScript, error) {
+			scripts, err := cmdutil.WithSpinner(ctx, status, "Loading startup scripts...", func(ctx context.Context) ([]verda.StartupScript, error) {
 				return client.StartupScripts.GetAllStartupScripts(ctx)
 			})
 			if err != nil {

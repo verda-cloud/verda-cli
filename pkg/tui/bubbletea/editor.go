@@ -26,13 +26,14 @@ import (
 )
 
 type editorModel struct {
-	prompt    string
-	textarea  textarea.Model
-	hint      string                 // resolved: caller override or library default
-	showHint  bool                   // false = suppress the affordance line (WithEditorNoHint)
-	summary   func(lines int) string // resolved: caller override or library default
-	submitted bool
-	aborted   bool
+	prompt      string
+	textarea    textarea.Model
+	hint        string                 // resolved: caller override or library default
+	showHint    bool                   // false = suppress the affordance line (WithEditorNoHint)
+	summary     func(lines int) string // resolved: caller override or library default
+	submitted   bool
+	aborted     bool
+	interrupted bool // true for Ctrl+C (hard cancel), false for Esc (soft cancel)
 }
 
 func newEditorModel(prompt string, cfg tui.EditorConfig) editorModel {
@@ -68,7 +69,10 @@ func (m editorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+d":
 			m.submitted = true
 			return m, tea.Quit
-		case keyCtrlC, keyEsc:
+		case keyCtrlC:
+			m.interrupted = true
+			return m, tea.Quit
+		case keyEsc:
 			m.aborted = true
 			return m, tea.Quit
 		}
@@ -107,6 +111,9 @@ func (p *Prompter) Editor(ctx context.Context, prompt string, opts ...tui.Editor
 	}
 
 	m := result.(editorModel)
+	if m.interrupted {
+		return "", tui.ErrInterrupted
+	}
 	if m.aborted {
 		return "", context.Canceled
 	}

@@ -109,8 +109,10 @@ func runMv(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, o
 		return cmdutil.UsageErrorf(cmd, "mv requires at least one s3:// URI")
 	}
 
-	ctx, cancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
-	defer cancel()
+	// Mirrors cp.go runCp (see its comment): a move is transfer + completing
+	// delete per object — data-plane on cmd.Context() (Ctrl+C), never the
+	// per-request --timeout. Enumeration re-bounds inside the tree walks.
+	ctx := cmd.Context()
 
 	switch dir {
 	case dirUpload:
@@ -274,7 +276,9 @@ func runDownloadMv(ctx context.Context, cmd *cobra.Command, f cmdutil.Factory, i
 }
 
 func downloadMoveTree(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client API, tr Transporter, src URI, dstDir string, opts *cpOptions, payload *cpPayload) error {
-	keys, err := listAllKeys(ctx, f, ioStreams, client, src)
+	listCtx, listCancel := context.WithTimeout(ctx, f.Options().Timeout)
+	keys, err := listAllKeys(listCtx, f, ioStreams, client, src)
+	listCancel()
 	if err != nil {
 		return err
 	}
@@ -361,7 +365,9 @@ func runCopyMv(ctx context.Context, cmd *cobra.Command, f cmdutil.Factory, ioStr
 }
 
 func s3MoveTree(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client API, src, dst URI, opts *cpOptions, payload *cpPayload) error {
-	keys, err := listAllKeys(ctx, f, ioStreams, client, src)
+	listCtx, listCancel := context.WithTimeout(ctx, f.Options().Timeout)
+	keys, err := listAllKeys(listCtx, f, ioStreams, client, src)
+	listCancel()
 	if err != nil {
 		return err
 	}

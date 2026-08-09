@@ -31,9 +31,10 @@ func (s *Server) registerVolumeTools() {
 
 	s.mcpServer.AddTool(
 		mcp.NewTool("create_volume",
-			mcp.WithDescription("Create a new block storage volume"),
+			mcp.WithDescription("Create a new block storage volume (starts billing). REQUIRES confirm: true — show the user the name/size/location first; without it the tool fails with CONFIRMATION_REQUIRED (mirrors --yes in the CLI agent contract)."),
 			mcp.WithString("name", mcp.Required(), mcp.Description("Volume name")),
 			mcp.WithNumber("size_gb", mcp.Required(), mcp.Description("Volume size in GiB")),
+			mcp.WithBoolean("confirm", mcp.Required(), mcp.Description(confirmParamHint)),
 			mcp.WithString("type", mcp.Description("Volume type: NVMe or HDD (default NVMe)")),
 			mcp.WithString("location", mcp.Description("Location code (default FIN-01)")),
 		),
@@ -64,27 +65,46 @@ func (s *Server) handleListVolumes(ctx context.Context, _ mcp.CallToolRequest) (
 
 //nolint:gocritic // hugeParam: handler signature defined by mcp-go.
 func (s *Server) handleCreateVolume(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	a := args(req)
+
+	name, err := requiredString(a, "name")
+	if err != nil {
+		return toolErrorResult(err), nil
+	}
+	sizeGB, err := requiredInt(a, "size_gb")
+	if err != nil {
+		return toolErrorResult(err), nil
+	}
+	if sizeGB <= 0 {
+		return toolErrorResult(invalidArgError("size_gb", "must be a positive integer")), nil
+	}
+	volType, err := optionalEnum(a, "type", verda.VolumeTypeNVMe, verda.VolumeTypeHDD)
+	if err != nil {
+		return toolErrorResult(err), nil
+	}
+	location, err := optionalString(a, "location")
+	if err != nil {
+		return toolErrorResult(err), nil
+	}
+	confirm, err := optionalBool(a, "confirm")
+	if err != nil {
+		return toolErrorResult(err), nil
+	}
+
+	// Billing action: explicit confirmation required, mirroring --yes in the
+	// CLI agent contract. Gated before any API call.
+	if !confirm {
+		return toolErrorResult(confirmationRequiredError("create_volume")), nil
+	}
+
 	client, err := s.verdaClient()
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	name, err := requiredString(args(req), "name")
-	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
-	}
-
-	sizeGB := optionalInt(args(req), "size_gb")
-	if sizeGB <= 0 {
-		return mcp.NewToolResultError("size_gb must be a positive integer"), nil
-	}
-
-	volType := optionalString(args(req), "type")
 	if volType == "" {
 		volType = verda.VolumeTypeNVMe
 	}
-
-	location := optionalString(args(req), "location")
 	if location == "" {
 		location = verda.LocationFIN01
 	}

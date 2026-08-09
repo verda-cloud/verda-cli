@@ -162,9 +162,11 @@ func runRm(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, o
 		return renderDryrun(f, ioStreams, uri, targets)
 	}
 
-	// Interactive confirmation (TTY path).
+	// Interactive confirmation (TTY path). cmd.Context(), not the bounded
+	// ctx: user think-time is not --timeout-bounded, and it must not drain
+	// the delete budget either.
 	if !opts.Yes && !f.AgentMode() {
-		confirmed, confirmErr := confirmRm(ctx, f, ioStreams, uri, targets, opts.Recursive)
+		confirmed, confirmErr := confirmRm(cmd.Context(), f, ioStreams, uri, targets, opts.Recursive)
 		if confirmErr != nil {
 			if cmdutil.IsPromptCancel(confirmErr) {
 				_, _ = fmt.Fprintln(ioStreams.ErrOut, "Canceled.")
@@ -178,7 +180,11 @@ func runRm(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, o
 		}
 	}
 
-	return executeRm(ctx, f, ioStreams, client, uri, targets, opts.Recursive)
+	// Fresh bound for the deletes (sshkey/startupscript delete use the same
+	// two-ctx split: one for listing, another for the mutation).
+	execCtx, execCancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
+	defer execCancel()
+	return executeRm(execCtx, f, ioStreams, client, uri, targets, opts.Recursive)
 }
 
 // validateRmArgs parses and validates the positional URI plus the flag

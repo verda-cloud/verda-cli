@@ -108,7 +108,10 @@ func runVolumeAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IO
 
 	idx, err := prompter.Select(ctx, "Select action", labels, tui.WithShowHints(true))
 	if err != nil {
-		return nil
+		if cmdutil.IsPromptCancel(err) {
+			return nil // User pressed Esc/Ctrl+C.
+		}
+		return err
 	}
 	if idx == len(actions) {
 		return nil
@@ -126,7 +129,14 @@ func runVolumeAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IO
 	if action.ConfirmMsg != "" || action.WarningMsg != "" {
 		_, _ = fmt.Fprintln(ioStreams.ErrOut)
 		confirmed, err := prompter.Confirm(ctx, fmt.Sprintf("Would you like to continue? (%s on %s)", action.Label, vol.Name))
-		if err != nil || !confirmed {
+		if err != nil {
+			if cmdutil.IsPromptCancel(err) {
+				_, _ = fmt.Fprintln(ioStreams.ErrOut, "Canceled.")
+				return nil
+			}
+			return err
+		}
+		if !confirmed {
 			_, _ = fmt.Fprintln(ioStreams.ErrOut, "Canceled.")
 			return nil
 		}
@@ -191,7 +201,13 @@ func buildVolumeActions(ctx context.Context, prompter tui.Prompter, client *verd
 		Label: "Rename",
 		Prepare: func(ctx context.Context) error {
 			n, err := prompter.TextInput(ctx, "New name", tui.WithDefault(vol.Name))
-			if err != nil || strings.TrimSpace(n) == "" {
+			if err != nil {
+				if cmdutil.IsPromptCancel(err) {
+					return errors.New("canceled")
+				}
+				return err
+			}
+			if strings.TrimSpace(n) == "" {
 				return errors.New("canceled")
 			}
 			newName = strings.TrimSpace(n)
@@ -207,7 +223,13 @@ func buildVolumeActions(ctx context.Context, prompter tui.Prompter, client *verd
 		Label: "Resize (grow only)",
 		Prepare: func(ctx context.Context) error {
 			sizeStr, err := prompter.TextInput(ctx, fmt.Sprintf("New size in GiB (current: %d)", vol.Size))
-			if err != nil || strings.TrimSpace(sizeStr) == "" {
+			if err != nil {
+				if cmdutil.IsPromptCancel(err) {
+					return errors.New("canceled")
+				}
+				return err
+			}
+			if strings.TrimSpace(sizeStr) == "" {
 				return errors.New("canceled")
 			}
 			s, err := strconv.Atoi(strings.TrimSpace(sizeStr))
@@ -227,7 +249,13 @@ func buildVolumeActions(ctx context.Context, prompter tui.Prompter, client *verd
 		Label: "Clone",
 		Prepare: func(ctx context.Context) error {
 			n, err := prompter.TextInput(ctx, "Clone name", tui.WithDefault(vol.Name+"-clone"))
-			if err != nil || strings.TrimSpace(n) == "" {
+			if err != nil {
+				if cmdutil.IsPromptCancel(err) {
+					return errors.New("canceled")
+				}
+				return err
+			}
+			if strings.TrimSpace(n) == "" {
 				return errors.New("canceled")
 			}
 			cloneName = strings.TrimSpace(n)
@@ -279,7 +307,10 @@ func selectVolume(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOSt
 
 	idx, err := f.Prompter().Select(ctx, "Select volume (type to filter)", labels, tui.WithShowHints(true))
 	if err != nil {
-		return "", nil //nolint:nilerr // User pressed Esc/Ctrl+C during prompt.
+		if cmdutil.IsPromptCancel(err) {
+			return "", nil // User pressed Esc/Ctrl+C during prompt.
+		}
+		return "", err
 	}
 	if idx == len(volumes) {
 		return "", nil

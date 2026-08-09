@@ -17,7 +17,6 @@ package cost
 import (
 	"context"
 	"fmt"
-	"math"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -66,6 +65,17 @@ type RunningInstanceCost struct {
 type RunningCostSummary struct {
 	Instances []RunningInstanceCost `json:"instances" yaml:"instances"`
 	Total     TotalItem             `json:"total" yaml:"total"`
+}
+
+// computeTotals recomputes s.Total from the per-instance rows. The money path
+// is pinned by TestRunningCostSummaryTotals.
+func (s *RunningCostSummary) computeTotals() {
+	s.Total = TotalItem{}
+	for i := range s.Instances {
+		s.Total.Hourly += s.Instances[i].Hourly
+		s.Total.Daily += s.Instances[i].Daily
+		s.Total.Monthly += s.Instances[i].Monthly
+	}
 }
 
 func runRunning(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams) error {
@@ -128,7 +138,7 @@ func runRunning(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStrea
 			volCount++
 			volGB += vol.Size
 			if vt, ok := vtMap[vol.Type]; ok {
-				volHourly += math.Ceil(vt.Price.PricePerMonthPerGB*float64(vol.Size)/hoursInMonth*10000) / 10000
+				volHourly += cmdutil.VolumeHourlyPrice(vt.Price.PricePerMonthPerGB, vol.Size)
 			}
 		}
 
@@ -141,17 +151,15 @@ func runRunning(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStrea
 			Status:       inst.Status,
 			Hourly:       totalHourly,
 			Daily:        totalHourly * 24,
-			Monthly:      totalHourly * hoursInMonth,
+			Monthly:      totalHourly * cmdutil.HoursInMonth,
 			VolumeCount:  volCount,
 			VolumeGB:     volGB,
 			VolumeHourly: volHourly,
 		}
 
 		summary.Instances = append(summary.Instances, rc)
-		summary.Total.Hourly += rc.Hourly
-		summary.Total.Daily += rc.Daily
-		summary.Total.Monthly += rc.Monthly
 	}
+	summary.computeTotals()
 
 	cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), "Running costs:", summary)
 

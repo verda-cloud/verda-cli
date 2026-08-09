@@ -138,7 +138,9 @@ func runAbortUploads(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IO
 	}
 
 	if !opts.Yes && !f.AgentMode() {
-		confirmed, confirmErr := confirmAbort(ctx, f, ioStreams, uri.Bucket, targets)
+		// cmd.Context(): prompt think-time is not --timeout-bounded and must
+		// not drain the abort budget below.
+		confirmed, confirmErr := confirmAbort(cmd.Context(), f, ioStreams, uri.Bucket, targets)
 		if confirmErr != nil {
 			if cmdutil.IsPromptCancel(confirmErr) {
 				_, _ = fmt.Fprintln(ioStreams.ErrOut, "Canceled.")
@@ -152,7 +154,10 @@ func runAbortUploads(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IO
 		}
 	}
 
-	return executeAbort(ctx, f, ioStreams, client, uri.Bucket, targets)
+	// Fresh bound for the aborts (two-ctx split: listing above, mutation here).
+	execCtx, execCancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
+	defer execCancel()
+	return executeAbort(execCtx, f, ioStreams, client, uri.Bucket, targets)
 }
 
 // filterAbortTargets narrows the listed uploads to those matching --key (exact)

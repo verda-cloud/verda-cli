@@ -44,7 +44,7 @@ type moveWizardState struct {
 }
 
 // runMoveWizard guides an interactive S3->S3 move/rename using the shared wizard
-// engine (same progress bar + hint bar + exit-confirmation as `s3 configure`):
+// engine (same progress bar + hint bar as `s3 configure`):
 // source bucket → source object → destination bucket (pick or create) →
 // destination key. A source fixed by an argument pre-sets and skips those steps.
 // After the engine collects the selections it previews + confirms, creates the
@@ -66,7 +66,7 @@ func runMoveWizard(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOSt
 	st := &moveWizardState{srcBucket: srcBucket, srcKey: srcKey}
 
 	engine := wizard.NewEngine(f.Prompter(), f.Status(),
-		wizard.WithOutput(ioStreams.ErrOut), wizard.WithExitConfirmation())
+		wizard.WithOutput(ioStreams.ErrOut))
 	if err := engine.Run(ctx, buildMoveFlow(f, client, st)); err != nil {
 		return err
 	}
@@ -223,7 +223,7 @@ func moveStepDestKey(st *moveWizardState) wizard.Step {
 // bucketChoices lists buckets as wizard choices, optionally appending a trailing
 // "create new bucket" option (for destination selection).
 func bucketChoices(ctx context.Context, f cmdutil.Factory, client API, withCreate bool) ([]wizard.Choice, error) {
-	out, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading buckets...", func() (*s3.ListBucketsOutput, error) {
+	out, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading buckets...", func(ctx context.Context) (*s3.ListBucketsOutput, error) {
 		return client.ListBuckets(ctx, &s3.ListBucketsInput{})
 	})
 	if err != nil {
@@ -243,7 +243,7 @@ func bucketChoices(ctx context.Context, f cmdutil.Factory, client API, withCreat
 // objectChoices lists object keys in bucket (capped) as wizard choices. An empty
 // bucket is an error — there is nothing to move out of it.
 func objectChoices(ctx context.Context, f cmdutil.Factory, client API, bucket string) ([]wizard.Choice, error) {
-	res, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading objects...", func() (cappedKeys, error) {
+	res, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading objects...", func(ctx context.Context) (cappedKeys, error) {
 		k, truncated, e := listKeysCapped(ctx, client, bucket, objectPickerCap)
 		return cappedKeys{keys: k, truncated: truncated}, e
 	})
@@ -306,7 +306,7 @@ func finalizeMove(ctx context.Context, cmd *cobra.Command, f cmdutil.Factory, io
 	}
 
 	if st.newDstBucket != "" {
-		if _, err := cmdutil.WithSpinner(ctx, f.Status(), "Creating bucket...", func() (*s3.CreateBucketOutput, error) {
+		if _, err := cmdutil.WithSpinner(ctx, f.Status(), "Creating bucket...", func(ctx context.Context) (*s3.CreateBucketOutput, error) {
 			return client.CreateBucket(ctx, &s3.CreateBucketInput{Bucket: aws.String(dstBucket)})
 		}); err != nil {
 			return translateError(err)

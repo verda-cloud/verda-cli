@@ -182,8 +182,9 @@ func buildDashboard(instances []verda.Instance, volumes []verda.Volume, balance 
 		}
 
 		// Offline instances still charge — include all non-terminated instances in burn rate.
+		// price_per_hour is the TOTAL hourly price: burn is the plain sum of totals.
 		if inst.Status == verda.StatusRunning || inst.Status == verda.StatusOffline {
-			d.Financials.BurnRateHourly += cmdutil.InstanceTotalHourlyCost(inst)
+			d.Financials.BurnRateHourly += float64(inst.PricePerHour)
 		}
 
 		// Location tracking.

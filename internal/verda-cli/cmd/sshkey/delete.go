@@ -20,12 +20,14 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/verda-cloud/verda-cli/pkg/tui"
+	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
 
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
 
 type deleteOptions struct {
-	ID string
+	ID  string
+	Yes bool
 }
 
 // NewCmdDelete creates the ssh-key delete cobra command.
@@ -39,7 +41,7 @@ func NewCmdDelete(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 		Long: cmdutil.LongDesc(`
 			Delete an SSH key from your account. In interactive mode you will be
 			prompted to select a key and confirm deletion. Use --id for
-			non-interactive use.
+			non-interactive use. Agent mode requires --id and --yes.
 		`),
 		Example: cmdutil.Examples(`
 			# Interactive
@@ -47,6 +49,9 @@ func NewCmdDelete(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 
 			# Non-interactive
 			verda ssh-key delete --id abc-123
+
+			# Agent mode
+			verda --agent ssh-key delete --id abc-123 --yes
 		`),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -55,11 +60,17 @@ func NewCmdDelete(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 	}
 
 	cmd.Flags().StringVar(&opts.ID, "id", "", "SSH key ID to delete")
+	cmd.Flags().BoolVar(&opts.Yes, "yes", false, "Skip confirmation for destructive actions (required in agent mode)")
 
 	return cmd
 }
 
 func runDelete(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *deleteOptions) error {
+	// Agent mode never prompts: deleting without --yes is an explicit error.
+	if f.AgentMode() && !opts.Yes {
+		return cmdutil.NewConfirmationRequiredError("delete")
+	}
+
 	client, err := f.VerdaClient()
 	if err != nil {
 		return err
@@ -71,51 +82,32 @@ func runDelete(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 	keyID := opts.ID
 	keyName := keyID
 
-	if keyID == "" { //nolint:nestif // Interactive prompt flow requires nested conditionals.
+	if keyID == "" {
 		// Interactive: list keys and let user select.
-		listCtx, cancel := context.WithTimeout(ctx, f.Options().Timeout)
-		defer cancel()
-
-		var sp interface{ Stop(string) }
-		if status := f.Status(); status != nil {
-			sp, _ = status.Spinner(listCtx, "Loading SSH keys...")
-		}
-		keys, err := client.SSHKeys.GetAllSSHKeys(listCtx)
-		if sp != nil {
-			sp.Stop("")
-		}
+		id, name, err := selectKey(ctx, f, ioStreams, prompter, client)
 		if err != nil {
 			return err
 		}
-
-		if len(keys) == 0 {
-			_, _ = fmt.Fprintln(ioStreams.Out, "No SSH keys found.")
-			return nil
+		if id == "" {
+			return nil // Canceled or no keys available.
 		}
-
-		labels := make([]string, 0, len(keys)+1)
-		for _, k := range keys {
-			labels = append(labels, fmt.Sprintf("%s  %s  %s", k.Name, k.ID, k.Fingerprint))
-		}
-		labels = append(labels, "Cancel")
-
-		idx, err := prompter.Select(ctx, "Select SSH key to delete", labels, tui.WithShowHints(true))
-		if err != nil {
-			return nil
-		}
-		if idx == len(keys) {
-			return nil
-		}
-
-		keyID = keys[idx].ID
-		keyName = keys[idx].Name
+		keyID, keyName = id, name
 	}
 
 	// Confirm deletion.
-	confirmed, err := prompter.Confirm(ctx, fmt.Sprintf("Are you sure you want to delete SSH key %q?", keyName))
-	if err != nil || !confirmed {
-		_, _ = fmt.Fprintln(ioStreams.ErrOut, "Canceled.")
-		return nil
+	if !opts.Yes {
+		confirmed, err := prompter.Confirm(ctx, fmt.Sprintf("Are you sure you want to delete SSH key %q?", keyName))
+		if err != nil {
+			if cmdutil.IsPromptCancel(err) {
+				_, _ = fmt.Fprintln(ioStreams.ErrOut, "Canceled.")
+				return nil
+			}
+			return err
+		}
+		if !confirmed {
+			_, _ = fmt.Fprintln(ioStreams.ErrOut, "Canceled.")
+			return nil
+		}
 	}
 
 	cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), "Deleting SSH key:", map[string]string{"id": keyID, "name": keyName})
@@ -135,6 +127,59 @@ func runDelete(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 		return err
 	}
 
+	if f.AgentMode() {
+		result := map[string]string{
+			"id":     keyID,
+			"name":   keyName,
+			"action": "delete",
+			"status": "completed",
+		}
+		_, _ = cmdutil.WriteStructured(ioStreams.Out, f.OutputFormat(), result)
+		return nil
+	}
+
 	_, _ = fmt.Fprintf(ioStreams.Out, "Deleted SSH key: %s (%s)\n", keyName, keyID)
 	return nil
+}
+
+// selectKey lists SSH keys and prompts the user to pick one for deletion.
+// Returns zero values when the user cancels or no keys exist.
+func selectKey(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, prompter tui.Prompter, client *verda.Client) (keyID, keyName string, _ error) {
+	listCtx, cancel := context.WithTimeout(ctx, f.Options().Timeout)
+	defer cancel()
+
+	var sp interface{ Stop(string) }
+	if status := f.Status(); status != nil {
+		sp, _ = status.Spinner(listCtx, "Loading SSH keys...")
+	}
+	keys, err := client.SSHKeys.GetAllSSHKeys(listCtx)
+	if sp != nil {
+		sp.Stop("")
+	}
+	if err != nil {
+		return "", "", err
+	}
+
+	if len(keys) == 0 {
+		_, _ = fmt.Fprintln(ioStreams.Out, "No SSH keys found.")
+		return "", "", nil
+	}
+
+	labels := make([]string, 0, len(keys)+1)
+	for _, k := range keys {
+		labels = append(labels, fmt.Sprintf("%s  %s  %s", k.Name, k.ID, k.Fingerprint))
+	}
+	labels = append(labels, "Cancel")
+
+	idx, err := prompter.Select(ctx, "Select SSH key to delete", labels, tui.WithShowHints(true))
+	if err != nil {
+		if cmdutil.IsPromptCancel(err) {
+			return "", "", nil // Esc/Ctrl+C — clean exit.
+		}
+		return "", "", err
+	}
+	if idx == len(keys) {
+		return "", "", nil
+	}
+	return keys[idx].ID, keys[idx].Name, nil
 }

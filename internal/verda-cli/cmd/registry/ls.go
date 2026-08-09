@@ -190,9 +190,10 @@ func runLsInteractive(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.
 	for {
 		idx, err := prompter.Select(ctx, registryBreadcrumb(host, ""), labels, tui.WithShowHints(true))
 		if err != nil {
-			// Prompter-layer cancellation (Ctrl-C, ESC) returns a
-			// sentinel error; vm list treats it as a clean exit.
-			return nil //nolint:nilerr // intentional: prompter cancel is a clean exit
+			if cmdutil.IsPromptCancel(err) {
+				return nil // Prompter-layer cancellation (Ctrl-C, ESC) is a clean exit.
+			}
+			return err
 		}
 		if idx == len(payload.Repositories) { // "Exit"
 			return nil
@@ -331,7 +332,10 @@ func runRepoActions(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IO
 			if cmdutil.IsPromptInterrupt(err) {
 				return true, nil // Ctrl+C quits the command
 			}
-			return false, nil // Esc → back to the repository list
+			if cmdutil.IsPromptBack(err) {
+				return false, nil // Esc → back to the repository list
+			}
+			return false, err
 		}
 		switch idx {
 		case actPull:
@@ -436,7 +440,10 @@ func runTagPicker(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOSt
 		if cmdutil.IsPromptInterrupt(err) {
 			return true, nil // Ctrl+C quits the whole command
 		}
-		return false, nil // Esc → back to the previous menu
+		if cmdutil.IsPromptBack(err) {
+			return false, nil // Esc → back to the previous menu
+		}
+		return false, err
 	}
 	if idx == len(entries) { // "← Back"
 		return false, nil

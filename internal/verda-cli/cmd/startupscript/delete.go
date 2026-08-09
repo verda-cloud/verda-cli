@@ -20,12 +20,14 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/verda-cloud/verda-cli/pkg/tui"
+	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
 
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
 
 type deleteOptions struct {
-	ID string
+	ID  string
+	Yes bool
 }
 
 // NewCmdDelete creates the startup-script delete cobra command.
@@ -39,7 +41,7 @@ func NewCmdDelete(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 		Long: cmdutil.LongDesc(`
 			Delete a startup script from your account. In interactive mode you
 			will be prompted to select a script and confirm deletion. Use --id
-			for non-interactive use.
+			for non-interactive use. Agent mode requires --id and --yes.
 		`),
 		Example: cmdutil.Examples(`
 			# Interactive
@@ -47,6 +49,9 @@ func NewCmdDelete(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 
 			# Non-interactive
 			verda startup-script delete --id abc-123
+
+			# Agent mode
+			verda --agent startup-script delete --id abc-123 --yes
 		`),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -55,11 +60,17 @@ func NewCmdDelete(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 	}
 
 	cmd.Flags().StringVar(&opts.ID, "id", "", "Startup script ID to delete")
+	cmd.Flags().BoolVar(&opts.Yes, "yes", false, "Skip confirmation for destructive actions (required in agent mode)")
 
 	return cmd
 }
 
 func runDelete(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *deleteOptions) error {
+	// Agent mode never prompts: deleting without --yes is an explicit error.
+	if f.AgentMode() && !opts.Yes {
+		return cmdutil.NewConfirmationRequiredError("delete")
+	}
+
 	client, err := f.VerdaClient()
 	if err != nil {
 		return err
@@ -71,51 +82,32 @@ func runDelete(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 	scriptID := opts.ID
 	scriptName := scriptID
 
-	if scriptID == "" { //nolint:nestif // Interactive prompt flow requires nested conditionals.
+	if scriptID == "" {
 		// Interactive: list scripts and let user select.
-		listCtx, cancel := context.WithTimeout(ctx, f.Options().Timeout)
-		defer cancel()
-
-		var sp interface{ Stop(string) }
-		if status := f.Status(); status != nil {
-			sp, _ = status.Spinner(listCtx, "Loading startup scripts...")
-		}
-		scripts, err := client.StartupScripts.GetAllStartupScripts(listCtx)
-		if sp != nil {
-			sp.Stop("")
-		}
+		id, name, err := selectScript(ctx, f, ioStreams, prompter, client)
 		if err != nil {
 			return err
 		}
-
-		if len(scripts) == 0 {
-			_, _ = fmt.Fprintln(ioStreams.Out, "No startup scripts found.")
-			return nil
+		if id == "" {
+			return nil // Canceled or no scripts available.
 		}
-
-		labels := make([]string, 0, len(scripts)+1)
-		for _, s := range scripts {
-			labels = append(labels, fmt.Sprintf("%s  %s", s.Name, s.ID))
-		}
-		labels = append(labels, "Cancel")
-
-		idx, err := prompter.Select(ctx, "Select startup script to delete", labels, tui.WithShowHints(true))
-		if err != nil {
-			return nil
-		}
-		if idx == len(scripts) {
-			return nil
-		}
-
-		scriptID = scripts[idx].ID
-		scriptName = scripts[idx].Name
+		scriptID, scriptName = id, name
 	}
 
 	// Confirm deletion.
-	confirmed, err := prompter.Confirm(ctx, fmt.Sprintf("Are you sure you want to delete startup script %q?", scriptName))
-	if err != nil || !confirmed {
-		_, _ = fmt.Fprintln(ioStreams.ErrOut, "Canceled.")
-		return nil
+	if !opts.Yes {
+		confirmed, err := prompter.Confirm(ctx, fmt.Sprintf("Are you sure you want to delete startup script %q?", scriptName))
+		if err != nil {
+			if cmdutil.IsPromptCancel(err) {
+				_, _ = fmt.Fprintln(ioStreams.ErrOut, "Canceled.")
+				return nil
+			}
+			return err
+		}
+		if !confirmed {
+			_, _ = fmt.Fprintln(ioStreams.ErrOut, "Canceled.")
+			return nil
+		}
 	}
 
 	cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), "Deleting startup script:", map[string]string{"id": scriptID, "name": scriptName})
@@ -135,6 +127,59 @@ func runDelete(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 		return err
 	}
 
+	if f.AgentMode() {
+		result := map[string]string{
+			"id":     scriptID,
+			"name":   scriptName,
+			"action": "delete",
+			"status": "completed",
+		}
+		_, _ = cmdutil.WriteStructured(ioStreams.Out, f.OutputFormat(), result)
+		return nil
+	}
+
 	_, _ = fmt.Fprintf(ioStreams.Out, "Deleted startup script: %s (%s)\n", scriptName, scriptID)
 	return nil
+}
+
+// selectScript lists startup scripts and prompts the user to pick one for
+// deletion. Returns zero values when the user cancels or no scripts exist.
+func selectScript(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, prompter tui.Prompter, client *verda.Client) (scriptID, scriptName string, _ error) {
+	listCtx, cancel := context.WithTimeout(ctx, f.Options().Timeout)
+	defer cancel()
+
+	var sp interface{ Stop(string) }
+	if status := f.Status(); status != nil {
+		sp, _ = status.Spinner(listCtx, "Loading startup scripts...")
+	}
+	scripts, err := client.StartupScripts.GetAllStartupScripts(listCtx)
+	if sp != nil {
+		sp.Stop("")
+	}
+	if err != nil {
+		return "", "", err
+	}
+
+	if len(scripts) == 0 {
+		_, _ = fmt.Fprintln(ioStreams.Out, "No startup scripts found.")
+		return "", "", nil
+	}
+
+	labels := make([]string, 0, len(scripts)+1)
+	for _, s := range scripts {
+		labels = append(labels, fmt.Sprintf("%s  %s", s.Name, s.ID))
+	}
+	labels = append(labels, "Cancel")
+
+	idx, err := prompter.Select(ctx, "Select startup script to delete", labels, tui.WithShowHints(true))
+	if err != nil {
+		if cmdutil.IsPromptCancel(err) {
+			return "", "", nil // Esc/Ctrl+C — clean exit.
+		}
+		return "", "", err
+	}
+	if idx == len(scripts) {
+		return "", "", nil
+	}
+	return scripts[idx].ID, scripts[idx].Name, nil
 }

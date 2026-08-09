@@ -24,10 +24,12 @@ import (
 func TestBuildDashboard(t *testing.T) {
 	t.Parallel()
 
+	// price_per_hour values are TOTAL hourly prices (staging fixture
+	// temp/docs/c1-ondemand-instance.json: CPU.4V.16G on-demand = 0.0279).
 	instances := []verda.Instance{
-		{ID: "i1", Status: verda.StatusRunning, Location: "FIN-01", PricePerHour: 0.10, IsSpot: false, GPU: verda.InstanceGPU{NumberOfGPUs: 2}},
-		{ID: "i2", Status: verda.StatusRunning, Location: "FIN-01", PricePerHour: 0.05, IsSpot: true, GPU: verda.InstanceGPU{NumberOfGPUs: 1}},
-		{ID: "i3", Status: verda.StatusRunning, Location: "US-TX-3", PricePerHour: 0.20, IsSpot: false, GPU: verda.InstanceGPU{NumberOfGPUs: 4}},
+		{ID: "i1", Status: verda.StatusRunning, Location: "FIN-01", PricePerHour: 0.50, GPU: verda.InstanceGPU{NumberOfGPUs: 1}},
+		{ID: "i2", Status: verda.StatusRunning, Location: "FIN-01", PricePerHour: 0.0279, IsSpot: true, CPU: verda.InstanceCPU{NumberOfCores: 4}},
+		{ID: "i3", Status: verda.StatusRunning, Location: "US-TX-3", PricePerHour: 4.00, GPU: verda.InstanceGPU{NumberOfGPUs: 8}}, // 8x i1's rate, like the catalog
 		{ID: "i4", Status: verda.StatusOffline, Location: "US-TX-5", PricePerHour: 0.10, GPU: verda.InstanceGPU{NumberOfGPUs: 1}},
 	}
 	volumes := []verda.Volume{
@@ -67,13 +69,13 @@ func TestBuildDashboard(t *testing.T) {
 		t.Fatalf("expected 120 GB total, got %d", d.Volumes.TotalSizeGB)
 	}
 
-	// Financials: burn rate = price_per_hour * units for each instance + all volumes
-	// i1: 0.10 * 2 GPUs = 0.20, i2: 0.05 * 1 = 0.05, i3: 0.20 * 4 = 0.80, i4: 0.10 * 1 = 0.10
-	// Instance total: 1.15
+	// Financials: burn rate = sum of price_per_hour TOTALS + all volumes
+	// i1: 0.50, i2: 0.0279, i3: 4.00 (NOT 4.00 * 8 GPUs = 32.00), i4: 0.10
+	// Instance total: 4.6279
 	// All volumes: 0.007 + 0.007 + 0.003 = 0.017
-	expectedHourly := 1.167
+	expectedHourly := 4.6449
 	if math.Abs(d.Financials.BurnRateHourly-expectedHourly) > 0.001 {
-		t.Fatalf("expected hourly burn rate ~$%.3f, got $%.4f", expectedHourly, d.Financials.BurnRateHourly)
+		t.Fatalf("expected hourly burn rate ~$%.4f, got $%.4f", expectedHourly, d.Financials.BurnRateHourly)
 	}
 	if math.Abs(d.Financials.BurnRateDaily-expectedHourly*24) > 0.1 {
 		t.Fatalf("expected daily burn rate ~$%.2f, got $%.4f", expectedHourly*24, d.Financials.BurnRateDaily)
@@ -84,14 +86,31 @@ func TestBuildDashboard(t *testing.T) {
 	if d.Financials.Currency != "USD" {
 		t.Fatalf("expected currency USD, got %s", d.Financials.Currency)
 	}
-	// Runway = 847.23 / (1.167 * 24) ≈ 30 days
-	if d.Financials.RunwayDays < 25 || d.Financials.RunwayDays > 35 {
-		t.Fatalf("expected runway ~30 days, got %d", d.Financials.RunwayDays)
+	// Runway = 847.23 / (4.6449 * 24) ≈ 7 days
+	if d.Financials.RunwayDays < 6 || d.Financials.RunwayDays > 9 {
+		t.Fatalf("expected runway ~7 days, got %d", d.Financials.RunwayDays)
 	}
 
 	// Locations
 	if len(d.Locations) != 3 {
 		t.Fatalf("expected 3 locations, got %d", len(d.Locations))
+	}
+}
+
+// TestBuildDashboardBurnRateUsesCatalogTotal (review C1 regression): an 8-GPU
+// instance contributes exactly its catalog price_per_hour to the burn rate.
+// A re-multiplication by GPU count breaks this exact equality (8 * 0.5 * 8).
+func TestBuildDashboardBurnRateUsesCatalogTotal(t *testing.T) {
+	t.Parallel()
+
+	instances := []verda.Instance{
+		{ID: "gpu8", Status: verda.StatusRunning, Location: "FIN-01", PricePerHour: 4.00, GPU: verda.InstanceGPU{NumberOfGPUs: 8}},
+	}
+
+	d := buildDashboard(instances, nil, nil)
+
+	if d.Financials.BurnRateHourly != 4.00 {
+		t.Fatalf("8-GPU burn contribution = $%.4f/hr, want catalog total $4.00/hr", d.Financials.BurnRateHourly)
 	}
 }
 

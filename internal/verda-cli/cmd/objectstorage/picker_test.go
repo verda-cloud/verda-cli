@@ -34,7 +34,7 @@ func TestSelectBucket_PicksChosen(t *testing.T) {
 		{Name: aws.String("beta")},
 	}}
 	f := cmdutil.NewTestFactory(tuitest.New().AddSelect(1)) // choose 2nd
-	got, err := selectBucket(context.Background(), f, cmdutil.IOStreams{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}, fake)
+	got, err := selectBucket(context.Background(), context.Background(), f, cmdutil.IOStreams{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}, fake)
 	if err != nil {
 		t.Fatalf("selectBucket: %v", err)
 	}
@@ -48,7 +48,7 @@ func TestSelectBucket_EmptyReturnsBlank(t *testing.T) {
 	fake := &fakeS3API{}
 	f := cmdutil.NewTestFactory(tuitest.New())
 	errOut := &bytes.Buffer{}
-	got, err := selectBucket(context.Background(), f, cmdutil.IOStreams{Out: &bytes.Buffer{}, ErrOut: errOut}, fake)
+	got, err := selectBucket(context.Background(), context.Background(), f, cmdutil.IOStreams{Out: &bytes.Buffer{}, ErrOut: errOut}, fake)
 	if err != nil {
 		t.Fatalf("selectBucket: %v", err)
 	}

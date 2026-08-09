@@ -6,12 +6,12 @@ Go CLI for Verda Cloud. Cobra commands + Bubble Tea TUI + lipgloss styling.
 
 ```bash
 make build        # Build binary to ./bin/verda
-make test         # Run all tests (go test + golangci-lint)
-make lint         # Lint only
+make test         # Run all tests (go test -race)
+make lint         # Lint only (golangci-lint); also run by pre-commit hooks
 make pre-commit   # Full pre-commit suite
 ```
 
-Never use raw `go test ./...` — always `make test` which includes linting.
+Never use raw `go test ./...` — always `make test` (go test -race). Lint is separate: `make lint`; the pre-commit hooks run both.
 
 ## Architecture
 
@@ -43,6 +43,9 @@ Each command directory has its own `CLAUDE.md` (domain knowledge) and `README.md
 | `cmd/registry/` | CLAUDE.md, README.md | Container registry (vccr.io): configure, configure-docker (alias login), show, ls, tags, push, copy, delete — beta (enabled by default, marked `(beta)` in `verda --help`) |
 | `cmd/update/` | CLAUDE.md, README.md | CLI self-update |
 | `cmd/settings/` | CLAUDE.md, README.md | CLI settings management |
+| `cmd/objectstorage/` | CLAUDE.md, README.md | S3-style object storage: configure, mb/rb, cp/mv/sync/ls/rm, uploads, presign |
+| `cmd/serverless/` | CLAUDE.md, README.md | Serverless containers and batch jobs |
+| `cmd/doctor/` | — | Environment diagnostics |
 | `cmd/availability/` | — | Instance availability by location |
 | `cmd/cost/` | — | Balance, running costs, estimates |
 | `cmd/images/` | — | OS image listing |
@@ -50,7 +53,7 @@ Each command directory has its own `CLAUDE.md` (domain knowledge) and `README.md
 | `cmd/locations/` | — | Datacenter locations |
 | `cmd/status/` | — | Status dashboard |
 | `cmd/ssh/` | — | SSH into instances |
-| `cmd/mcp/` | — | MCP server |
+| `cmd/mcp/` | CLAUDE.md, README.md | MCP server (AI-agent tool surface; confirm gates, accepted/completed semantics) |
 | `cmd/skills/` | — | AI skills management |
 | `cmd/completion/` | — | Shell completions |
 
@@ -73,7 +76,7 @@ Each command directory has its own `CLAUDE.md` (domain knowledge) and `README.md
 
 ### Go House Style — avoid avoidable lint hits
 
-The repo lints with `golangci-lint` via `make lint` (included in `make test`). These are the patterns the linters enforce — write them correctly the first time instead of fixing them in a second pass:
+The repo lints with `golangci-lint` via `make lint` (also enforced by the pre-commit hooks, not by `make test`). These are the patterns the linters enforce — write them correctly the first time instead of fixing them in a second pass:
 
 - **HTTP bodies** — use `http.NoBody` for GET/DELETE/etc., never `nil`. Close with `defer func() { _ = resp.Body.Close() }()`, not bare `defer resp.Body.Close()` (errcheck).
 - **American English** — `behavior`, `canceled`, `artifact`, `checkered`, `gray`. `misspell` runs with `locale: US` and rejects British spellings in code and comments.
@@ -98,7 +101,7 @@ The repo lints with `golangci-lint` via `make lint` (included in `make test`). T
 
 ### Every API-calling command MUST:
 
-1. **Timeout context**: `ctx, cancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)`
+1. **Timeout context**: `ctx, cancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)` for control-plane calls. Data-plane transfers (registry push/copy, object-storage cp/mv/sync) run on `cmd.Context()` — Ctrl+C is the stop signal; a multi-GB transfer legitimately outlives `--timeout`. Interactive prompts also get `cmd.Context()`, and work resumed after a prompt re-bounds its API ctx so prompt think-time can't drain the budget. The shared `http.Client` carries NO `Timeout` — the client cap covers whole-body reads and would clamp transfers.
 2. **Spinner**: Show spinner during API calls, stop before handling result
 3. **Debug output**: `cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), "label:", data)`
 4. **Dual mode**: Work with flags (non-interactive) AND prompts (interactive) — no partial wizard
@@ -118,10 +121,11 @@ The repo lints with `golangci-lint` via `make lint` (included in `make test`). T
 
 ### Pricing — get this wrong and users get billed wrong:
 
-- Instance `price_per_hour` from API is **per-unit** (per-GPU or per-vCPU)
-- Total = `price_per_hour * units` — use `cmdutil.InstanceTotalHourlyCost(inst)`
-- Volume: `price_per_month_per_gb` — hourly = `ceil(monthly * size / 730 * 10000) / 10000`
-- Never display raw API price as "total" without multiplying
+- Instance `price_per_hour` from the API (instances AND instance-types endpoints) is the **TOTAL** hourly price of the instance. Never multiply by GPU/vCPU count. Verified live on staging 2026-08-09 (`temp/docs/c1-ondemand-instance.json`; review C1).
+- Burn rate = plain sum of instance `price_per_hour` totals (+ volume `base_hourly_cost`).
+- A per-unit price shown to the user is total **divided** by units (GPU count or vCPU count) — division only, and only for display.
+- Volume hourly: `cmdutil.VolumeHourlyPrice(monthlyPerGB, sizeGB)` = `ceil(monthlyPerGB * sizeGB / HoursInMonth * 10000) / 10000` — the only sanctioned formula (MCP and all CLI surfaces use it).
+- Volume monthly: `cmdutil.VolumeMonthlyPrice(monthlyPerGB, sizeGB)`; hourly→monthly estimates use `cmdutil.HoursInMonth` (730 = 365*24/12, matching the web frontend).
 
 ### Credentials
 
@@ -157,10 +161,11 @@ Before considering any change complete:
 
 ```bash
 make build                    # Must compile
-make test                     # Must pass (tests + lint)
+make test                     # Must pass (go test -race)
+make lint                     # Must pass (golangci-lint; also run by pre-commit hooks)
 ```
 
-`make test` runs `golangci-lint` — **never** report work as complete with lint failures outstanding. Fix them before the "done" message; don't defer to the pre-commit hook. See the "Go House Style" section above for the patterns that prevent the common hits.
+**Never** report work as complete with lint failures outstanding. Fix them before the "done" message; don't defer to the pre-commit hook. See the "Go House Style" section above for the patterns that prevent the common hits.
 
 If you modified a command, also verify:
 - `./bin/verda <command> --help` renders correctly

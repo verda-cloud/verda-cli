@@ -81,7 +81,10 @@ func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 	// 1. Select resource type.
 	idx, err := prompter.Select(ctx, "Resource type", resourceTypes, tui.WithShowHints(true))
 	if err != nil {
-		return nil //nolint:nilerr // user cancellation (Ctrl+C) is not an error
+		if cmdutil.IsPromptCancel(err) {
+			return nil // user cancellation (Ctrl+C/Esc) is not an error
+		}
+		return err
 	}
 	resource := resourceMap[idx]
 
@@ -96,7 +99,10 @@ func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 		if name == "" {
 			name, err = prompter.TextInput(ctx, "Template name")
 			if err != nil {
-				return nil //nolint:nilerr // user cancellation (Ctrl+C) is not an error
+				if cmdutil.IsPromptCancel(err) {
+					return nil // user cancellation (Ctrl+C/Esc) is not an error
+				}
+				return err
 			}
 		}
 

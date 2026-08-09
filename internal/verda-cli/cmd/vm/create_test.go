@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
@@ -226,7 +227,8 @@ func TestRunCreate_AgentMode_AllFlags(t *testing.T) {
 // TestRunCreate_AgentMode_WithTemplate verifies that --from loads a template
 // file and its values appear in the API request. Required flags are still
 // provided on the CLI because the missing-flags check runs before template
-// application (the template can override values via resolveCreateInputs).
+// application; the template supplies values only for flags not passed
+// (location here — no --location flag, so the template's FIN-03 applies).
 func TestRunCreate_AgentMode_WithTemplate(t *testing.T) {
 	t.Parallel()
 
@@ -265,7 +267,8 @@ hostname_pattern: from-template
 
 	cmd := NewCmdCreate(h.Factory, h.IOStreams)
 	// Required flags must be passed because missingCreateFlags is checked
-	// before the template is applied. The template overrides location.
+	// before the template is applied. No --location is passed, so the
+	// template's FIN-03 fills the unset flag.
 	cmd.SetArgs([]string{
 		"--from", tmplPath,
 		"--kind", "gpu",
@@ -301,7 +304,77 @@ hostname_pattern: from-template
 	}
 }
 
-// TestRunCreate_AgentMode_TemplateMissingFlags verifies that in agent mode,
+// TestRunCreate_AgentMode_TemplateFlagOverride verifies the documented
+// contract: an explicitly passed flag beats the template value
+// (`vm create --from gpu-training --location FIN-03` must land in FIN-03).
+func TestRunCreate_AgentMode_TemplateFlagOverride(t *testing.T) {
+	t.Parallel()
+
+	mux := baseMux()
+	var capturedReq map[string]any
+	mux.HandleFunc("POST /instances", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&capturedReq)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":             "inst-override-001",
+			"hostname":       "from-flag",
+			"status":         "new",
+			"instance_type":  "1V100.6V",
+			"image":          "ubuntu-24.04-cuda-12.8-open-docker",
+			"location":       "FIN-03",
+			"price_per_hour": 1.50,
+		})
+	})
+
+	h := newTestHarness(t, mux)
+
+	tmplDir := t.TempDir()
+	tmplContent := `resource: vm
+kind: cpu
+instance_type: CPU.4V.16G
+location: FIN-01
+image: alpine
+hostname_pattern: from-template-ignored
+os_volume_size: 25
+`
+	tmplPath := filepath.Join(tmplDir, "test-template.yaml")
+	if err := os.WriteFile(tmplPath, []byte(tmplContent), 0o600); err != nil {
+		t.Fatalf("failed to write template file: %v", err)
+	}
+
+	cmd := NewCmdCreate(h.Factory, h.IOStreams)
+	cmd.SetArgs([]string{
+		"--from", tmplPath,
+		"--kind", "gpu",
+		"--instance-type", "1V100.6V",
+		"--os", "ubuntu-24.04-cuda-12.8-open-docker",
+		"--hostname", "from-flag",
+		"--location", "FIN-03",
+		"--os-volume-size", "100",
+		"--wait=false",
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("cmd.Execute() returned error: %v\nStderr: %s", err, h.Stderr.String())
+	}
+
+	if capturedReq == nil {
+		t.Fatal("expected API request to be captured")
+	}
+	if got := capturedReq["location_code"]; got != "FIN-03" {
+		t.Errorf("expected location_code=FIN-03 (flag beats template), got %v", got)
+	}
+	if got := capturedReq["instance_type"]; got != "1V100.6V" {
+		t.Errorf("expected instance_type=1V100.6V (flag beats template), got %v", got)
+	}
+	if got := capturedReq["hostname"]; got != "from-flag" {
+		t.Errorf("expected hostname=from-flag (flag beats template pattern), got %v", got)
+	}
+	if osVol, ok := capturedReq["os_volume"].(map[string]any); !ok || osVol["size"] != float64(100) {
+		t.Errorf("expected os_volume.size=100 (flag beats template), got %v", capturedReq["os_volume"])
+	}
+}
+
 // --from alone is not sufficient when the template would provide required
 // values -- the missing-flags check fires before template application.
 func TestRunCreate_AgentMode_TemplateMissingFlags(t *testing.T) {
@@ -339,6 +412,103 @@ hostname_pattern: from-template
 	if !cmdutil.IsAgentError(err) {
 		t.Fatalf("expected AgentError, got %T: %v", err, err)
 	}
+}
+
+// TestRunCreate_AgentMode_NoWaitDefaultDoesNotPoll: --wait defaults to true at
+// flag registration (AgentMode is not yet known there), so without a runtime
+// override an agent-mode create would block polling until timeout. The override
+// in runCreate must make the default agent create return after issuance with
+// zero status polls.
+func TestRunCreate_AgentMode_NoWaitDefaultDoesNotPoll(t *testing.T) {
+	t.Parallel()
+
+	var pollCalls atomic.Int32
+	mux := newCreatePollMux(&pollCalls)
+
+	h := newTestHarness(t, mux)
+	cmd := NewCmdCreate(h.Factory, h.IOStreams)
+	cmd.SetArgs([]string{
+		"--kind", "gpu",
+		"--instance-type", "1V100.6V",
+		"--os", "ubuntu-24.04-cuda-12.8-open-docker",
+		"--hostname", "gpu-runner",
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("cmd.Execute() returned error: %v\nStderr: %s", err, h.Stderr.String())
+	}
+
+	if got := pollCalls.Load(); got != 0 {
+		t.Fatalf("agent-mode create polled instance status %d times with default --wait; want 0", got)
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal(h.Stdout.Bytes(), &result); err != nil {
+		t.Fatalf("failed to parse JSON output: %v\nOutput: %s", err, h.Stdout.String())
+	}
+	if got := result["id"]; got != "inst-001" {
+		t.Errorf("expected id=inst-001, got %v", got)
+	}
+}
+
+// TestRunCreate_AgentMode_ExplicitWaitPolls: an explicit --wait opts the agent
+// back into status polling.
+func TestRunCreate_AgentMode_ExplicitWaitPolls(t *testing.T) {
+	t.Parallel()
+
+	var pollCalls atomic.Int32
+	mux := newCreatePollMux(&pollCalls)
+
+	h := newTestHarness(t, mux)
+	cmd := NewCmdCreate(h.Factory, h.IOStreams)
+	cmd.SetArgs([]string{
+		"--kind", "gpu",
+		"--instance-type", "1V100.6V",
+		"--os", "ubuntu-24.04-cuda-12.8-open-docker",
+		"--hostname", "gpu-runner",
+		"--wait",
+		"--wait-timeout", "30s",
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("cmd.Execute() returned error: %v\nStderr: %s", err, h.Stderr.String())
+	}
+
+	if got := pollCalls.Load(); got == 0 {
+		t.Fatal("explicit --wait in agent mode did not poll instance status")
+	}
+}
+
+// newCreatePollMux serves instance creation and counts GetByID status polls;
+// the instance reads terminal "running" on the first poll.
+func newCreatePollMux(pollCalls *atomic.Int32) *http.ServeMux {
+	mux := baseMux()
+	mux.HandleFunc("POST /instances", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":             "inst-001",
+			"hostname":       "gpu-runner",
+			"status":         "new",
+			"instance_type":  "1V100.6V",
+			"image":          "ubuntu-24.04-cuda-12.8-open-docker",
+			"location":       "FIN-01",
+			"price_per_hour": 1.50,
+		})
+	})
+	mux.HandleFunc("GET /instances/{id}", func(w http.ResponseWriter, _ *http.Request) {
+		pollCalls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":             "inst-001",
+			"hostname":       "gpu-runner",
+			"status":         "running",
+			"instance_type":  "1V100.6V",
+			"image":          "ubuntu-24.04-cuda-12.8-open-docker",
+			"location":       "FIN-01",
+			"price_per_hour": 1.50,
+		})
+	})
+	return mux
 }
 
 // TestRunCreate_AgentMode_NoClient verifies that runCreate returns an error

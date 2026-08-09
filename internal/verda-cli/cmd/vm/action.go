@@ -156,6 +156,10 @@ func NewCmdAction(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 	cmd.Flags().StringVar(&opts.InstanceID, "id", "", "Instance ID to act on")
 	cmd.Flags().StringVar(&opts.Action, "action", "", "Action to perform: start, shutdown, force_shutdown, hibernate, delete")
 	cmd.Flags().BoolVar(&opts.Yes, "yes", false, "Skip confirmation for destructive actions (required in agent mode)")
+	cmd.Flags().BoolVar(&opts.WithVolumes, "with-volumes", false, "Also delete all attached volumes (delete only)")
+	// Hidden like on non-delete shortcuts: `vm delete --with-volumes` is the
+	// canonical UX; the flag works here for `--action delete` (agent parity).
+	_ = cmd.Flags().MarkHidden("with-volumes")
 	opts.Wait.AddFlags(cmd.Flags(), true) // --wait defaults to true to preserve existing behavior
 
 	return cmd
@@ -172,7 +176,7 @@ func runAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 		if opts.Hostname != "" {
 			flags = append(flags, "--hostname")
 		}
-		return fmt.Errorf("%s can only be used with --all", strings.Join(flags, " and "))
+		return cmdutil.UsageErrorf(cmd, "%s can only be used with --all", strings.Join(flags, " and "))
 	}
 
 	// In agent mode, --id and --action are required.
@@ -214,8 +218,11 @@ func runAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 		opts.InstanceID = id
 	}
 
-	// Fetch instance details.
-	inst, err := client.Instances.GetByID(ctx, opts.InstanceID)
+	// Fetch instance details. Bare cmd.Context() would have no deadline now
+	// that the HTTP client carries no Timeout (review H2 sweep).
+	fetchCtx, fetchCancel := context.WithTimeout(ctx, f.Options().Timeout)
+	inst, err := client.Instances.GetByID(fetchCtx, opts.InstanceID)
+	fetchCancel()
 	if err != nil {
 		return fmt.Errorf("fetching instance: %w", err)
 	}
@@ -238,35 +245,32 @@ func runAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 	var action instanceAction
 
 	if opts.Action != "" {
-		var resolveErr error
-		action, resolveErr = resolveAction(opts.Action, validActions)
-		if resolveErr != nil {
-			return resolveErr
+		var err error
+		action, err = resolveAction(opts.Action, validActions)
+		if err != nil {
+			return err
 		}
 	} else {
 		// Interactive: show instance summary and prompt for action.
-		_, _ = fmt.Fprint(ioStreams.Out, renderInstanceCard(inst))
-
-		actionLabels := make([]string, 0, len(validActions)+1)
-		for _, a := range validActions {
-			actionLabels = append(actionLabels, a.Label)
-		}
-		actionLabels = append(actionLabels, "Cancel")
-
-		actionIdx, err := prompter.Select(ctx, "Select action", actionLabels, tui.WithShowHints(true))
+		picked, err := selectAction(ctx, ioStreams, prompter, inst, validActions)
 		if err != nil {
-			return nil
+			return err
 		}
-		if actionIdx == len(validActions) { // Cancel
-			return nil
+		if picked == nil {
+			return nil // User canceled.
 		}
-		action = validActions[actionIdx]
+		action = *picked
+	}
+
+	// --with-volumes only applies to delete (delete has Execute == nil).
+	if opts.WithVolumes && action.Execute != nil {
+		return cmdutil.UsageErrorf(cmd, "--with-volumes is only valid with the delete action")
 	}
 
 	// Special handling for delete — needs volume selection sub-flow.
 	if action.Execute == nil {
 		if f.AgentMode() {
-			return runDeleteAgent(ctx, f, ioStreams, client, inst, opts.Yes)
+			return runDeleteAgent(ctx, f, ioStreams, client, inst, opts.Yes, opts.WithVolumes)
 		}
 		return runDeleteFlow(ctx, f, ioStreams, client, inst)
 	}
@@ -278,7 +282,14 @@ func runAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 	}
 	if isDestructive && !f.AgentMode() {
 		confirmed, err := confirmDestructive(ctx, ioStreams, prompter, &action, inst)
-		if err != nil || !confirmed {
+		if err != nil {
+			if cmdutil.IsPromptCancel(err) {
+				_, _ = fmt.Fprintln(ioStreams.ErrOut, "Canceled.")
+				return nil
+			}
+			return err
+		}
+		if !confirmed {
 			_, _ = fmt.Fprintln(ioStreams.ErrOut, "Canceled.")
 			return nil
 		}
@@ -294,7 +305,7 @@ func runAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 	actionCtx, cancel := context.WithTimeout(ctx, f.Options().Timeout)
 	defer cancel()
 
-	err = cmdutil.RunWithSpinner(actionCtx, f.Status(), fmt.Sprintf("%s %s...", action.Label, inst.Hostname), func() error {
+	err = cmdutil.RunWithSpinner(actionCtx, f.Status(), fmt.Sprintf("%s %s...", action.Label, inst.Hostname), func(ctx context.Context) error {
 		return action.Execute(actionCtx, client, inst)
 	})
 	if err != nil {
@@ -303,10 +314,21 @@ func runAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 
 	// Structured output for agent mode.
 	if f.AgentMode() {
+		// Truthful default: the API accepted the action; nothing has completed
+		// yet (same contract as MCP vm_action). --wait defaults to true but is
+		// locked in before --agent is parsed, so only an explicitly passed flag
+		// opts the agent into polling (same override as vm create).
 		result := map[string]string{
 			"id":     inst.ID,
 			"action": opts.Action,
-			"status": "completed",
+			"status": "accepted",
+		}
+		wait := opts.Wait.Wait && cmd.Flags().Changed("wait")
+		if wait && action.ExpectStatus != "" {
+			if _, err := cmdutil.PollInstanceStatus(ctx, nil, client, inst.ID, opts.Wait, action.ExpectStatus); err != nil {
+				return err
+			}
+			result["status"] = "completed"
 		}
 		_, _ = cmdutil.WriteStructured(ioStreams.Out, f.OutputFormat(), result)
 		return nil
@@ -328,35 +350,30 @@ func runAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 	return nil
 }
 
-// runDeleteAgent handles delete in agent mode: requires --yes, deletes all volumes.
-func runDeleteAgent(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client *verda.Client, inst *verda.Instance, yes bool) error {
+// runDeleteAgent handles a single-instance delete in agent mode. It mirrors
+// the batch contract exactly: --yes is required, attached volumes are deleted
+// only with --with-volumes, and the JSON output shares the batch shape.
+func runDeleteAgent(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client *verda.Client, inst *verda.Instance, yes, withVolumes bool) error {
 	if !yes {
 		return cmdutil.NewConfirmationRequiredError(verda.ActionDelete)
 	}
 
-	// In agent mode, delete the instance and all attached volumes.
-	volumes := fetchInstanceVolumes(ctx, client, inst)
-	volumeIDs := make([]string, 0, len(volumes))
-	for i := range volumes {
-		volumeIDs = append(volumeIDs, volumes[i].ID)
+	// VolumeIDs: nil would invoke the API default (OS volume deleted), so the
+	// default path passes an explicit empty slice and only --with-volumes
+	// names the attached volumes (same as runBatchDelete).
+	volumeIDs := []string{}
+	if withVolumes {
+		volumeIDs = cmdutil.UniqueVolumeIDs(inst)
 	}
 
 	deleteCtx, cancel := context.WithTimeout(ctx, f.Options().Timeout)
 	defer cancel()
 
-	err := client.Instances.Delete(deleteCtx, []string{inst.ID}, volumeIDs, false)
-	if err != nil {
+	if err := client.Instances.Delete(deleteCtx, []string{inst.ID}, volumeIDs, false); err != nil {
 		return err
 	}
 
-	result := map[string]any{
-		"id":              inst.ID,
-		"action":          verda.ActionDelete,
-		"status":          "completed",
-		"volumes_deleted": len(volumeIDs),
-	}
-	_, _ = cmdutil.WriteStructured(ioStreams.Out, f.OutputFormat(), result)
-	return nil
+	return writeBatchAgentOutput(ioStreams, f.OutputFormat(), verda.ActionDelete, []verda.Instance{*inst}, nil)
 }
 
 // resolveInstanceInteractive handles interactive instance selection.
@@ -414,13 +431,40 @@ func selectInstance(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IO
 
 	idx, err := f.Prompter().Select(ctx, "Select instance (type to filter)", labels, tui.WithShowHints(true))
 	if err != nil {
-		return "", nil //nolint:nilerr // User pressed Esc/Ctrl+C during prompt.
+		if cmdutil.IsPromptCancel(err) {
+			return "", nil // User pressed Esc/Ctrl+C during prompt.
+		}
+		return "", err
 	}
 	if idx == len(instances) {
 		return "", nil
 	}
 
 	return instances[idx].ID, nil
+}
+
+// selectAction shows the instance summary and prompts for an action.
+// Returns nil when the user cancels or picks "Cancel".
+func selectAction(ctx context.Context, ioStreams cmdutil.IOStreams, prompter tui.Prompter, inst *verda.Instance, validActions []instanceAction) (*instanceAction, error) {
+	_, _ = fmt.Fprint(ioStreams.Out, renderInstanceCard(inst))
+
+	actionLabels := make([]string, 0, len(validActions)+1)
+	for _, a := range validActions {
+		actionLabels = append(actionLabels, a.Label)
+	}
+	actionLabels = append(actionLabels, "Cancel")
+
+	actionIdx, err := prompter.Select(ctx, "Select action", actionLabels, tui.WithShowHints(true))
+	if err != nil {
+		if cmdutil.IsPromptCancel(err) {
+			return nil, nil // User pressed Esc/Ctrl+C.
+		}
+		return nil, err
+	}
+	if actionIdx == len(validActions) { // Cancel
+		return nil, nil
+	}
+	return &validActions[actionIdx], nil
 }
 
 // runDeleteFlow handles the delete action with volume selection.
@@ -437,7 +481,9 @@ func runDeleteFlow(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOS
 	// Fetch attached volumes.
 	volumes := fetchInstanceVolumes(ctx, client, inst)
 
-	var volumeIDs []string
+	// Explicit empty slice, not nil: nil volume_ids invokes the API default
+	// of deleting the OS volume, contradicting the keep-billing warning below.
+	volumeIDs := []string{}
 	if len(volumes) > 0 {
 		_, _ = fmt.Fprintf(ioStreams.ErrOut, "  Choose storage to delete\n")
 		_, _ = fmt.Fprintf(ioStreams.ErrOut, "  %s\n\n", dimStyle.Render("Deleted storage can be restored within 96 hours"))
@@ -453,7 +499,10 @@ func runDeleteFlow(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOS
 
 		indices, err := prompter.MultiSelect(ctx, "Select volumes to delete (optional)", labels)
 		if err != nil {
-			return nil
+			if cmdutil.IsPromptCancel(err) {
+				return nil // User pressed Esc/Ctrl+C.
+			}
+			return err
 		}
 		for _, idx := range indices {
 			volumeIDs = append(volumeIDs, volumes[idx].ID)
@@ -471,7 +520,14 @@ func runDeleteFlow(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOS
 		warnStyle.Render("This action cannot be undone."))
 
 	confirmed, err := prompter.Confirm(ctx, fmt.Sprintf("Delete %s?", inst.Hostname))
-	if err != nil || !confirmed {
+	if err != nil {
+		if cmdutil.IsPromptCancel(err) {
+			_, _ = fmt.Fprintln(ioStreams.ErrOut, "Canceled.")
+			return nil
+		}
+		return err
+	}
+	if !confirmed {
 		_, _ = fmt.Fprintln(ioStreams.ErrOut, "Canceled.")
 		return nil
 	}
@@ -486,7 +542,7 @@ func runDeleteFlow(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOS
 	deleteCtx, cancel := context.WithTimeout(ctx, f.Options().Timeout)
 	defer cancel()
 
-	err = cmdutil.RunWithSpinner(deleteCtx, f.Status(), fmt.Sprintf("Deleting %s...", inst.Hostname), func() error {
+	err = cmdutil.RunWithSpinner(deleteCtx, f.Status(), fmt.Sprintf("Deleting %s...", inst.Hostname), func(ctx context.Context) error {
 		return client.Instances.Delete(deleteCtx, []string{inst.ID}, volumeIDs, false)
 	})
 	if err != nil {

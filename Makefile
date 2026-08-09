@@ -25,8 +25,8 @@ lint.fix: ## Run golangci-lint with auto-fix
 security: ## Run gosec-only scan mirroring CI (ignores .golangci.yaml, so test files are scanned too)
 	@golangci-lint run --no-config -E gosec ./...
 
-test: ## Run all tests
-	@go test -count=1 ./...
+test: ## Run all tests (with race detector)
+	@go test -race -count=1 ./...
 
 test.integration: build ## Run integration tests (requires staging credentials in [test] profile)
 	@cp $(OUTPUT_DIR)/verda /usr/local/bin/verda-test
@@ -38,6 +38,7 @@ test-s3-integration: build ## Run S3 data-plane smoke test against a live endpoi
 
 fmt: ## Format code with gofmt and goimports
 	@gofmt -w .
+	@# local prefix has a known typo (missing .com, same as .golangci.yaml); fixing it would regroup ~100 files — deliberate deferral, see .golangci.yaml.
 	@goimports -w -local github/verda-cloud/verda-cli .
 	@go mod tidy
 

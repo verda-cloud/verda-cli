@@ -42,10 +42,11 @@ func terminalHeight(w io.Writer) int {
 }
 
 type pagerModel struct {
-	viewport viewport.Model
-	title    string
-	ready    bool
-	quitting bool
+	viewport    viewport.Model
+	title       string
+	ready       bool
+	quitting    bool
+	interrupted bool // true for Ctrl+C (hard cancel), false for q/Esc
 }
 
 func newPagerModel(content string, cfg tui.PagerConfig) pagerModel {
@@ -85,7 +86,11 @@ func (m pagerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.ready = true
 	case tea.KeyPressMsg:
 		switch msg.String() {
-		case "q", keyEsc, keyCtrlC:
+		case keyCtrlC:
+			m.quitting = true
+			m.interrupted = true
+			return m, tea.Quit
+		case "q", keyEsc:
 			m.quitting = true
 			return m, tea.Quit
 		}
@@ -126,11 +131,12 @@ func (m pagerModel) View() tea.View {
 func (p *Prompter) Pager(ctx context.Context, content string, opts ...tui.PagerOption) error {
 	cfg := tui.ResolvePagerConfig(opts)
 
-	// Auto-detect: if content fits in terminal, just print it.
+	// Auto-detect: if content fits in terminal, just print it. The
+	// print-through path is data, so it goes to dataOut (house rule).
 	lines := strings.Count(content, "\n") + 1
 	termHeight := terminalHeight(p.out)
 	if lines <= termHeight-2 { // leave room for prompt
-		_, err := fmt.Fprint(p.out, content)
+		_, err := fmt.Fprint(p.dataOut, content)
 		return err
 	}
 
@@ -142,6 +148,12 @@ func (p *Prompter) Pager(ctx context.Context, content string, opts ...tui.PagerO
 		tea.WithContext(ctx),
 	)
 
-	_, err := program.Run()
-	return err
+	result, err := program.Run()
+	if err != nil {
+		return err
+	}
+	if m, ok := result.(pagerModel); ok && m.interrupted {
+		return tui.ErrInterrupted
+	}
+	return nil
 }

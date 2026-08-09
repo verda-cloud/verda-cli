@@ -201,7 +201,11 @@ func runPush(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams,
 	}
 	loader := sourceLoaderBuilder(ping)
 
-	ctx, cancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
+	// Load+Write are data-plane: a multi-GB image legitimately outlives the
+	// per-request --timeout, so pushes run on cmd.Context() with Ctrl+C as the
+	// stop signal (mirrors objectstorage cp). cancel stays explicit so the
+	// progress view's Esc aborts in-flight transfers.
+	ctx, cancel := context.WithCancel(cmd.Context())
 	defer cancel()
 
 	// --no-mount is accepted but not yet wired: ggcr's remote.Write always

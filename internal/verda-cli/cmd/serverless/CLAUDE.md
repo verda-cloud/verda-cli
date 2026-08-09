@@ -133,7 +133,7 @@ Describe cards (`renderContainerDeploymentCard`, `renderJobDeploymentCard`) prin
 ## Relationships
 
 - `cmdutil` (`internal/verda-cli/cmd/util`) — `Factory`, `IOStreams`, `WithSpinner`, `RunWithSpinner`, `DebugJSON`, `WriteStructured`, `NewMissingFlagsError`, `NewConfirmationRequiredError`, `UsageErrorf`, `LongDesc`, `Examples`, `DefaultSubCommandRun`.
-- `pkg/tui/wizard` — `Flow`, `Step`, `Choice`, `Store`, `Engine`, `NewEngine`, `StaticChoices`, `WithOutput`, `WithExitConfirmation`, prompt-type enums.
+- `pkg/tui/wizard` — `Flow`, `Step`, `Choice`, `Store`, `Engine`, `NewEngine`, `StaticChoices`, `WithOutput`, prompt-type enums.
 - `pkg/tui` — `Prompter`, `Status`, `WithConfirmDefault`.
 - SDK (`verdacloud-sdk-go/pkg/verda`):
   - `ContainerDeploymentsService` — `GetDeployments`, `CreateDeployment`, `GetDeploymentByName`, `DeleteDeployment`, `GetDeploymentStatus`, `PauseDeployment`, `ResumeDeployment`, `RestartDeployment`, `PurgeDeploymentQueue`, `GetServerlessComputeResources`, `GetRegistryCredentials`, `GetSecrets`, `GetFileSecrets`, `ValidateCreateDeploymentRequest`.

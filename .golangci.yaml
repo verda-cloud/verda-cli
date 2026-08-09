@@ -123,4 +123,7 @@ formatters:
   settings:
     goimports:
       local-prefixes:
+        # Known typo (missing .com): local grouping never matched, and fixing
+        # the prefix would regroup imports in ~100 files — deliberately
+        # deferred until a dedicated import-regroup change. Review LOW-2026-08-09.
         - github/verda-cloud/verda-cli

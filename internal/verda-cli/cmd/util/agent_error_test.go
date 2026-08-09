@@ -18,8 +18,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
 )
 
@@ -160,5 +163,35 @@ func TestClassifyError_Fallback(t *testing.T) {
 	}
 	if got.ExitCode != ExitGeneral {
 		t.Errorf("exit code = %d, want %d", got.ExitCode, ExitGeneral)
+	}
+}
+
+// Usage/flag-misuse errors must classify as VALIDATION_ERROR with exit 2 so
+// agents can tell bad input apart from server failures (exit 4/1) and fix the
+// call. The --help hint stays out of the envelope (human-facing text only).
+func TestClassifyError_UsageError(t *testing.T) {
+	cmd := &cobra.Command{Use: "verda volume delete"}
+	err := UsageErrorf(cmd, "--status can only be used with --all")
+
+	got := ClassifyError(err)
+	if got.Code != "VALIDATION_ERROR" {
+		t.Errorf("code = %q, want VALIDATION_ERROR", got.Code)
+	}
+	if got.ExitCode != ExitBadArgs {
+		t.Errorf("exit code = %d, want %d", got.ExitCode, ExitBadArgs)
+	}
+	if got.Message != "--status can only be used with --all" {
+		t.Errorf("message = %q — the --help hint must not leak into the envelope", got.Message)
+	}
+
+	// Human-facing text keeps the hint.
+	if !strings.Contains(err.Error(), "--help") {
+		t.Errorf("Error() lost the help hint: %q", err.Error())
+	}
+
+	// Wrapping keeps the classification.
+	wrapped := fmt.Errorf("volume delete: %w", err)
+	if ClassifyError(wrapped).Code != "VALIDATION_ERROR" {
+		t.Error("wrapped UsageError lost the VALIDATION_ERROR classification")
 	}
 }

@@ -24,6 +24,8 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/verda-cloud/verda-cli/pkg/tui/wizard"
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
+
+	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
 
 // summaryView implements wizard.View and renders the deployment summary
@@ -90,7 +92,7 @@ func renderDeploymentSummary(opts *createOptions, cache *apiCache) string {
 	if opts.OSVolumeSize > 0 {
 		if vt, ok := cache.volumeTypes[verda.VolumeTypeNVMe]; ok {
 			osVolUnitPrice = vt.Price.PricePerMonthPerGB
-			osVolPrice = volumeHourlyPrice(osVolUnitPrice, opts.OSVolumeSize)
+			osVolPrice = cmdutil.VolumeHourlyPrice(osVolUnitPrice, opts.OSVolumeSize)
 			storageHourly += osVolPrice
 		}
 	}
@@ -113,7 +115,7 @@ func renderDeploymentSummary(opts *createOptions, cache *apiCache) string {
 		var hourly, unitP float64
 		if vt, ok := cache.volumeTypes[vType]; ok {
 			unitP = vt.Price.PricePerMonthPerGB
-			hourly = volumeHourlyPrice(unitP, size)
+			hourly = cmdutil.VolumeHourlyPrice(unitP, size)
 			storageHourly += hourly
 		}
 		volDetails = append(volDetails, volDetail{name, vType, size, unitP, hourly})

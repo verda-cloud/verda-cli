@@ -354,7 +354,7 @@ func confirmAndRunCopy(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.
 		return false, nil
 	}
 
-	srcAuth, aerr := buildSourceAuth(opts, srcPassword)
+	srcAuth, aerr := buildSourceAuth(opts, srcRef, srcPassword)
 	if aerr != nil {
 		return false, aerr
 	}

@@ -44,15 +44,39 @@ const (
 )
 
 // sensitiveJSONFieldRe matches "field": "value" JSON entries whose values must
-// not appear in debug output (OAuth credentials, bearer tokens, etc.).
-// Value pattern allows escaped quotes (\") so values containing them are
-// redacted whole — a bare [^"]* would stop at the first escaped quote and
-// leak the remainder while emitting malformed JSON.
+// not appear in debug output (OAuth credentials, bearer tokens, provisioning
+// secrets — the key list mirrors the SDK's struct tags plus the API payloads
+// where verify-live testing saw them leak). Value pattern allows escaped
+// quotes (\") so values containing them are redacted whole — a bare [^"]*
+// would stop at the first escaped quote and leak the remainder while emitting
+// malformed JSON.
 var sensitiveJSONFieldRe = regexp.MustCompile(
-	`("(?:client_secret|access_token|refresh_token|id_token|password|api_key|bearer|authorization)")(\s*:\s*)"(?:[^"\\]|\\.)*"`)
+	`("(?:client_secret|secret_access_key|service_account_key|value_or_reference_to_secret|jupyter_token|access_token|refresh_token|id_token|password|api_key|bearer|authorization)")(\s*:\s*)"(?:[^"\\]|\\.)*"`)
+
+// sensitiveFormFieldRe matches name=value pairs in form-encoded bodies whose
+// values are secrets. The SDK retries /oauth2/token form-encoded when the API
+// rejects the JSON attempt with 400 — without this, --debug prints
+// client_secret verbatim exactly when the user captures logs for a bug
+// report (review H1).
+var sensitiveFormFieldRe = regexp.MustCompile(
+	`\b(client_secret|access_token|refresh_token|id_token|password|token)=[^&]*`)
 
 func redactSensitiveJSON(s string) string {
 	return sensitiveJSONFieldRe.ReplaceAllString(s, `$1$2"<redacted>"`)
+}
+
+func redactSensitiveForm(s string) string {
+	return sensitiveFormFieldRe.ReplaceAllString(s, `$1=<redacted>`)
+}
+
+// redactSensitiveBody picks a redactor by content type. Unknown types fall
+// back to the JSON redactor: the API speaks JSON, and the JSON pattern
+// harmlessly no-ops on non-JSON bytes.
+func redactSensitiveBody(contentType, s string) string {
+	if strings.HasPrefix(strings.ToLower(contentType), "application/x-www-form-urlencoded") {
+		return redactSensitiveForm(s)
+	}
+	return redactSensitiveJSON(s)
 }
 
 // Factory provides shared resources that are created once in the root command
@@ -61,7 +85,11 @@ func redactSensitiveJSON(s string) string {
 type Factory interface {
 	// ServerAddr returns the configured API server address.
 	ServerAddr() string
-	// HTTPClient returns a shared HTTP client with the configured timeout.
+	// HTTPClient returns a shared HTTP client. It intentionally has no
+	// client-level Timeout: that cap applies to whole-body reads and would
+	// kill long transfers. Callers bound requests with a context instead
+	// (control plane: WithTimeout(cmd.Context(), Options().Timeout); data
+	// plane: cmd.Context()).
 	HTTPClient() *http.Client
 	// Options returns the underlying Options for advanced use.
 	Options() *clioptions.Options
@@ -150,7 +178,7 @@ func (t *debugTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		_, _ = fmt.Fprintf(t.out, "DEBUG:   %s: %s\n", k, strings.Join(req.Header[k], ", "))
 	}
 	if len(reqBody) > 0 {
-		_, _ = fmt.Fprintf(t.out, "DEBUG: request body: %s\n", redactSensitiveJSON(string(reqBody)))
+		_, _ = fmt.Fprintf(t.out, "DEBUG: request body: %s\n", redactSensitiveBody(req.Header.Get("Content-Type"), string(reqBody)))
 	}
 
 	resp, err := t.base.RoundTrip(req)
@@ -175,36 +203,52 @@ func (t *debugTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 	_, _ = fmt.Fprintf(t.out, "DEBUG: HTTP response %s\n", resp.Status)
 	if len(respBody) > 0 {
-		_, _ = fmt.Fprintf(t.out, "DEBUG: response body: %s\n", redactSensitiveJSON(string(respBody)))
+		_, _ = fmt.Fprintf(t.out, "DEBUG: response body: %s\n", redactSensitiveBody(resp.Header.Get("Content-Type"), string(respBody)))
 	}
 	return resp, nil
 }
 
-// NewFactory creates a Factory from the given Options. debugOut receives
-// HTTP request/response dumps when --debug is enabled.
-func NewFactory(opts *clioptions.Options, debugOut io.Writer) Factory {
+// NewFactory creates a Factory from the given Options. ioStreams wires all
+// harness output: --debug dumps HTTP details to ErrOut, and prompt UI
+// (select/confirm/text input, spinners) renders on ErrOut so stdout stays
+// machine-consumable data (house rule; a bare tui.Default() rendered prompts
+// to os.Stdout and polluted pipes — review MEDIUM "prompts honor IO").
+//
+// The client has no client-level Timeout (review H2): Client.Timeout covers
+// the entire body read and silently clamped any request to opts.Timeout,
+// killing multi-GB transfers. Dial/TLS bounds stay on http.DefaultTransport;
+// per-call deadlines come from request contexts instead.
+func NewFactory(opts *clioptions.Options, ioStreams IOStreams) Factory {
 	f := &factoryImpl{opts: opts}
 	var rt http.RoundTripper = &userAgentTransport{base: http.DefaultTransport, userAgent: userAgentString()}
-	rt = &debugTransport{base: rt, out: debugOut, enabled: f.Debug}
-	f.client = &http.Client{
-		Timeout:   opts.Timeout,
-		Transport: rt,
+	rt = &debugTransport{base: rt, out: ioStreams.ErrOut, enabled: f.Debug}
+	f.client = &http.Client{Transport: rt}
+	streamIO := func(s *tui.IO) {
+		s.In, s.Out, s.ErrOut = ioStreams.In, ioStreams.Out, ioStreams.ErrOut
 	}
-	f.prompter = tui.Default()
-	f.status = tui.DefaultStatus()
-	if opts.Agent {
-		f.prompter = &agentPrompter{}
-		f.status = nil
-	}
+	f.prompter = tui.Default(streamIO)
+	f.status = tui.DefaultStatus(streamIO)
 	return f
 }
 
 func (f *factoryImpl) ServerAddr() string           { return f.opts.Server }
 func (f *factoryImpl) HTTPClient() *http.Client     { return f.client }
 func (f *factoryImpl) Options() *clioptions.Options { return f.opts }
-func (f *factoryImpl) Prompter() tui.Prompter       { return f.prompter }
+
+// Prompter resolves the prompt implementation at call time: the factory is
+// built during command-tree construction, before flags are parsed and
+// opts.Complete() runs, so opts.Agent is never reliable in NewFactory.
+// In agent mode every prompt attempt must fail fast with a structured
+// INTERACTIVE_PROMPT_BLOCKED error instead of blocking on stdin.
+func (f *factoryImpl) Prompter() tui.Prompter {
+	if f.opts.Agent {
+		return &agentPrompter{}
+	}
+	return f.prompter
+}
+
 func (f *factoryImpl) Status() tui.Status {
-	if f.opts.Output != "table" {
+	if f.opts.Agent || f.opts.Output != "table" {
 		return nil
 	}
 	return f.status

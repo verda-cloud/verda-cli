@@ -162,10 +162,11 @@ func IsAgentError(err error) bool {
 //
 // Classification priority:
 //  1. Already an *AgentError → return as-is
-//  2. SDK *verda.APIError → map status codes to error codes
-//  3. SDK *verda.ValidationError → VALIDATION_ERROR
-//  4. Auth-related error messages → AUTH_ERROR
-//  5. Fallback → generic ERROR
+//  2. CLI *UsageError (flag/argument misuse) → VALIDATION_ERROR, exit 2
+//  3. SDK *verda.APIError → map status codes to error codes
+//  4. SDK *verda.ValidationError → VALIDATION_ERROR
+//  5. Auth-related error messages → AUTH_ERROR
+//  6. Fallback → generic ERROR
 func ClassifyError(err error) *AgentError {
 	if err == nil {
 		return nil
@@ -177,25 +178,35 @@ func ClassifyError(err error) *AgentError {
 		return ae
 	}
 
-	// 2. SDK API error with status code.
+	// 2. CLI usage errors (flag misuse) — bad input, exit 2.
+	var usageErr *UsageError
+	if errors.As(err, &usageErr) {
+		return &AgentError{
+			Code:     "VALIDATION_ERROR",
+			Message:  usageErr.Message(),
+			ExitCode: ExitBadArgs,
+		}
+	}
+
+	// 3. SDK API error with status code.
 	var apiErr *verda.APIError
 	if errors.As(err, &apiErr) {
 		return classifyAPIError(apiErr)
 	}
 
-	// 3. SDK validation error.
+	// 4. SDK validation error.
 	var valErr *verda.ValidationError
 	if errors.As(err, &valErr) {
 		return NewValidationError(valErr.Field, valErr.Message)
 	}
 
-	// 4. Auth-related errors (heuristic on message).
+	// 5. Auth-related errors (heuristic on message).
 	msg := err.Error()
 	if isAuthError(msg) {
 		return NewAuthError(msg)
 	}
 
-	// 5. Fallback.
+	// 6. Fallback.
 	return &AgentError{
 		Code:     "ERROR",
 		Message:  msg,

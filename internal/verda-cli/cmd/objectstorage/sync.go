@@ -123,8 +123,10 @@ func runSync(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams,
 		return cmdutil.UsageErrorf(cmd, "sync requires at least one s3:// URI")
 	}
 
-	ctx, cancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
-	defer cancel()
+	// Mirrors cp.go runCp (see its comment): bulk transfers are data-plane and
+	// run on cmd.Context() (Ctrl+C), never the per-request --timeout. Only the
+	// enumeration calls re-bound (list control plane) inside each direction.
+	ctx := cmd.Context()
 
 	switch dir {
 	case dirUpload:
@@ -177,7 +179,9 @@ func runSyncUpload(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOS
 	if err != nil {
 		return err
 	}
-	dstEntries, err := enumerateS3(ctx, f, ioStreams, apiClient, dst.Bucket, dst.Key, opts.Include, opts.Exclude)
+	listCtx, listCancel := context.WithTimeout(ctx, f.Options().Timeout)
+	dstEntries, err := enumerateS3(listCtx, f, ioStreams, apiClient, dst.Bucket, dst.Key, opts.Include, opts.Exclude)
+	listCancel()
 	if err != nil {
 		return err
 	}
@@ -238,7 +242,9 @@ func runSyncDownload(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.I
 		return err
 	}
 
-	srcEntries, err := enumerateS3(ctx, f, ioStreams, apiClient, src.Bucket, src.Key, opts.Include, opts.Exclude)
+	listCtx, listCancel := context.WithTimeout(ctx, f.Options().Timeout)
+	srcEntries, err := enumerateS3(listCtx, f, ioStreams, apiClient, src.Bucket, src.Key, opts.Include, opts.Exclude)
+	listCancel()
 	if err != nil {
 		return err
 	}
@@ -296,11 +302,13 @@ func runSyncCopy(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStr
 		return err
 	}
 
-	srcEntries, err := enumerateS3(ctx, f, ioStreams, apiClient, src.Bucket, src.Key, opts.Include, opts.Exclude)
-	if err != nil {
-		return err
+	listCtx, listCancel := context.WithTimeout(ctx, f.Options().Timeout)
+	srcEntries, err := enumerateS3(listCtx, f, ioStreams, apiClient, src.Bucket, src.Key, opts.Include, opts.Exclude)
+	var dstEntries []syncEntry
+	if err == nil {
+		dstEntries, err = enumerateS3(listCtx, f, ioStreams, apiClient, dst.Bucket, dst.Key, opts.Include, opts.Exclude)
 	}
-	dstEntries, err := enumerateS3(ctx, f, ioStreams, apiClient, dst.Bucket, dst.Key, opts.Include, opts.Exclude)
+	listCancel()
 	if err != nil {
 		return err
 	}

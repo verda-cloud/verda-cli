@@ -146,15 +146,7 @@ func writeCredentialsFile(t *testing.T, content string) string {
 
 func makeLocalTempDir(t *testing.T) string {
 	t.Helper()
-
-	dir, err := os.MkdirTemp(".", "tmp-test-")
-	if err != nil {
-		t.Fatalf("os.MkdirTemp() returned error: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = os.RemoveAll(dir)
-	})
-	return dir
+	return t.TempDir()
 }
 
 func TestOptionsValidateOutputFormat(t *testing.T) {
@@ -247,17 +239,18 @@ verda_client_secret = secret
 // ---------------------------------------------------------------------------
 // Credential resolution priority tests
 //
-// Auto-resolved profile (no explicit --auth.profile):
-//   1. CLI flags          (--auth.client-id=xxx)
-//   2. Config file        (viper: auth.client-id in config.yaml)
+// Per-field precedence is uniform, whether the profile is auto-resolved or
+// explicitly selected (--auth.profile / VERDA_PROFILE):
+//   1. CLI flag           (--auth.client-id=xxx)
+//   2. Config file/viper  (auth.client-id; also VERDA_AUTH_CLIENT_ID via
+//                          viper's AutomaticEnv binding)
 //   3. Environment vars   (VERDA_CLIENT_ID)
-//   4. Credentials file   ([default] section in ~/.verda/credentials)
+//   4. Credentials file   (selected profile section fills only unset fields)
 //
-// Explicit profile (--auth.profile=staging):
-//   1. CLI flags          — always wins
-//   2. Credentials file   — explicit profile promotes its creds
-//   3. Config file        — viper values
-//   4. Environment vars   — lowest
+// An explicit profile selects WHICH credentials-file section supplies missing
+// values (and pins its verda_base_url); it does NOT promote stored values over
+// inline sources — that silently sent env-credentialed CI jobs to the wrong
+// account (review MEDIUM: env vs profile precedence).
 //
 // These tests are NOT parallel because they mutate global viper state.
 // ---------------------------------------------------------------------------
@@ -323,14 +316,22 @@ func TestCredentialPriority(t *testing.T) {
 			wantSec: "cred-secret",
 		},
 
-		// --- Explicit profile: flag > creds > viper > env ---
+		// --- Explicit profile: same cascade — the profile fills only gaps ---
 		{
-			name:    "explicit profile: creds override viper and env",
+			name:    "explicit profile: viper and env beat creds",
 			profile: "staging",
 			id:      credSource{viper: "viper-id", env: "env-id", cred: "staging-id"},
 			secret:  credSource{viper: "viper-secret", env: "env-secret", cred: "staging-secret"},
-			wantID:  "staging-id",
-			wantSec: "staging-secret",
+			wantID:  "viper-id",
+			wantSec: "viper-secret",
+		},
+		{
+			name:    "explicit profile: env beats creds when no config",
+			profile: "staging",
+			id:      credSource{env: "env-id", cred: "staging-id"},
+			secret:  credSource{env: "env-secret", cred: "staging-secret"},
+			wantID:  "env-id",
+			wantSec: "env-secret",
 		},
 		{
 			name:    "explicit profile: flag still wins over creds",
@@ -346,7 +347,15 @@ func TestCredentialPriority(t *testing.T) {
 			id:      credSource{flag: "flag-id", env: "env-id", cred: "staging-id"},
 			secret:  credSource{env: "env-secret", cred: "staging-secret"},
 			wantID:  "flag-id",
-			wantSec: "staging-secret", // explicit profile creds beat env
+			wantSec: "env-secret", // env creds beat the stored profile
+		},
+		{
+			name:    "explicit profile: creds fill only unset fields",
+			profile: "staging",
+			id:      credSource{cred: "staging-id"},
+			secret:  credSource{cred: "staging-secret"},
+			wantID:  "staging-id",
+			wantSec: "staging-secret",
 		},
 	}
 
@@ -407,6 +416,42 @@ func TestCredentialPriority(t *testing.T) {
 				t.Errorf("ClientSecret: want %q, got %q", tt.wantSec, opts.AuthOptions.ClientSecret)
 			}
 		})
+	}
+}
+
+// TestCredentialPriority_ViperEnvBinding: the real CLI enables viper
+// AutomaticEnv with prefix VERDA (cmd/helper.go initConfig), so the
+// VERDA_AUTH_CLIENT_ID/VERDA_AUTH_CLIENT_SECRET spellings land in the viper
+// layer. They must beat an explicitly selected stored profile exactly like
+// the documented VERDA_CLIENT_ID spelling does.
+func TestCredentialPriority_ViperEnvBinding(t *testing.T) {
+	// no t.Parallel — mutates global viper + env
+	viper.Reset() // clear earlier tests' viper.Set("", "") overrides, which mask env
+	viper.SetEnvPrefix("VERDA")
+	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_", "-", "_"))
+	viper.AutomaticEnv()
+	t.Cleanup(viper.Reset)
+
+	t.Setenv("VERDA_AUTH_CLIENT_ID", "viper-env-id")
+	t.Setenv("VERDA_AUTH_CLIENT_SECRET", "viper-env-secret")
+
+	path := writeCredentialsFile(t, "[staging]\nverda_client_id = staging-id\nverda_client_secret = staging-secret\n")
+
+	opts := &Options{
+		Server:  defaultBaseURL,
+		Timeout: 30,
+		AuthOptions: &AuthOptions{
+			Profile:         "staging", // explicit profile selection
+			CredentialsFile: path,
+		},
+	}
+	opts.Complete()
+
+	if got := opts.AuthOptions.ClientID; got != "viper-env-id" {
+		t.Errorf("ClientID = %q, want viper-env-id (VERDA_AUTH_* beats stored profile)", got)
+	}
+	if got := opts.AuthOptions.ClientSecret; got != "viper-env-secret" {
+		t.Errorf("ClientSecret = %q, want viper-env-secret (VERDA_AUTH_* beats stored profile)", got)
 	}
 }
 

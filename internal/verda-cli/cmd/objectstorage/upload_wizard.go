@@ -217,7 +217,7 @@ func resolveUploadSource(ctx context.Context, f cmdutil.Factory, ioStreams cmdut
 // top-level Select is canceled (so the caller can tell Esc from Ctrl+C); a
 // canceled create-name sub-prompt loops back to the Select rather than exiting.
 func selectBucketOrCreate(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client API) (string, error) {
-	out, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading buckets...", func() (*s3.ListBucketsOutput, error) {
+	out, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading buckets...", func(ctx context.Context) (*s3.ListBucketsOutput, error) {
 		return client.ListBuckets(ctx, &s3.ListBucketsInput{})
 	})
 	if err != nil {
@@ -263,7 +263,7 @@ func createBucketInteractive(ctx context.Context, f cmdutil.Factory, ioStreams c
 	if name == "" {
 		return "", nil
 	}
-	_, err = cmdutil.WithSpinner(ctx, f.Status(), "Creating bucket...", func() (*s3.CreateBucketOutput, error) {
+	_, err = cmdutil.WithSpinner(ctx, f.Status(), "Creating bucket...", func(ctx context.Context) (*s3.CreateBucketOutput, error) {
 		return client.CreateBucket(ctx, &s3.CreateBucketInput{Bucket: aws.String(name)})
 	})
 	if err != nil {
@@ -278,7 +278,7 @@ func createBucketInteractive(ctx context.Context, f cmdutil.Factory, ioStreams c
 // prompter error if the Select is canceled; a canceled new-folder sub-prompt
 // loops back to the Select.
 func selectUploadLocation(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client API, bucket, suggested string) (string, error) {
-	payload, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading folders...", func() (objectsPayload, error) {
+	payload, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading folders...", func(ctx context.Context) (objectsPayload, error) {
 		return collectObjects(ctx, f, ioStreams, client, URI{Bucket: bucket}, "/")
 	})
 	if err != nil {
