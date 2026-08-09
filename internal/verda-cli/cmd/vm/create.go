@@ -399,11 +399,11 @@ func validateKind(kind, instanceType string) error {
 	}
 
 	switch strings.ToLower(strings.TrimSpace(kind)) {
-	case "cpu":
+	case kindCPU:
 		if !strings.HasPrefix(strings.ToUpper(instanceType), "CPU.") {
 			return fmt.Errorf("--kind cpu does not match --instance-type %q", instanceType)
 		}
-	case "gpu":
+	case kindGPU:
 		if strings.HasPrefix(strings.ToUpper(instanceType), "CPU.") {
 			return fmt.Errorf("--kind gpu does not match --instance-type %q", instanceType)
 		}

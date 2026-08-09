@@ -172,7 +172,7 @@ func TestRunUpdateVerifiedHappyPath(t *testing.T) {
 	}
 
 	dst := filepath.Join(home, "bin", platformBinaryName())
-	got, err := os.ReadFile(dst)
+	got, err := os.ReadFile(dst) // #nosec G304 -- dst is under t.TempDir()
 	if err != nil {
 		t.Fatalf("reading installed binary: %v", err)
 	}
@@ -195,6 +195,7 @@ func TestRunUpdateAbortsOnChecksumMismatch(t *testing.T) {
 	if err := os.MkdirAll(binDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
+	// #nosec G306 -- fixture must be executable like a real install
 	if err := os.WriteFile(dst, []byte("old binary"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +215,7 @@ func TestRunUpdateAbortsOnChecksumMismatch(t *testing.T) {
 		t.Errorf("error should name --skip-verify as escape hatch, got: %v", err)
 	}
 
-	got, err := os.ReadFile(dst)
+	got, err := os.ReadFile(dst) // #nosec G304 -- dst is under t.TempDir()
 	if err != nil {
 		t.Fatalf("old binary missing after aborted update: %v", err)
 	}
@@ -266,7 +267,7 @@ func TestRunUpdateSkipVerifyProceeds(t *testing.T) {
 	}
 
 	dst := filepath.Join(home, "bin", platformBinaryName())
-	got, err := os.ReadFile(dst)
+	got, err := os.ReadFile(dst) // #nosec G304 -- dst is under t.TempDir()
 	if err != nil {
 		t.Fatalf("reading installed binary: %v", err)
 	}

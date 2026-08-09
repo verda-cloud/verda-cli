@@ -100,7 +100,7 @@ func TestTemplateWizard_DecideLaterLocationStaysEmpty(t *testing.T) {
 	if err := template.Save(dir, "vm", "no-location", tmpl); err != nil {
 		t.Fatalf("Save failed: %v", err)
 	}
-	data, err := os.ReadFile(filepath.Join(dir, "vm", "no-location.yaml"))
+	data, err := os.ReadFile(filepath.Join(dir, "vm", "no-location.yaml")) // #nosec G304 -- dir is t.TempDir()
 	if err != nil {
 		t.Fatalf("reading saved template: %v", err)
 	}

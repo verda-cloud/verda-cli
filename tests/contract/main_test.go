@@ -69,7 +69,7 @@ func TestMain(m *testing.M) {
 	defer func() { _ = os.RemoveAll(dir) }()
 
 	verdaBin = filepath.Join(dir, "verda")
-	build := exec.CommandContext(ctx, "go", "build", "-C", root, "-o", verdaBin, "./cmd/verda/")
+	build := exec.CommandContext(ctx, "go", "build", "-C", root, "-o", verdaBin, "./cmd/verda/") // #nosec G204 -- args are fixed literals; output path is a t.TempDir-managed dir
 	if out, err := build.CombinedOutput(); err != nil {
 		fmt.Fprintf(os.Stderr, "contract: go build ./cmd/verda: %v\n%s\n", err, out)
 		os.Exit(1)
@@ -140,7 +140,7 @@ func runCLIEnv(t *testing.T, srv *mockapi.Server, extraEnv []string, args ...str
 	defer cancel()
 
 	fullArgs := append([]string{"--base-url", srv.URL()}, args...)
-	cmd := exec.CommandContext(ctx, verdaBin, fullArgs...)
+	cmd := exec.CommandContext(ctx, verdaBin, fullArgs...) // #nosec G204 -- verdaBin is the harness-built binary under t.TempDir
 	cmd.Env = append(cliEnv(t), extraEnv...)
 	cmd.Dir = t.TempDir()
 	cmd.Stdin = devNull
