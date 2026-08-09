@@ -117,7 +117,7 @@ func ensurePricingCache(ctx context.Context, getClient clientFunc, cache *apiCac
 
 // loadAllLocations returns all locations with a skip option (for template mode).
 func loadAllLocations(ctx context.Context, cache *apiCache, getClient clientFunc) ([]wizard.Choice, error) {
-	choices := []wizard.Choice{{Label: "None (decide at deploy time)", Value: ""}}
+	choices := []wizard.Choice{{Label: "None (decide at deploy time)", Value: locationDecideLater}}
 	locMap, err := cache.fetchLocations(ctx, getClient)
 	if err != nil {
 		return nil, err

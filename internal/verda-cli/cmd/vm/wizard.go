@@ -27,6 +27,7 @@ import (
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
 
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
+	"github.com/verda-cloud/verda-cli/internal/verda-cli/template"
 )
 
 const (
@@ -42,6 +43,14 @@ const (
 	unitLabelVCPU = "vCPU"
 
 	billingTypeOnDemand = "on-demand"
+
+	// locationDecideLater is the template-mode location choice for
+	// "None (decide at deploy time)". In-memory only: the step Setter
+	// translates it to an unset location, so a saved template stays
+	// locationless and the deploy flow prompts for it. An empty Value would
+	// instead trip the engine's Default substitution for optional steps and
+	// silently persist the FIN-01 default (review H5).
+	locationDecideLater = "__decide_later__"
 )
 
 // clientFunc lazily resolves a Verda API client. This allows the wizard
@@ -238,17 +247,23 @@ func stepContract(getClient clientFunc, opts *createOptions) wizard.Step {
 				return choices, nil //nolint:nilerr // Non-fatal: just offer pay-as-you-go.
 			}
 			for _, p := range periods {
-				if p.IsEnabled {
-					desc := ""
-					if p.DiscountPercentage > 0 {
-						desc = fmt.Sprintf("%.0f%% discount", p.DiscountPercentage)
-					}
-					choices = append(choices, wizard.Choice{
-						Label:       p.Name,
-						Value:       p.Code,
-						Description: desc,
-					})
+				if !p.IsEnabled {
+					continue
 				}
+				// POST /v1/instances takes no long-term durations, so drop
+				// period codes normalizeContract would reject at deploy time.
+				if _, err := normalizeContract(p.Code); err != nil {
+					continue
+				}
+				desc := ""
+				if p.DiscountPercentage > 0 {
+					desc = fmt.Sprintf("%.0f%% discount", p.DiscountPercentage)
+				}
+				choices = append(choices, wizard.Choice{
+					Label:       p.Name,
+					Value:       p.Code,
+					Description: desc,
+				})
 			}
 			return choices, nil
 		},
@@ -377,8 +392,20 @@ func stepLocation(getClient clientFunc, cache *apiCache, opts *createOptions, mo
 			return loadAvailableLocations(ctx, cache, getClient, isSpot, instType)
 		},
 		Setter: func(v any) {
-			if s := v.(string); s != "" {
-				opts.LocationCode = s
+			s := v.(string)
+			if s == locationDecideLater {
+				opts.LocationCode = "" // decide at deploy time; keep unset
+				return
+			}
+			if s == "" {
+				return
+			}
+			opts.LocationCode = s
+			// A template hostname pattern was expanded at apply time against
+			// the pre-wizard location; re-expand {location} against the
+			// effective one picked here so the confirm summary stays truthful.
+			if strings.Contains(opts.hostnamePattern, "{location}") && opts.Hostname != "" {
+				opts.Hostname = template.ExpandHostnamePattern(opts.hostnamePattern, s)
 			}
 		},
 		Resetter: func() { opts.LocationCode = verda.LocationFIN01 },

@@ -16,6 +16,7 @@ package vm
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -156,6 +157,10 @@ func NewCmdAction(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 	cmd.Flags().StringVar(&opts.InstanceID, "id", "", "Instance ID to act on")
 	cmd.Flags().StringVar(&opts.Action, "action", "", "Action to perform: start, shutdown, force_shutdown, hibernate, delete")
 	cmd.Flags().BoolVar(&opts.Yes, "yes", false, "Skip confirmation for destructive actions (required in agent mode)")
+	cmd.Flags().BoolVar(&opts.WithVolumes, "with-volumes", false, "Also delete all attached volumes (delete only)")
+	// Hidden like on non-delete shortcuts: `vm delete --with-volumes` is the
+	// canonical UX; the flag works here for `--action delete` (agent parity).
+	_ = cmd.Flags().MarkHidden("with-volumes")
 	opts.Wait.AddFlags(cmd.Flags(), true) // --wait defaults to true to preserve existing behavior
 
 	return cmd
@@ -258,10 +263,15 @@ func runAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 		action = *picked
 	}
 
+	// --with-volumes only applies to delete (delete has Execute == nil).
+	if opts.WithVolumes && action.Execute != nil {
+		return errors.New("--with-volumes is only valid with the delete action")
+	}
+
 	// Special handling for delete — needs volume selection sub-flow.
 	if action.Execute == nil {
 		if f.AgentMode() {
-			return runDeleteAgent(ctx, f, ioStreams, client, inst, opts.Yes)
+			return runDeleteAgent(ctx, f, ioStreams, client, inst, opts.Yes, opts.WithVolumes)
 		}
 		return runDeleteFlow(ctx, f, ioStreams, client, inst)
 	}
@@ -305,10 +315,21 @@ func runAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 
 	// Structured output for agent mode.
 	if f.AgentMode() {
+		// Truthful default: the API accepted the action; nothing has completed
+		// yet (same contract as MCP vm_action). --wait defaults to true but is
+		// locked in before --agent is parsed, so only an explicitly passed flag
+		// opts the agent into polling (same override as vm create).
 		result := map[string]string{
 			"id":     inst.ID,
 			"action": opts.Action,
-			"status": "completed",
+			"status": "accepted",
+		}
+		wait := opts.Wait.Wait && cmd.Flags().Changed("wait")
+		if wait && action.ExpectStatus != "" {
+			if _, err := cmdutil.PollInstanceStatus(ctx, nil, client, inst.ID, opts.Wait, action.ExpectStatus); err != nil {
+				return err
+			}
+			result["status"] = "completed"
 		}
 		_, _ = cmdutil.WriteStructured(ioStreams.Out, f.OutputFormat(), result)
 		return nil
@@ -330,35 +351,30 @@ func runAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 	return nil
 }
 
-// runDeleteAgent handles delete in agent mode: requires --yes, deletes all volumes.
-func runDeleteAgent(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client *verda.Client, inst *verda.Instance, yes bool) error {
+// runDeleteAgent handles a single-instance delete in agent mode. It mirrors
+// the batch contract exactly: --yes is required, attached volumes are deleted
+// only with --with-volumes, and the JSON output shares the batch shape.
+func runDeleteAgent(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client *verda.Client, inst *verda.Instance, yes, withVolumes bool) error {
 	if !yes {
 		return cmdutil.NewConfirmationRequiredError(verda.ActionDelete)
 	}
 
-	// In agent mode, delete the instance and all attached volumes.
-	volumes := fetchInstanceVolumes(ctx, client, inst)
-	volumeIDs := make([]string, 0, len(volumes))
-	for i := range volumes {
-		volumeIDs = append(volumeIDs, volumes[i].ID)
+	// VolumeIDs: nil would invoke the API default (OS volume deleted), so the
+	// default path passes an explicit empty slice and only --with-volumes
+	// names the attached volumes (same as runBatchDelete).
+	volumeIDs := []string{}
+	if withVolumes {
+		volumeIDs = cmdutil.UniqueVolumeIDs(inst)
 	}
 
 	deleteCtx, cancel := context.WithTimeout(ctx, f.Options().Timeout)
 	defer cancel()
 
-	err := client.Instances.Delete(deleteCtx, []string{inst.ID}, volumeIDs, false)
-	if err != nil {
+	if err := client.Instances.Delete(deleteCtx, []string{inst.ID}, volumeIDs, false); err != nil {
 		return err
 	}
 
-	result := map[string]any{
-		"id":              inst.ID,
-		"action":          verda.ActionDelete,
-		"status":          "completed",
-		"volumes_deleted": len(volumeIDs),
-	}
-	_, _ = cmdutil.WriteStructured(ioStreams.Out, f.OutputFormat(), result)
-	return nil
+	return writeBatchAgentOutput(ioStreams, f.OutputFormat(), verda.ActionDelete, []verda.Instance{*inst}, nil)
 }
 
 // resolveInstanceInteractive handles interactive instance selection.
@@ -466,7 +482,9 @@ func runDeleteFlow(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOS
 	// Fetch attached volumes.
 	volumes := fetchInstanceVolumes(ctx, client, inst)
 
-	var volumeIDs []string
+	// Explicit empty slice, not nil: nil volume_ids invokes the API default
+	// of deleting the OS volume, contradicting the keep-billing warning below.
+	volumeIDs := []string{}
 	if len(volumes) > 0 {
 		_, _ = fmt.Fprintf(ioStreams.ErrOut, "  Choose storage to delete\n")
 		_, _ = fmt.Fprintf(ioStreams.ErrOut, "  %s\n\n", dimStyle.Render("Deleted storage can be restored within 96 hours"))

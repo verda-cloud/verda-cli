@@ -68,7 +68,7 @@
 Fields are populated in a defined sequence — each stage reads fields set by prior stages:
 
 1. **Flag parsing (cobra)** — Sets all public fields from CLI flags. LocationCode defaults to FIN-01.
-2. **Template application (applyTemplate)** — Overwrites empty fields with template values. Sets `billingTypeSet`, `locationSet`, `storageSkip`, `startupScriptSkip` coordination flags. Expands HostnamePattern.
+2. **Template application (applyTemplate)** — Fills fields the user did not pass explicitly (`cmd.Flags().Changed` is the authority: flags beat template values, e.g. `--from t --location FIN-03` keeps FIN-03). Sets `billingTypeSet`, `locationSet`, `storageSkip`, `startupScriptSkip` coordination flags (only for template-sourced values). Expands HostnamePattern (kept in `opts.hostnamePattern` so the wizard location step can re-expand `{location}` against the effective location).
 3. **Name resolution (resolveTemplateNames)** — Resolves `sshKeyNames` → `SSHKeyIDs`, `startupScriptName` → `StartupScriptID` via API. On failure, prints warnings and leaves IDs empty for wizard.
 4. **Wizard (buildCreateFlow steps)** — Fills remaining gaps interactively. Steps check `IsSet` to skip pre-filled values. Steps 8/9/10 manage state directly via Loader closures.
 5. **Request building (request())** — Reads all fields to assemble `CreateInstanceRequest`. Auto-sets `Contract=contractSpot` when IsSpot && Contract is empty.
@@ -84,7 +84,7 @@ startup-script -> hostname -> description -> confirm-deploy
 - Steps with `DependsOn` re-run their Loader when dependencies change
 - `contract` step: `ShouldSkip` returns true for spot billing
 - `instance-type` step: accepts `WizardMode`. Deploy mode filters by real-time availability; template mode shows all instance types from the instance-types API (no availability filtering)
-- `location` step: accepts `WizardMode`. Deploy mode shows only locations where the instance type is available; template mode shows all locations with a "None (decide at deploy time)" skip option. Deploy mode returns a clear error when no locations are available for the instance type
+- `location` step: accepts `WizardMode`. Deploy mode shows only locations where the instance type is available and returns a clear error when none are; template mode shows all locations with a "None (decide at deploy time)" choice whose value is the `locationDecideLater` sentinel — an empty value would trip the engine's Default substitution and silently persist FIN-01 (review H5). The Setter also re-expands a template `hostnamePattern`'s `{location}` against the picked location so deploy hostnames use the effective location.
 - `location` step: `IsSet` treats default `FIN-01` as unset (so wizard prompts)
 - `location` step: `Required` is dynamic — true in deploy mode, false in template mode
 - `storage`, `ssh-keys`, `startup-script` steps: manage values directly in Loader (Setter/Resetter are no-ops), include inline sub-flows for creating new resources via API
@@ -103,7 +103,8 @@ startup-script -> hostname -> description -> confirm-deploy
 
 - **Wizard triggers when ANY of instance-type, os, or hostname is missing** -- not all three. Providing two of three still launches the wizard. Also triggers when `--from` was used but the template had no location (`templateWithoutLocation` check in `resolveCreateInputs`).
 - **Location default quirk**: `LocationCode` defaults to `FIN-01` in createOptions, but the wizard's `IsSet` returns false for `FIN-01` specifically, so the wizard always prompts for location even when the default is in effect.
-- **Flags override template values**: When `--from` is used alongside other flags (e.g. `--hostname`, `--location`), flags are parsed first, then `applyTemplate` only overwrites empty fields. CLI flags take precedence.
+- **Flags override template values**: `applyTemplate` fills only flags the user did not pass — `cmd.Flags().Changed` is the authority (not field emptiness), and template-sourced values are the only ones that arm the `*Set` coordination flags.
+- **Contract step offers only deployable contracts**: the Loader drops long-term periods whose codes `normalizeContract` would reject at request time (POST /v1/instances takes no durations). Non-fatal API errors: if fetching periods fails, the step falls back to offering only "Pay as you go".
 - **apiCache invalidation**: Cache is invalidated when `isSpot` changes (user switches billing type), because availability differs between spot and on-demand.
 - **Lazy client resolution**: `clientFunc` defers credential resolution until the first API-dependent wizard step fires. Early steps (billing-type, kind, text inputs) run without credentials.
 - **Hidden flag aliases**: `--type`, `--image`, `--ssh-key-id`, `--startup-script-id`, `--spot` are hidden aliases for their primary flags.
@@ -113,9 +114,9 @@ startup-script -> hostname -> description -> confirm-deploy
 - **Delete does NOT poll** -- `action.Execute` is nil for delete, handled by `runDeleteFlow` which returns after the API call.
 - **SSH key / startup script inline creation**: These wizard steps create resources via API during the wizard, not deferred to instance creation.
 - **Cluster images filtered out**: `stepImage` skips images where `IsCluster` is true.
-- **Contract step non-fatal API errors**: If fetching long-term periods fails, the step gracefully falls back to offering only "Pay as you go".
 - **Agent-mode missing flags checked before template application**: `missingCreateFlags` runs before `resolveCreateInputs`, so `--from` alone cannot satisfy required flags in agent mode.
-- **Agent mode never waits by default**: `--wait`'s default is locked in at flag registration, before `--agent` is parsed (the factory is built during command-tree construction), so `runCreate` applies the override at runtime: create returns after issuance unless `--wait` was passed explicitly.
+- **Agent mode never waits by default**: `--wait`'s default is locked in at flag registration, before `--agent` is parsed (the factory is built during command-tree construction), so `runCreate` and the `vm action` agent branch apply the override at runtime: they return after issuance with `status: "accepted"` unless `--wait` was passed explicitly, in which case they poll via `cmdutil.PollInstanceStatus` and report `completed` (a failed transition is an error). MCP `vm_action` shares this accepted/completed contract.
+- **Delete volume semantics are explicit, never nil**: interactive single delete, agent single delete, and batch delete all pass an explicit `[]string{}` when no volumes should die — nil `volume_ids` invokes the API default of deleting the OS volume, contradicting the "unselected keeps billing" warning. Agent single delete mirrors batch exactly: `--yes` required, volumes only with `--with-volumes`, batch-shaped JSON output.
 - **Template name resolution warnings**: `resolveSSHKeyNames` and `resolveStartupScriptName` now return warnings instead of silently swallowing errors.
 
 ## Relationships

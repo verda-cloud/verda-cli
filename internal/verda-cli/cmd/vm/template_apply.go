@@ -41,7 +41,7 @@ func resolveCreateInputs(
 	// Load template when --from is used.
 	if cmd.Flags().Changed("from") {
 		ref := strings.TrimSpace(opts.From)
-		if err := applyTemplateFrom(cmd.Context(), f, ioStreams, client, opts, ref); err != nil {
+		if err := applyTemplateFrom(cmd.Context(), f, ioStreams, client, opts, ref, cmd.Flags().Changed); err != nil {
 			return true, err
 		}
 	}
@@ -49,7 +49,8 @@ func resolveCreateInputs(
 	// Run wizard for any remaining missing fields.
 	// When a template was used but didn't specify a location, prompt the user
 	// so they can pick where to deploy instead of silently defaulting to FIN-01.
-	templateWithoutLocation := cmd.Flags().Changed("from") && !opts.locationSet
+	changedLocation := cmd.Flags().Changed("location")
+	templateWithoutLocation := cmd.Flags().Changed("from") && !opts.locationSet && !changedLocation
 	if opts.InstanceType == "" || opts.Image == "" || opts.Hostname == "" || templateWithoutLocation {
 		if err := runWizard(cmd.Context(), f, ioStreams, opts); err != nil {
 			return true, err
@@ -62,6 +63,8 @@ func resolveCreateInputs(
 // applyTemplateFrom loads a template, applies its values to opts, resolves
 // SSH key / startup script names to IDs, and prints a summary.
 // If ref is empty, shows an interactive picker; otherwise loads by name or path.
+// changed reports which CLI flags the user passed explicitly — template values
+// only fill fields the user did not set.
 func applyTemplateFrom(
 	ctx context.Context,
 	f cmdutil.Factory,
@@ -69,6 +72,7 @@ func applyTemplateFrom(
 	client *verda.Client,
 	opts *createOptions,
 	ref string,
+	changed func(string) bool,
 ) error {
 	baseDir, err := cmdutil.TemplatesBaseDir()
 	if err != nil {
@@ -83,11 +87,11 @@ func applyTemplateFrom(
 		return nil // user canceled picker
 	}
 
-	applyTemplate(tmpl, opts)
+	applyTemplate(tmpl, opts, changed)
 
 	resolveCtx, resolveCancel := context.WithTimeout(ctx, f.Options().Timeout)
 	defer resolveCancel()
-	resolveTemplateNames(resolveCtx, ioStreams, client, tmpl, opts)
+	resolveTemplateNames(resolveCtx, ioStreams, client, tmpl, opts, changed)
 
 	printTemplateSummary(ioStreams, tmpl)
 
@@ -133,28 +137,69 @@ func pickTemplate(ctx context.Context, f cmdutil.Factory, baseDir string) (*temp
 	return template.LoadFromPath(entries[idx].Path)
 }
 
-// applyTemplate pre-fills createOptions from a template.
-func applyTemplate(tmpl *template.Template, opts *createOptions) {
-	if tmpl.BillingType != "" {
+// applyTemplate pre-fills createOptions from a template. Only fields the
+// user did not pass explicitly are filled: changed (cobra's Flags().Changed)
+// is the authority, so `--from gpu-training --location FIN-03` keeps FIN-03.
+func applyTemplate(tmpl *template.Template, opts *createOptions, changed func(string) bool) {
+	if tmpl.BillingType != "" && !anyFlagChanged(changed, "is-spot", "spot") {
 		opts.IsSpot = tmpl.BillingType == billingTypeSpot
 		opts.billingTypeSet = true
 	}
-	if tmpl.Contract != "" {
+	if tmpl.Contract != "" && !changed("contract") {
 		opts.Contract = tmpl.Contract
 	}
-	if tmpl.Kind != "" {
+	if tmpl.Kind != "" && !changed("kind") {
 		opts.Kind = tmpl.Kind
 	}
-	if tmpl.InstanceType != "" {
+	if tmpl.InstanceType != "" && !anyFlagChanged(changed, "instance-type", "type") {
 		opts.InstanceType = tmpl.InstanceType
 	}
-	if tmpl.Location != "" {
+	// locationDecideLater is wizard-internal and never persisted; the guard
+	// only protects against hand-written YAML carrying the sentinel.
+	if tmpl.Location != "" && tmpl.Location != locationDecideLater && !changed("location") {
 		opts.LocationCode = tmpl.Location
 		opts.locationSet = true
 	}
 	// Image name is resolved to ID by resolveTemplateNames, not here.
-	if tmpl.OSVolumeSize != 0 {
+	if tmpl.OSVolumeSize != 0 && !changed("os-volume-size") {
 		opts.OSVolumeSize = tmpl.OSVolumeSize
+	}
+	applyTemplateStorage(tmpl, opts, changed)
+	if tmpl.StartupScriptSkip && !anyFlagChanged(changed, "startup-script", "startup-script-id") {
+		opts.startupScriptSkip = true
+	}
+	// Hostname pattern: expand {random} against the current location now (so
+	// flag-complete invocations skip the wizard), keep the pattern so the
+	// wizard's location step can re-expand {location} against the effective
+	// deploy location (review H5 family; stepLocation.Setter).
+	if tmpl.HostnamePattern != "" && !changed("hostname") {
+		opts.hostnamePattern = tmpl.HostnamePattern
+		opts.Hostname = template.ExpandHostnamePattern(tmpl.HostnamePattern, opts.LocationCode)
+	}
+	if tmpl.Description != "" && !changed("description") {
+		opts.Description = tmpl.Description
+	}
+	// SSH keys and startup script are handled by resolveTemplateNames, not here.
+}
+
+// anyFlagChanged reports whether any of the named flags was explicitly set
+// (aliases are separate names on the same flag set).
+func anyFlagChanged(changed func(string) bool, names ...string) bool {
+	for _, n := range names {
+		if changed(n) {
+			return true
+		}
+	}
+	return false
+}
+
+// applyTemplateStorage applies the template's storage fields. Any explicit
+// storage flag means the user owns storage: the template neither appends its
+// volume nor arms the storage-skip coordination flag.
+func applyTemplateStorage(tmpl *template.Template, opts *createOptions, changed func(string) bool) {
+	storageChanged := anyFlagChanged(changed, "volume", "storage-size", "storage-type", "storage-name", "storage-on-spot-discontinue")
+	if storageChanged {
+		return
 	}
 	if len(tmpl.Storage) > 0 {
 		// Only the first storage entry is applied — the wizard's convenience
@@ -165,26 +210,22 @@ func applyTemplate(tmpl *template.Template, opts *createOptions) {
 	if tmpl.StorageSkip {
 		opts.storageSkip = true
 	}
-	if tmpl.StartupScriptSkip {
-		opts.startupScriptSkip = true
-	}
-	// Hostname pattern: expand {random} and {location} placeholders.
-	if tmpl.HostnamePattern != "" && opts.Hostname == "" {
-		opts.Hostname = template.ExpandHostnamePattern(tmpl.HostnamePattern, opts.LocationCode)
-	}
-	if tmpl.Description != "" && opts.Description == "" {
-		opts.Description = tmpl.Description
-	}
-	// SSH keys and startup script are handled by resolveTemplateNames, not here.
 }
 
 // resolveTemplateNames resolves image name, SSH key names, and startup script
-// name to IDs. Prints each warning to ioStreams.ErrOut and returns the
-// collected warnings.
-func resolveTemplateNames(ctx context.Context, ioStreams cmdutil.IOStreams, client *verda.Client, tmpl *template.Template, opts *createOptions) []string {
-	imageWarnings := resolveImageName(ctx, client, tmpl.Image, opts)
-	_, sshWarnings := resolveSSHKeyNames(ctx, client, tmpl.SSHKeys, opts)
-	scriptWarnings := resolveStartupScriptName(ctx, client, tmpl.StartupScript, opts)
+// name to IDs — but only for fields the user did not set via flags (changed).
+// Prints each warning to ioStreams.ErrOut and returns the collected warnings.
+func resolveTemplateNames(ctx context.Context, ioStreams cmdutil.IOStreams, client *verda.Client, tmpl *template.Template, opts *createOptions, changed func(string) bool) []string {
+	var imageWarnings, sshWarnings, scriptWarnings []string
+	if !anyFlagChanged(changed, "os", "image") {
+		imageWarnings = resolveImageName(ctx, client, tmpl.Image, opts)
+	}
+	if !anyFlagChanged(changed, "ssh-key", "ssh-key-id") {
+		_, sshWarnings = resolveSSHKeyNames(ctx, client, tmpl.SSHKeys, opts)
+	}
+	if !anyFlagChanged(changed, "startup-script", "startup-script-id") {
+		scriptWarnings = resolveStartupScriptName(ctx, client, tmpl.StartupScript, opts)
+	}
 	warnings := make([]string, 0, len(imageWarnings)+len(sshWarnings)+len(scriptWarnings))
 	warnings = append(warnings, imageWarnings...)
 	warnings = append(warnings, sshWarnings...)

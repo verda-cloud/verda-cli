@@ -45,9 +45,11 @@ var validSpotPolicies = map[string]struct{}{
 //
 // Stage 2 — Template application (applyTemplate):
 //
-//	Overwrites empty fields with template values. Sets billingTypeSet,
+//	Fills fields the user did not pass explicitly (cobra Flags().Changed is
+//	the authority — flags always beat template values). Sets billingTypeSet,
 //	locationSet, storageSkip, startupScriptSkip coordination flags.
-//	Expands HostnamePattern into Hostname.
+//	Expands HostnamePattern into Hostname (the location step re-expands
+//	{location} against the effective location if the wizard runs).
 //
 // Stage 3 — Name resolution (resolveTemplateNames):
 //
