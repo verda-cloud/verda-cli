@@ -197,7 +197,10 @@ func NewCmdCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 	_ = flags.MarkHidden("ssh-key-id")
 	_ = flags.MarkHidden("startup-script-id")
 	_ = flags.MarkHidden("spot")
-	opts.Wait.AddFlags(flags, !f.AgentMode()) // agents should poll with vm describe instead of blocking
+	// AgentMode is always false at registration: the factory is built during
+	// command-tree construction, before flags are parsed. The agent no-wait
+	// default is applied in runCreate instead.
+	opts.Wait.AddFlags(flags, true)
 
 	return cmd
 }
@@ -226,6 +229,10 @@ func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 
 	cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), "Request payload:", req)
 
+	// Agent mode returns after issuance unless --wait was passed explicitly: the
+	// flag default is locked in at command construction, before --agent is parsed.
+	wait := opts.Wait.Wait && (!f.AgentMode() || cmd.Flags().Changed("wait"))
+
 	createCtx, createCancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
 	defer createCancel()
 
@@ -241,7 +248,7 @@ func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 		if werr != nil {
 			return werr
 		}
-		if opts.Wait.Wait {
+		if wait {
 			_, err = cmdutil.PollInstanceStatus(cmd.Context(), nil, client, instance.ID, opts.Wait)
 			return err
 		}
@@ -249,7 +256,7 @@ func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 	}
 
 	// Show live status view, polling until the instance reaches a terminal state.
-	if !opts.Wait.Wait {
+	if !wait {
 		_, _ = fmt.Fprintf(ioStreams.Out, "Created instance: %s (%s)\n", instance.Hostname, instance.ID)
 		return nil
 	}

@@ -71,6 +71,7 @@ type Server struct {
 	sshKeys        map[string]*verda.SSHKey
 	failures       map[string]int // exact path -> HTTP status override
 	forceFormToken bool
+	instanceGets   int // GET /instances/{id} count — status polling signal
 	idSeq          int
 }
 
@@ -193,6 +194,14 @@ func (s *Server) VolumeCount() int {
 	return len(s.volumes)
 }
 
+// InstanceGetCount returns how many GET /instances/{id} reads the mock has
+// served — the wire-level signal of --wait status polling.
+func (s *Server) InstanceGetCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.instanceGets
+}
+
 // guard enforces failure overrides before routing.
 func (s *Server) guard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -306,6 +315,7 @@ func (s *Server) handleListInstances(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleGetInstance(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.instanceGets++
 	inst, ok := s.instances[r.PathValue("id")]
 	if !ok {
 		writeError(w, http.StatusNotFound, "instance not found")

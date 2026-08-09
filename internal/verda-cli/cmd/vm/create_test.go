@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
@@ -339,6 +340,103 @@ hostname_pattern: from-template
 	if !cmdutil.IsAgentError(err) {
 		t.Fatalf("expected AgentError, got %T: %v", err, err)
 	}
+}
+
+// TestRunCreate_AgentMode_NoWaitDefaultDoesNotPoll: --wait defaults to true at
+// flag registration (AgentMode is not yet known there), so without a runtime
+// override an agent-mode create would block polling until timeout. The override
+// in runCreate must make the default agent create return after issuance with
+// zero status polls.
+func TestRunCreate_AgentMode_NoWaitDefaultDoesNotPoll(t *testing.T) {
+	t.Parallel()
+
+	var pollCalls atomic.Int32
+	mux := newCreatePollMux(&pollCalls)
+
+	h := newTestHarness(t, mux)
+	cmd := NewCmdCreate(h.Factory, h.IOStreams)
+	cmd.SetArgs([]string{
+		"--kind", "gpu",
+		"--instance-type", "1V100.6V",
+		"--os", "ubuntu-24.04-cuda-12.8-open-docker",
+		"--hostname", "gpu-runner",
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("cmd.Execute() returned error: %v\nStderr: %s", err, h.Stderr.String())
+	}
+
+	if got := pollCalls.Load(); got != 0 {
+		t.Fatalf("agent-mode create polled instance status %d times with default --wait; want 0", got)
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal(h.Stdout.Bytes(), &result); err != nil {
+		t.Fatalf("failed to parse JSON output: %v\nOutput: %s", err, h.Stdout.String())
+	}
+	if got := result["id"]; got != "inst-001" {
+		t.Errorf("expected id=inst-001, got %v", got)
+	}
+}
+
+// TestRunCreate_AgentMode_ExplicitWaitPolls: an explicit --wait opts the agent
+// back into status polling.
+func TestRunCreate_AgentMode_ExplicitWaitPolls(t *testing.T) {
+	t.Parallel()
+
+	var pollCalls atomic.Int32
+	mux := newCreatePollMux(&pollCalls)
+
+	h := newTestHarness(t, mux)
+	cmd := NewCmdCreate(h.Factory, h.IOStreams)
+	cmd.SetArgs([]string{
+		"--kind", "gpu",
+		"--instance-type", "1V100.6V",
+		"--os", "ubuntu-24.04-cuda-12.8-open-docker",
+		"--hostname", "gpu-runner",
+		"--wait",
+		"--wait-timeout", "30s",
+	})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("cmd.Execute() returned error: %v\nStderr: %s", err, h.Stderr.String())
+	}
+
+	if got := pollCalls.Load(); got == 0 {
+		t.Fatal("explicit --wait in agent mode did not poll instance status")
+	}
+}
+
+// newCreatePollMux serves instance creation and counts GetByID status polls;
+// the instance reads terminal "running" on the first poll.
+func newCreatePollMux(pollCalls *atomic.Int32) *http.ServeMux {
+	mux := baseMux()
+	mux.HandleFunc("POST /instances", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":             "inst-001",
+			"hostname":       "gpu-runner",
+			"status":         "new",
+			"instance_type":  "1V100.6V",
+			"image":          "ubuntu-24.04-cuda-12.8-open-docker",
+			"location":       "FIN-01",
+			"price_per_hour": 1.50,
+		})
+	})
+	mux.HandleFunc("GET /instances/{id}", func(w http.ResponseWriter, _ *http.Request) {
+		pollCalls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":             "inst-001",
+			"hostname":       "gpu-runner",
+			"status":         "running",
+			"instance_type":  "1V100.6V",
+			"image":          "ubuntu-24.04-cuda-12.8-open-docker",
+			"location":       "FIN-01",
+			"price_per_hour": 1.50,
+		})
+	})
+	return mux
 }
 
 // TestRunCreate_AgentMode_NoClient verifies that runCreate returns an error

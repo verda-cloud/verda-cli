@@ -115,6 +115,7 @@ startup-script -> hostname -> description -> confirm-deploy
 - **Cluster images filtered out**: `stepImage` skips images where `IsCluster` is true.
 - **Contract step non-fatal API errors**: If fetching long-term periods fails, the step gracefully falls back to offering only "Pay as you go".
 - **Agent-mode missing flags checked before template application**: `missingCreateFlags` runs before `resolveCreateInputs`, so `--from` alone cannot satisfy required flags in agent mode.
+- **Agent mode never waits by default**: `--wait`'s default is locked in at flag registration, before `--agent` is parsed (the factory is built during command-tree construction), so `runCreate` applies the override at runtime: create returns after issuance unless `--wait` was passed explicitly.
 - **Template name resolution warnings**: `resolveSSHKeyNames` and `resolveStartupScriptName` now return warnings instead of silently swallowing errors.
 
 ## Relationships

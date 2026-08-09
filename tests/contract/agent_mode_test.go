@@ -104,6 +104,49 @@ func TestAgentVolumeDeleteGate(t *testing.T) {
 	}
 }
 
+// TestAgentVMCreateReturnsAfterIssuance: --agent vm create must not block on
+// the default --wait (the flag default is locked in before --agent is parsed).
+// The mock flips instances to running on first read, so a poll would be fast —
+// the real assertion is wire-level: zero GET /instances/{id} unless --wait was
+// passed explicitly.
+func TestAgentVMCreateReturnsAfterIssuance(t *testing.T) {
+	t.Parallel()
+	srv := newServer(t)
+
+	r := runCLI(t, srv, "--agent", "vm", "create",
+		"--kind", "cpu",
+		"--instance-type", mockapi.TypeCPU,
+		"--os", "ubuntu-24.04",
+		"--hostname", "contract-nowait",
+	)
+	requireExit(t, r, 0)
+	var inst struct {
+		ID string `json:"id"`
+	}
+	requireCleanJSON(t, r, &inst)
+	if inst.ID == "" {
+		t.Fatalf("create returned empty instance id:\n%s", r.Stdout)
+	}
+	if n := srv.InstanceGetCount(); n != 0 {
+		t.Fatalf("default --wait polled instance status %d times in agent mode; want 0 (agents poll via vm describe)", n)
+	}
+	if r.Duration >= 5*time.Second {
+		t.Fatalf("issuance-only create took %s — regression toward blocking", r.Duration)
+	}
+
+	r2 := runCLI(t, srv, "--agent", "vm", "create",
+		"--kind", "cpu",
+		"--instance-type", mockapi.TypeCPU,
+		"--os", "ubuntu-24.04",
+		"--hostname", "contract-wait",
+		"--wait",
+	)
+	requireExit(t, r2, 0)
+	if n := srv.InstanceGetCount(); n == 0 {
+		t.Fatal("explicit --wait in agent mode did not poll instance status")
+	}
+}
+
 // TestAgentErrorClassification: HTTP status codes map to the documented
 // error codes and exit codes (docs/agent-errors.md).
 func TestAgentErrorClassification(t *testing.T) {
