@@ -77,7 +77,7 @@ func TestMain(m *testing.M) {
 	// Pay the first-launch cost up front: macOS holds a freshly written unsigned
 	// binary in dyld for ~60s (provenance/Gatekeeper check) while every parallel
 	// test would otherwise blow its per-command timeout waiting on the loader.
-	warm := exec.CommandContext(ctx, verdaBin, "--version")
+	warm := exec.CommandContext(ctx, verdaBin, "--version") // #nosec G204 -- verdaBin is the harness-built binary under t.TempDir
 	if out, err := warm.CombinedOutput(); err != nil {
 		fmt.Fprintf(os.Stderr, "contract: warm-up run failed: %v\n%s\n", err, out)
 		os.Exit(1)
@@ -149,7 +149,7 @@ func runCLIEnv(t *testing.T, srv *mockapi.Server, extraEnv []string, args ...str
 	cmd.Stderr = &stderr
 
 	start := time.Now()
-	runErr := cmd.Run()
+	runErr := cmd.Run() // #nosec G204 -- launches the harness-built CLI binary; see exec.CommandContext above
 	duration := time.Since(start)
 
 	if ctx.Err() == context.DeadlineExceeded {
