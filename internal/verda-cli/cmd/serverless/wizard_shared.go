@@ -82,23 +82,36 @@ func stepCompute(getClient clientFunc, cache *apiCache, target *string) wizard.S
 		Description: "Compute resource",
 		Prompt:      wizard.SelectPrompt,
 		Required:    true,
-		Loader: func(ctx context.Context, _ tui.Prompter, status tui.Status, _ *wizard.Store) ([]wizard.Choice, error) {
+		// Prices render from the earlier compute-type choice, so flipping
+		// on-demand ↔ spot must clear this step's cached choices.
+		DependsOn: []string{"compute-type"},
+		Loader: func(ctx context.Context, _ tui.Prompter, status tui.Status, store *wizard.Store) ([]wizard.Choice, error) {
 			res, err := withFetchSpinner(ctx, status, "Fetching compute resources…", func(ctx context.Context) ([]verda.ComputeResource, error) {
 				return cache.fetchComputeResources(ctx, getClient)
 			})
 			if err != nil {
 				return nil, err
 			}
-			choices := make([]wizard.Choice, 0, len(res))
-			for i := range res {
-				r := &res[i]
+			// /container-types only enriches labels; a failure degrades to the
+			// legacy label, it never fails the step.
+			types, typesErr := withFetchSpinner(ctx, status, "Fetching container types…", func(ctx context.Context) ([]verda.ContainerType, error) {
+				return cache.fetchContainerTypes(ctx, getClient)
+			})
+			if typesErr != nil {
+				// TODO(order-006): DebugJSON the fetch error — the ioStreams/debug plumbing arrives with the create-flow restructure.
+				types = nil
+			}
+			options := joinComputeCatalog(types, res)
+			spot := spotSelected(store)
+			choices := make([]wizard.Choice, 0, len(options))
+			for i := range options {
 				desc := "available"
-				if !r.IsAvailable {
+				if !options[i].Available {
 					desc = "unavailable"
 				}
 				choices = append(choices, wizard.Choice{
-					Label:       fmt.Sprintf("%s  (size %d)", r.Name, r.Size),
-					Value:       r.Name,
+					Label:       computeOptionLabel(&options[i], spot),
+					Value:       options[i].Name,
 					Description: desc,
 				})
 			}
@@ -116,6 +129,15 @@ func stepCompute(getClient clientFunc, cache *apiCache, target *string) wizard.S
 }
 
 // --- Compute size (count of GPUs or vCPUs per replica) ---
+
+// spotSelected reports the earlier compute-type choice. Step values live in
+// Collected() (engine.go calls SetCollected on answer; Get reads the arbitrary
+// data map). A missing key means the batchjob flow, which has no such step —
+// on-demand is correct there.
+func spotSelected(store *wizard.Store) bool {
+	v, ok := store.Collected()["compute-type"]
+	return ok && v == computeTypeSpot
+}
 
 func stepComputeSize(target *int) wizard.Step {
 	return wizard.Step{

@@ -42,6 +42,7 @@ type clientFunc func() (*verda.Client, error)
 // doesn't trigger redundant API calls. All fields are populated lazily.
 type apiCache struct {
 	computeResources []verda.ComputeResource
+	containerTypes   []verda.ContainerType
 	registryCreds    []verda.RegistryCredentials
 	secrets          []verda.Secret
 	fileSecrets      []verda.FileSecret
@@ -60,6 +61,22 @@ func (c *apiCache) fetchComputeResources(ctx context.Context, getClient clientFu
 		return nil, fmt.Errorf("fetching compute resources: %w", err)
 	}
 	c.computeResources = res
+	return res, nil
+}
+
+func (c *apiCache) fetchContainerTypes(ctx context.Context, getClient clientFunc) ([]verda.ContainerType, error) {
+	if c.containerTypes != nil {
+		return c.containerTypes, nil
+	}
+	client, err := getClient()
+	if err != nil {
+		return nil, err
+	}
+	res, err := client.ContainerTypes.Get(ctx, "")
+	if err != nil {
+		return nil, fmt.Errorf("fetching container types: %w", err)
+	}
+	c.containerTypes = res
 	return res, nil
 }
 
