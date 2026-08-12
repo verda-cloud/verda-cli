@@ -21,6 +21,8 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+
+	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
 
 // /v1/instances omits created_at, exactly like /v1/ssh-keys — verified against
@@ -121,5 +123,47 @@ func TestDescribeOmitsZeroCreatedAt(t *testing.T) {
 	}
 	if !strings.Contains(out, "box-a") {
 		t.Errorf("describe output lost the hostname:\n%s", out)
+	}
+}
+
+// The API rejects a create that omits ssh_key_ids while its own text says an
+// absent value is fine (live staging capture, 2026-08-12: the request body had
+// no ssh_key_ids key). The CLI must not relay that wording.
+func TestCreateSSHKeyRequiredIsActionable(t *testing.T) {
+	t.Parallel()
+
+	mux := baseMux()
+	mux.HandleFunc("POST /instances", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"message":"SSH keys can be an array of UUID's, a single UUID string, null value or not defined"}`))
+	})
+	h := newTestHarness(t, mux)
+
+	root := &cobra.Command{Use: "verda", SilenceUsage: true, SilenceErrors: true}
+	root.AddCommand(NewCmdCreate(h.Factory, h.IOStreams))
+	root.SetArgs([]string{
+		"create", "--kind", "cpu", "--instance-type", "CPU.4V.16G",
+		"--os", "ubuntu-24.04", "--location", "FIN-00",
+		"--hostname", "box-a", "--os-volume-size", "50",
+	})
+
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("expected the create to fail")
+	}
+
+	ae := cmdutil.ClassifyError(err)
+	if ae.Code != "SSH_KEY_REQUIRED" {
+		t.Fatalf("code = %q, want SSH_KEY_REQUIRED (err: %v)", ae.Code, err)
+	}
+	if !strings.Contains(ae.Message, "--ssh-key") {
+		t.Errorf("message must tell the user which flag to pass: %q", ae.Message)
+	}
+	if !strings.Contains(ae.Message, "ssh-key list") {
+		t.Errorf("message should point at how to find ids: %q", ae.Message)
+	}
+	if ae.Details["api_message"] == nil {
+		t.Error("the verbatim server text must survive in details for debugging")
 	}
 }

@@ -17,9 +17,13 @@ package mcp
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
+
+	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
 
 // resultText extracts the text payload of a single-content tool result.
@@ -76,9 +80,15 @@ func TestRequiredString(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for missing arg")
 	}
-	var ae *argError
-	if errors.As(err, &ae) && ae.code != "MISSING_REQUIRED_FLAGS" {
-		t.Errorf("code = %q, want MISSING_REQUIRED_FLAGS", ae.code)
+	// errors.As must succeed — the old form (`As(...) && code != x`) passed
+	// silently whenever the type assertion failed, which is the case this
+	// asserts.
+	var ae *cmdutil.AgentError
+	if !errors.As(err, &ae) {
+		t.Fatalf("error is not a *cmdutil.AgentError: %T %v", err, err)
+	}
+	if ae.Code != "MISSING_REQUIRED_FLAGS" {
+		t.Errorf("code = %q, want MISSING_REQUIRED_FLAGS", ae.Code)
 	}
 
 	a["num"] = float64(7)
@@ -86,8 +96,11 @@ func TestRequiredString(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for non-string arg")
 	}
-	if errors.As(err, &ae) && ae.code != "VALIDATION_ERROR" {
-		t.Errorf("code = %q, want VALIDATION_ERROR", ae.code)
+	if !errors.As(err, &ae) {
+		t.Fatalf("error is not a *cmdutil.AgentError: %T %v", err, err)
+	}
+	if ae.Code != "VALIDATION_ERROR" {
+		t.Errorf("code = %q, want VALIDATION_ERROR", ae.Code)
 	}
 }
 
@@ -220,10 +233,49 @@ func TestToolErrorResultEnvelope(t *testing.T) {
 		t.Errorf("details.action = %v, want create_vm", env.Error.Details["action"])
 	}
 
-	// Non-argError falls back to plain text.
+	// CONTRACT CHANGE: every error now carries the envelope, not just MCP's own
+	// argument errors. An agent can branch on code for API failures too, which
+	// is what docs/agent-errors.md always claimed MCP did.
 	res = toolErrorResult(errors.New("boom"))
-	if !res.IsError || resultText(t, res) != "boom" {
-		t.Errorf("plain error = %q, IsError=%v; want boom, true", resultText(t, res), res.IsError)
+	if !res.IsError {
+		t.Fatal("expected IsError")
+	}
+	if err := json.Unmarshal([]byte(resultText(t, res)), &env); err != nil {
+		t.Fatalf("plain error did not produce the contract envelope: %v", err)
+	}
+	if env.Error.Message != "boom" {
+		t.Errorf("message = %q, want boom", env.Error.Message)
+	}
+	if env.Error.Code == "" {
+		t.Error("envelope has no code")
+	}
+
+	// An SDK API error must reach the agent with the mapped code, not a string.
+	res = toolErrorResult(&verda.APIError{StatusCode: 404, Message: "instance not found"})
+	if err := json.Unmarshal([]byte(resultText(t, res)), &env); err != nil {
+		t.Fatalf("API error did not produce the contract envelope: %v", err)
+	}
+	if env.Error.Code != "NOT_FOUND" {
+		t.Errorf("code = %q, want NOT_FOUND", env.Error.Code)
+	}
+
+	// The create-time SSH-key 400: the API's self-contradictory text must be
+	// replaced by something actionable, with the original kept in details.
+	res = toolErrorResult(&verda.APIError{
+		StatusCode: 400,
+		Message:    "SSH keys can be an array of UUID's, a single UUID string, null value or not defined",
+	})
+	if err := json.Unmarshal([]byte(resultText(t, res)), &env); err != nil {
+		t.Fatalf("ssh-key 400 did not produce the contract envelope: %v", err)
+	}
+	if env.Error.Code != "SSH_KEY_REQUIRED" {
+		t.Errorf("code = %q, want SSH_KEY_REQUIRED", env.Error.Code)
+	}
+	if !strings.Contains(env.Error.Message, "ssh_key_ids") {
+		t.Errorf("message must name the MCP parameter: %q", env.Error.Message)
+	}
+	if env.Error.Details["api_message"] == nil {
+		t.Error("details must keep the verbatim api_message")
 	}
 }
 

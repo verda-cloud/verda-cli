@@ -146,6 +146,31 @@ The requested resource does not exist.
 
 **Agent action:** Verify the resource ID is correct. List resources to find the right one.
 
+### `SSH_KEY_REQUIRED`
+
+**Exit code:** 2
+
+`POST /instances` requires at least one SSH key and the request carried none. The
+API's own text lists an absent value as acceptable and then rejects it, so the
+server wording is preserved under `details.api_message` rather than shown as the
+message.
+
+```json
+{
+  "error": {
+    "code": "SSH_KEY_REQUIRED",
+    "message": "the API requires at least one SSH key to create an instance, and this request had none: pass --ssh-key <id> (CLI) or ssh_key_ids (MCP); list ids with \"verda ssh-key list\"",
+    "details": {
+      "status": 400,
+      "api_message": "SSH keys can be an array of UUID's, a single UUID string, null value or not defined"
+    }
+  }
+}
+```
+
+**Agent action:** Call `list_ssh_keys` (or `verda ssh-key list`), then retry with
+at least one key id. Creating a key first is `add_ssh_key` / `verda ssh-key add`.
+
 ### `INSUFFICIENT_BALANCE`
 
 **Exit code:** 6
@@ -260,4 +285,8 @@ Tools exposed by `verda mcp serve` reuse this contract with one transport differ
 {"error": {"code": "CONFIRMATION_REQUIRED", "message": "action \"delete\" creates billing or destructive changes and requires an explicit confirm: true argument", "details": {"action": "delete"}}}
 ```
 
-All other tool failures (API errors, auth, unknown IDs) arrive as plain-text `isError` results. See `internal/verda-cli/cmd/mcp/README.md` for the full tool reference.
+**One error type, one classifier.** MCP argument errors are plain `cmdutil.AgentError` values — not a parallel type — and `toolErrorResult` renders *every* failure through `ClassifyError`, the same funnel the CLI uses. So an API 404 reaches an agent as `NOT_FOUND` over MCP exactly as it does on the CLI, and a new code added to the classifier appears on both surfaces without touching either renderer.
+
+> Changed 2026-08-12: MCP previously carried a private `argError` type, so only argument errors had a code and every other failure degraded to a bare string. Tool errors that used to be plain text now arrive as the envelope. Handlers still returning `mcp.NewToolResultError(err.Error())` directly bypass this — converting the remaining call sites is tracked separately.
+
+See `internal/verda-cli/cmd/mcp/README.md` for the full tool reference.

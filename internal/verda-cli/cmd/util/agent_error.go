@@ -237,8 +237,40 @@ func classifyAPIError(apiErr *verda.APIError) *AgentError {
 			Details:  map[string]any{"status": apiErr.StatusCode},
 			ExitCode: ExitInsufficientBal,
 		}
+	case http.StatusBadRequest:
+		if ae := sshKeyRequired(apiErr); ae != nil {
+			return ae
+		}
+		return NewAPIError(apiErr.Error(), apiErr.StatusCode)
 	default:
 		return NewAPIError(apiErr.Error(), apiErr.StatusCode)
+	}
+}
+
+// sshKeyRequired recognizes the one API 400 whose own text cannot be shown to a
+// user: POST /instances rejects a request that omits ssh_key_ids with "SSH keys
+// can be an array of UUID's, a single UUID string, null value or not defined" —
+// while the field *was* not defined. Verified live on staging 2026-08-12 with the
+// request body captured via --debug: no ssh_key_ids key was sent. Passing that
+// through tells the user their correct input was wrong, in the one wording they
+// cannot act on.
+//
+// Returns nil for any other 400 so the generic API_ERROR path still applies.
+// Delete this once the API either accepts an absent value or says what it means.
+func sshKeyRequired(apiErr *verda.APIError) *AgentError {
+	if !strings.Contains(strings.ToLower(apiErr.Message), "ssh key") {
+		return nil
+	}
+	return &AgentError{
+		Code: "SSH_KEY_REQUIRED",
+		Message: "the API requires at least one SSH key to create an instance, and this request had none: " +
+			"pass --ssh-key <id> (CLI) or ssh_key_ids (MCP); list ids with \"verda ssh-key list\"",
+		Details: map[string]any{
+			"status": apiErr.StatusCode,
+			// Verbatim: the only record of what the server actually said.
+			"api_message": apiErr.Message,
+		},
+		ExitCode: ExitBadArgs,
 	}
 }
 
