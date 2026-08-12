@@ -172,7 +172,9 @@ func NewCmdCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 	flags.StringVar(&opts.Image, "os", "", "OS image slug or an existing detached OS volume ID")
 	flags.StringVar(&opts.Image, "image", "", "Alias of --os")
 	flags.StringVar(&opts.Hostname, "hostname", "", "Hostname for the new VM")
-	flags.StringVar(&opts.Description, "description", "", "Human-readable description, max 100 characters; defaults to the hostname")
+	// No length limit stated: the reported 100-char cap does not exist — a
+	// 101-char description was accepted and stored by staging on 2026-08-12.
+	flags.StringVar(&opts.Description, "description", "", "Human-readable description; defaults to the hostname")
 	flags.StringSliceVar(&opts.SSHKeyIDs, "ssh-key", nil, "SSH key ID to inject into the instance; repeat the flag for multiple keys")
 	flags.StringSliceVar(&opts.SSHKeyIDs, "ssh-key-id", nil, "Alias of --ssh-key")
 	flags.StringVar(&opts.LocationCode, "location", opts.LocationCode, "Location code, for example FIN-01")
