@@ -19,6 +19,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
@@ -85,5 +86,160 @@ func TestLoadCredsFromFactoryFallsBackToDefaultProfile(t *testing.T) {
 	}
 	if creds.Endpoint != "https://example.invalid" {
 		t.Errorf("Endpoint = %q, want https://example.invalid", creds.Endpoint)
+	}
+}
+
+// s3TestFactory is the shape every S3 command sees in production: S3 commands
+// are in skipCredentialResolution, so AuthOptions.Profile is never resolved.
+func s3TestFactory() *cmdutil.TestFactory {
+	return &cmdutil.TestFactory{
+		OptionsOverride: &options.Options{
+			AuthOptions: &options.AuthOptions{},
+		},
+	}
+}
+
+func writeS3Profile(t *testing.T, contents string) string {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "credentials")
+	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+		t.Fatalf("write creds file: %v", err)
+	}
+	return path
+}
+
+// CI has no credentials file and must not have to write secrets to disk:
+// VERDA_S3_* alone has to be enough. Before this fix nothing in the tree ever
+// read those variables, so a complete env resolved to "no S3 credentials".
+func TestLoadCredsFromFactoryHonorsEnvWithoutFile(t *testing.T) {
+	// No t.Parallel: t.Setenv.
+	t.Setenv("VERDA_PROFILE", "default")
+	t.Setenv("VERDA_SHARED_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "absent"))
+	t.Setenv("VERDA_S3_ACCESS_KEY", "REPLACE_ME_ENV_KEY")
+	t.Setenv("VERDA_S3_SECRET_KEY", "REPLACE_ME_ENV_SECRET")
+	t.Setenv("VERDA_S3_ENDPOINT", "https://env.example.invalid")
+	t.Setenv("VERDA_S3_REGION", "eu-north-1")
+
+	creds, err := loadCredsFromFactory(s3TestFactory())
+	if err != nil {
+		t.Fatalf("loadCredsFromFactory: %v", err)
+	}
+	if !creds.HasCredentials() {
+		t.Fatalf("HasCredentials() = false; env-only credentials were ignored: %+v", redactedCreds(creds))
+	}
+	if creds.AccessKey != "REPLACE_ME_ENV_KEY" || creds.SecretKey != "REPLACE_ME_ENV_SECRET" {
+		t.Errorf("key material not taken from env: %+v", redactedCreds(creds))
+	}
+	if creds.Endpoint != "https://env.example.invalid" {
+		t.Errorf("Endpoint = %q, want the env value", creds.Endpoint)
+	}
+	if creds.Region != "eu-north-1" {
+		t.Errorf("Region = %q, want eu-north-1", creds.Region)
+	}
+}
+
+// The decided semantics: per-field merge, env above file. One env var must not
+// discard the rest of a working profile.
+func TestLoadCredsFromFactoryEnvOverridesFilePerField(t *testing.T) {
+	path := writeS3Profile(t, "[default]\n"+
+		"verda_s3_access_key = FILE_KEY\n"+
+		"verda_s3_secret_key = FILE_SECRET\n"+
+		"verda_s3_endpoint   = https://file.example.invalid\n"+
+		"verda_s3_region     = us-east-1\n")
+
+	t.Setenv("VERDA_PROFILE", "default")
+	t.Setenv("VERDA_SHARED_CREDENTIALS_FILE", path)
+	t.Setenv("VERDA_S3_ENDPOINT", "https://env.example.invalid")
+
+	creds, err := loadCredsFromFactory(s3TestFactory())
+	if err != nil {
+		t.Fatalf("loadCredsFromFactory: %v", err)
+	}
+	if creds.Endpoint != "https://env.example.invalid" {
+		t.Errorf("Endpoint = %q, want the env override", creds.Endpoint)
+	}
+	if creds.AccessKey != "FILE_KEY" || creds.SecretKey != "FILE_SECRET" {
+		t.Errorf("env endpoint wiped file key material: %+v", redactedCreds(creds))
+	}
+	if creds.Region != "us-east-1" {
+		t.Errorf("Region = %q, want the file value us-east-1", creds.Region)
+	}
+}
+
+// An exported-but-empty variable (`export VERDA_S3_REGION=`) means unset, not
+// "blank the profile".
+func TestLoadCredsFromFactoryEmptyEnvKeepsFileValue(t *testing.T) {
+	path := writeS3Profile(t, "[default]\n"+
+		"verda_s3_access_key = FILE_KEY\n"+
+		"verda_s3_secret_key = FILE_SECRET\n"+
+		"verda_s3_endpoint   = https://file.example.invalid\n"+
+		"verda_s3_region     = us-east-1\n")
+
+	t.Setenv("VERDA_PROFILE", "default")
+	t.Setenv("VERDA_SHARED_CREDENTIALS_FILE", path)
+	t.Setenv("VERDA_S3_REGION", "")
+
+	creds, err := loadCredsFromFactory(s3TestFactory())
+	if err != nil {
+		t.Fatalf("loadCredsFromFactory: %v", err)
+	}
+	if creds.Region != "us-east-1" {
+		t.Errorf("Region = %q; an empty env var blanked the file value", creds.Region)
+	}
+}
+
+// A partial env set with no file must stay incomplete — NewClient then produces
+// the "run configure" hint rather than half-authenticating.
+func TestLoadCredsFromFactoryPartialEnvStaysIncomplete(t *testing.T) {
+	t.Setenv("VERDA_PROFILE", "default")
+	t.Setenv("VERDA_SHARED_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "absent"))
+	t.Setenv("VERDA_S3_ACCESS_KEY", "REPLACE_ME_ENV_KEY")
+
+	creds, err := loadCredsFromFactory(s3TestFactory())
+	if err != nil {
+		t.Fatalf("loadCredsFromFactory: %v", err)
+	}
+	if creds.HasCredentials() {
+		t.Errorf("HasCredentials() = true with only an access key set: %+v", redactedCreds(creds))
+	}
+
+	_, err = NewClient(context.Background(), creds, creds.AuthMode, ClientOverrides{})
+	if err == nil {
+		t.Fatal("NewClient succeeded on incomplete credentials")
+	}
+	if strings.Contains(err.Error(), "REPLACE_ME_ENV_KEY") {
+		t.Errorf("error message leaks key material: %v", err)
+	}
+}
+
+// Flags still outrank env — env sits between flags and file.
+func TestClientOverridesBeatEnv(t *testing.T) {
+	t.Setenv("VERDA_PROFILE", "default")
+	t.Setenv("VERDA_SHARED_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "absent"))
+	t.Setenv("VERDA_S3_ACCESS_KEY", "REPLACE_ME_ENV_KEY")
+	t.Setenv("VERDA_S3_SECRET_KEY", "REPLACE_ME_ENV_SECRET")
+	t.Setenv("VERDA_S3_ENDPOINT", "https://env.example.invalid")
+
+	creds, err := loadCredsFromFactory(s3TestFactory())
+	if err != nil {
+		t.Fatalf("loadCredsFromFactory: %v", err)
+	}
+	if got := resolveEndpoint(creds, "https://flag.example.invalid"); got != "https://flag.example.invalid" {
+		t.Errorf("resolveEndpoint = %q, want the flag value to win over env", got)
+	}
+	if got := resolveEndpoint(creds, ""); got != "https://env.example.invalid" {
+		t.Errorf("resolveEndpoint = %q, want the env value when no flag is passed", got)
+	}
+}
+
+// redactedCreds keeps key material out of test failure output.
+func redactedCreds(c *options.S3Credentials) map[string]any {
+	return map[string]any{
+		"access_key_set": c.AccessKey != "",
+		"secret_key_set": c.SecretKey != "",
+		"endpoint":       c.Endpoint,
+		"region":         c.Region,
+		"auth_mode":      c.AuthMode,
 	}
 }

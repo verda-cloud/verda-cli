@@ -57,10 +57,15 @@ func NewCmdShow(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 				profile = "default"
 			}
 
-			creds, err := options.LoadS3CredentialsForProfile(path, profile)
+			// Same resolver the transfer commands use, or show would report
+			// "not configured" for an env-only setup that `ls` handles fine.
+			creds, envApplied, err := options.ResolveS3Credentials(path, profile)
 
 			_, _ = fmt.Fprintf(ioStreams.Out, "profile:           %s\n", profile)
 			_, _ = fmt.Fprintf(ioStreams.Out, "credentials_file:  %s\n", path)
+			if len(envApplied) > 0 {
+				_, _ = fmt.Fprintf(ioStreams.Out, "env_overrides:     %s\n", strings.Join(envApplied, ", "))
+			}
 
 			if err != nil {
 				_, _ = fmt.Fprintf(ioStreams.Out, "s3_configured:     false\n")
