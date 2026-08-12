@@ -264,6 +264,10 @@ func confirmBatchDelete(ctx context.Context, f cmdutil.Factory, ioStreams cmduti
 	return confirmed, deleteVolumes, nil
 }
 
+// actionNameDelete is the CLI spelling of the delete action, distinct from the
+// SDK's verda.ActionDelete wire value.
+const actionNameDelete = "delete"
+
 // actionNameToAPI maps CLI action names to SDK action constants.
 func actionNameToAPI(action string) string {
 	switch strings.ToLower(action) {
@@ -275,7 +279,7 @@ func actionNameToAPI(action string) string {
 		return verda.ActionForceShutdown
 	case "hibernate":
 		return verda.ActionHibernate
-	case "delete":
+	case actionNameDelete:
 		return verda.ActionDelete
 	default:
 		return action
