@@ -16,7 +16,9 @@ package util
 
 import (
 	"bytes"
+	"encoding/json"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -300,5 +302,114 @@ func TestJobDeploymentShortViewOmitsZeroCreatedAt(t *testing.T) {
 	realJSON, _ := marshalBoth(t, NewJobDeploymentShortView(&verda.JobDeploymentShortInfo{Name: "job-b", CreatedAt: ts}))
 	if !strings.Contains(realJSON, "2026-08-11T18:51:12Z") {
 		t.Errorf("real timestamp lost: %s", realJSON)
+	}
+}
+
+// fillNonZero recursively sets every settable field to a distinctive non-zero
+// value so a copy can be compared field-by-field. time.Time is special-cased:
+// its fields are unexported, so recursing into it would find nothing settable.
+func fillNonZero(t *testing.T, v reflect.Value, n *int) {
+	t.Helper()
+
+	*n++
+	switch v.Kind() {
+	case reflect.String:
+		v.SetString("s" + strconv.Itoa(*n))
+	case reflect.Bool:
+		v.SetBool(true)
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		v.SetInt(int64(*n))
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		v.SetUint(uint64(*n))
+	case reflect.Float32, reflect.Float64:
+		v.SetFloat(float64(*n) + 0.25)
+	case reflect.Pointer:
+		v.Set(reflect.New(v.Type().Elem()))
+		fillNonZero(t, v.Elem(), n)
+	case reflect.Slice:
+		v.Set(reflect.MakeSlice(v.Type(), 2, 2))
+		for i := range 2 {
+			fillNonZero(t, v.Index(i), n)
+		}
+	case reflect.Struct:
+		if v.Type() == reflect.TypeFor[time.Time]() {
+			v.Set(reflect.ValueOf(time.Date(2026, 8, 11, 18, 51, 12, 0, time.UTC)))
+			return
+		}
+		for i := range v.NumField() {
+			if f := v.Field(i); f.CanSet() {
+				fillNonZero(t, f, n)
+			}
+		}
+	default:
+		// Maps, channels, funcs, interfaces: absent from these payloads.
+	}
+}
+
+func marshalToMap(t *testing.T, v any) map[string]any {
+	t.Helper()
+
+	raw, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	return m
+}
+
+// The tag-name drift guard cannot see a field InstanceView declares but
+// NewInstanceView never assigns: it would marshal as a zero value and still
+// pass — the very defect class these views exist to prevent. Fill every SDK
+// field with a distinctive value and compare the marshaled maps.
+// Credit: hole identified by session 862d36ab's cross-check of c27e9df.
+func TestInstanceViewCopiesEveryValue(t *testing.T) {
+	t.Parallel()
+
+	var inst verda.Instance
+	n := 0
+	fillNonZero(t, reflect.ValueOf(&inst).Elem(), &n)
+
+	sdk := marshalToMap(t, inst)
+	view := marshalToMap(t, NewInstanceView(&inst))
+
+	for key, want := range sdk {
+		got, ok := view[key]
+		if !ok {
+			t.Errorf("view dropped key %q", key)
+			continue
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("key %q: view has %#v, SDK has %#v", key, got, want)
+		}
+	}
+	for key := range view {
+		if _, ok := sdk[key]; !ok {
+			t.Errorf("view invented key %q", key)
+		}
+	}
+}
+
+// On a zero-valued instance the view must drop created_at and nothing else: no
+// other field may silently vanish from the agent contract.
+func TestEmptyInstanceOnlyDropsCreatedAt(t *testing.T) {
+	t.Parallel()
+
+	sdk := marshalToMap(t, verda.Instance{})
+	view := marshalToMap(t, NewInstanceView(&verda.Instance{}))
+
+	var missing []string
+	for key := range sdk {
+		if _, ok := view[key]; !ok {
+			missing = append(missing, key)
+		}
+	}
+	if len(missing) != 1 || missing[0] != "created_at" {
+		t.Errorf("view drops %v on a zero instance; want exactly [created_at]", missing)
+	}
+	if len(view) != len(sdk)-1 {
+		t.Errorf("view has %d keys, SDK has %d; want exactly one fewer", len(view), len(sdk))
 	}
 }
