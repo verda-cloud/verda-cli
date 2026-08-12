@@ -16,7 +16,9 @@ package template
 
 import (
 	"testing"
+	"time"
 
+	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/serverless"
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/vm"
 )
 
@@ -147,5 +149,63 @@ func TestVmResultToTemplate_NoStorage(t *testing.T) {
 	}
 	if !tmpl.StorageSkip {
 		t.Error("StorageSkip should be true")
+	}
+}
+
+func TestContainerResultToTemplate(t *testing.T) {
+	r := &serverless.ContainerTemplateResult{
+		Spot:            true,
+		Compute:         "B200",
+		ComputeSize:     2,
+		Image:           "ghcr.io/me/llm:v1.2",
+		Port:            8080,
+		HealthcheckPath: "/readyz",
+		Env:             []string{"HF_HOME=/data/.huggingface"},
+		EnvSecret:       []string{"HF_TOKEN=hf-token"},
+		Entrypoint:      []string{"python"},
+		Cmd:             []string{"serve.py"},
+		MinReplicas:     0, // wizard answered scale-to-zero explicitly
+		MaxReplicas:     4,
+		Concurrency:     2,
+		QueuePreset:     "custom",
+		QueueLoad:       10,
+		ScaleDownDelay:  5 * time.Minute,
+		RequestTTL:      2 * time.Minute,
+		SecretMounts:    []string{"hf-token:/etc/hf/token"},
+		Description:     "llm api",
+	}
+	tmpl := containerResultToTemplate(r)
+	c := tmpl.Container
+	if tmpl.Resource != "container" || c == nil {
+		t.Fatalf("resource/container block missing: %+v", tmpl)
+	}
+	if !c.Spot || c.Compute != "B200" || c.ComputeSize != 2 || c.Image != "ghcr.io/me/llm:v1.2" ||
+		c.Port != 8080 || c.HealthcheckPath != "/readyz" {
+		t.Fatalf("scalars drifted: %+v", c)
+	}
+	if c.MinReplicas == nil || *c.MinReplicas != 0 {
+		t.Fatalf("min_replicas must be materialized (scale-to-zero intent): %+v", c.MinReplicas)
+	}
+	if c.Env["HF_HOME"] != "/data/.huggingface" || c.EnvSecret["HF_TOKEN"] != "hf-token" {
+		t.Fatalf("env maps wrong: %+v %+v", c.Env, c.EnvSecret)
+	}
+	if c.ScaleDownDelay != "5m0s" || c.RequestTTL != "2m0s" || c.ScaleUpDelay != "" {
+		t.Fatalf("durations wrong: %+v", c)
+	}
+	if c.QueuePreset != "custom" || c.QueueLoad != 10 || len(c.SecretMounts) != 1 {
+		t.Fatalf("queue/mounts wrong: %+v", c)
+	}
+	if tmpl.Description != "llm api" {
+		t.Fatalf("description lost: %q", tmpl.Description)
+	}
+}
+
+func TestPairsToMap(t *testing.T) {
+	m := pairsToMap([]string{"A=1", "B=two=2", "BARE"})
+	if m["A"] != "1" || m["B"] != "two=2" || m["BARE"] != "" {
+		t.Fatalf("pairsToMap wrong: %+v", m)
+	}
+	if pairsToMap(nil) != nil {
+		t.Fatal("nil pairs must give nil map (omitempty)")
 	}
 }

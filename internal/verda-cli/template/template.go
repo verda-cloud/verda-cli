@@ -47,6 +47,115 @@ type Template struct {
 	StartupScriptSkip bool          `yaml:"startup_script_skip,omitempty"`
 	HostnamePattern   string        `yaml:"hostname_pattern,omitempty"`
 	Description       string        `yaml:"description,omitempty"`
+
+	// Container carries serverless-container settings; nil for other resources.
+	Container *ContainerSpec `yaml:"container,omitempty"`
+}
+
+// ContainerSpec mirrors the container create parameters. Field names match
+// the CLI flags so a hand-edited template is guessable.
+type ContainerSpec struct {
+	Spot            bool              `yaml:"spot,omitempty"`
+	Compute         string            `yaml:"compute,omitempty"`
+	ComputeSize     int               `yaml:"compute_size,omitempty"`
+	Image           string            `yaml:"image,omitempty"`
+	RegistryCreds   string            `yaml:"registry_creds,omitempty"`
+	Port            int               `yaml:"port,omitempty"`
+	HealthcheckOff  bool              `yaml:"healthcheck_off,omitempty"`
+	HealthcheckPort int               `yaml:"healthcheck_port,omitempty"`
+	HealthcheckPath string            `yaml:"healthcheck_path,omitempty"`
+	Env             map[string]string `yaml:"env,omitempty"`
+	EnvSecret       map[string]string `yaml:"env_secret,omitempty"`
+	Entrypoint      []string          `yaml:"entrypoint,omitempty"`
+	Cmd             []string          `yaml:"cmd,omitempty"`
+	// MinReplicas is a pointer because 0 (scale-to-zero) is meaningful:
+	// omitempty on a plain int would silently drop it.
+	MinReplicas    *int     `yaml:"min_replicas,omitempty"`
+	MaxReplicas    int      `yaml:"max_replicas,omitempty"`
+	Concurrency    int      `yaml:"concurrency,omitempty"`
+	QueuePreset    string   `yaml:"queue_preset,omitempty"`
+	QueueLoad      int      `yaml:"queue_load,omitempty"`
+	CPUUtil        int      `yaml:"cpu_util,omitempty"`
+	GPUUtil        int      `yaml:"gpu_util,omitempty"`
+	ScaleUpDelay   string   `yaml:"scale_up_delay,omitempty"` // Go duration string
+	ScaleDownDelay string   `yaml:"scale_down_delay,omitempty"`
+	RequestTTL     string   `yaml:"request_ttl,omitempty"`
+	SecretMounts   []string `yaml:"secret_mounts,omitempty"` // "SECRET:/path"
+	// A `model:` / `variants:` block lands here when the model-runtime design
+	// ships — deliberately absent until then.
+}
+
+// vmOnlyFields are Template fields that must stay empty on non-VM templates.
+// Checked by Validate; names match the YAML keys for error messages.
+func (t *Template) vmOnlyFieldsSet() []string {
+	var bad []string
+	if t.BillingType != "" {
+		bad = append(bad, "billing_type")
+	}
+	if t.Contract != "" {
+		bad = append(bad, "contract")
+	}
+	if t.Kind != "" {
+		bad = append(bad, "kind")
+	}
+	if t.InstanceType != "" {
+		bad = append(bad, "instance_type")
+	}
+	if t.Location != "" {
+		bad = append(bad, "location")
+	}
+	if t.Image != "" {
+		bad = append(bad, "image")
+	}
+	if t.OSVolumeSize != 0 {
+		bad = append(bad, "os_volume_size")
+	}
+	if len(t.Storage) > 0 {
+		bad = append(bad, "storage")
+	}
+	if t.StorageSkip {
+		bad = append(bad, "storage_skip")
+	}
+	if len(t.SSHKeys) > 0 {
+		bad = append(bad, "ssh_keys")
+	}
+	if t.StartupScript != "" {
+		bad = append(bad, "startup_script")
+	}
+	if t.StartupScriptSkip {
+		bad = append(bad, "startup_script_skip")
+	}
+	if t.HostnamePattern != "" {
+		bad = append(bad, "hostname_pattern")
+	}
+	return bad
+}
+
+// Validate enforces the per-resource shape. resource "" is read as "vm":
+// every template written before the container split lives under vm/ anyway.
+// Anything else unknown is rejected, and a mismatched container block/VM
+// fields are named in the error.
+func (t *Template) Validate() error {
+	resource := t.Resource
+	if resource == "" {
+		resource = "vm"
+	}
+	switch resource {
+	case "vm":
+		if t.Container != nil {
+			return errors.New(`resource "vm" must not set the "container" block`)
+		}
+	case "container":
+		if t.Container == nil {
+			return errors.New(`resource "container" requires the "container" block`)
+		}
+		if bad := t.vmOnlyFieldsSet(); len(bad) > 0 {
+			return fmt.Errorf("container template must not set VM fields: %s", strings.Join(bad, ", "))
+		}
+	default:
+		return fmt.Errorf("unknown resource %q (supported: vm, container)", t.Resource)
+	}
+	return nil
 }
 
 // StorageSpec describes an additional storage volume attached to a template.
@@ -124,8 +233,15 @@ func Load(baseDir, resource, name string) (*Template, error) {
 	return LoadFromPath(path)
 }
 
-// LoadFromPath reads a template from an absolute file path.
+// LoadFromPath reads a template from an absolute file path and validates it.
+// Validation errors name the file so a bad template fails loudly before deploy.
 func LoadFromPath(path string) (*Template, error) {
+	return loadTemplate(path, true)
+}
+
+// List/ListAll use loadTemplate(..., false): the listing stays
+// forward-compatible with resource kinds added after this CLI version.
+func loadTemplate(path string, validate bool) (*Template, error) {
 	data, err := os.ReadFile(path) //nolint:gosec // user-provided template path
 	if err != nil {
 		return nil, fmt.Errorf("reading template file: %w", err)
@@ -133,7 +249,12 @@ func LoadFromPath(path string) (*Template, error) {
 
 	var tmpl Template
 	if err := yaml.Unmarshal(data, &tmpl); err != nil {
-		return nil, fmt.Errorf("parsing template file: %w", err)
+		return nil, fmt.Errorf("parsing template file %s: %w", path, err)
+	}
+	if validate {
+		if err := tmpl.Validate(); err != nil {
+			return nil, fmt.Errorf("%s: %w", path, err)
+		}
 	}
 	return &tmpl, nil
 }
@@ -176,7 +297,7 @@ func List(baseDir, resource string) ([]Entry, error) {
 		name := strings.TrimSuffix(de.Name(), ".yaml")
 		path := filepath.Join(dir, de.Name())
 
-		tmpl, err := LoadFromPath(path)
+		tmpl, err := loadTemplate(path, false)
 		if err != nil {
 			continue // skip unparseable files
 		}

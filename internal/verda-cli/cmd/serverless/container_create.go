@@ -85,6 +85,8 @@ type containerCreateOptions struct {
 
 	SecretMounts []string // SECRET:PATH
 
+	From string // --from template reference (name or path)
+
 	Yes bool
 }
 
@@ -125,8 +127,15 @@ func newCmdContainerCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobr
 			  --env HF_HOME=/data/.huggingface \
 			  --max-replicas 5 --queue-preset cost-saver
 		`),
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// --from with NoOptDefVal: "verda container create --from my-api"
+			// leaves "my-api" as a positional arg. Recombine it.
+			if cmd.Flags().Changed("from") && strings.TrimSpace(opts.From) == "" && len(args) == 1 {
+				opts.From = args[0]
+			} else if len(args) > 0 {
+				return cmdutil.UsageErrorf(cmd, "unexpected argument %q", args[0])
+			}
 			return runContainerCreate(cmd, f, ioStreams, opts)
 		},
 	}
@@ -165,18 +174,29 @@ func newCmdContainerCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobr
 
 	flags.StringArrayVar(&opts.SecretMounts, "secret-mount", nil, "Secret mount SECRET:MOUNT_PATH; repeat for multiple")
 
+	flags.StringVar(&opts.From, "from", "", "Create from a saved template; use alone to pick from list")
+	flags.Lookup("from").NoOptDefVal = " " // allow --from without value (shows picker)
+
 	flags.BoolVarP(&opts.Yes, "yes", "y", false, "Skip confirmation (required in agent mode)")
 
 	return cmd
 }
 
 func runContainerCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *containerCreateOptions) error {
+	// Template values land before any agent/wizard branch: a template is a set
+	// of defaults, and explicit flags still beat it (apply checks Changed).
+	if cmd.Flags().Changed("from") {
+		if err := applyContainerTemplateFrom(cmd.Context(), f, ioStreams, opts, opts.From, cmd.Flags().Changed); err != nil {
+			return err
+		}
+	}
+
 	// In --agent, validate required flags before VerdaClient() so MISSING_REQUIRED_FLAGS beats auth errors.
 	if f.AgentMode() {
 		if missing := missingContainerCreateFlags(opts); len(missing) > 0 {
 			return cmdutil.NewMissingFlagsError(missing)
 		}
-	} else if opts.Name == "" || opts.Image == "" || opts.Compute == "" {
+	} else if needsContainerWizard(opts) {
 		if err := runContainerWizard(cmd.Context(), f, ioStreams, opts); err != nil {
 			return err
 		}
@@ -224,6 +244,13 @@ func runContainerCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil
 	_, _ = fmt.Fprintf(ioStreams.Out, "Created deployment %q\n", deployment.Name)
 	_, _ = fmt.Fprintf(ioStreams.Out, "Endpoint: %s\n", deployment.EndpointBaseURL)
 	return nil
+}
+
+// needsContainerWizard reports whether the interactive flow must run: any
+// core field still empty after flags and template. The engine auto-skips
+// steps whose target IsSet, so pre-filled values pass through untouched.
+func needsContainerWizard(opts *containerCreateOptions) bool {
+	return opts.Name == "" || opts.Image == "" || opts.Compute == ""
 }
 
 // runContainerWizard runs the interactive create flow into opts.

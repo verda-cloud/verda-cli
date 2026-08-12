@@ -18,12 +18,15 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/verda-cloud/verda-cli/pkg/tui"
 
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
+	tpl "github.com/verda-cloud/verda-cli/internal/verda-cli/template"
 )
 
 // parseRef splits a "resource/name" reference into its two parts.
@@ -98,6 +101,12 @@ func runShow(f cmdutil.Factory, ioStreams cmdutil.IOStreams, ref string) error {
 			value = "-"
 		}
 		_, _ = fmt.Fprintf(ioStreams.Out, "  %-18s %s\n", label, value)
+	}
+
+	if tmpl.Container != nil {
+		printContainerSpec(tmpl.Container, pf)
+		pf("Description:", tmpl.Description)
+		return nil
 	}
 
 	pf("Resource:", tmpl.Resource)
@@ -182,4 +191,80 @@ func pickTemplateEntry(cmd *cobra.Command, f cmdutil.Factory) (*Entry, error) {
 		return nil, err
 	}
 	return &entries[idx], nil
+}
+
+// printContainerSpec renders the container block fields in place of the VM grid.
+func printContainerSpec(c *tpl.ContainerSpec, pf func(label, value string)) {
+	pf("Resource:", "container")
+	if c.Spot {
+		pf("Billing:", "spot")
+	}
+	pf("Compute:", c.Compute)
+	if c.ComputeSize > 0 {
+		pf("Compute Size:", strconv.Itoa(c.ComputeSize))
+	}
+	pf("Image:", c.Image)
+	pf("Registry Creds:", c.RegistryCreds)
+	if c.Port > 0 {
+		pf("Port:", strconv.Itoa(c.Port))
+	}
+	switch {
+	case c.HealthcheckOff:
+		pf("Healthcheck:", "off")
+	case c.HealthcheckPath != "":
+		hc := c.HealthcheckPath
+		if c.HealthcheckPort > 0 {
+			hc += " (port " + strconv.Itoa(c.HealthcheckPort) + ")"
+		}
+		pf("Healthcheck:", hc)
+	}
+	if len(c.Env) > 0 {
+		pf("Env:", pairsLine(c.Env, "="))
+	}
+	if len(c.EnvSecret) > 0 {
+		pf("Env Secret:", pairsLine(c.EnvSecret, "→secret "))
+	}
+	if len(c.Entrypoint) > 0 {
+		pf("Entrypoint:", strings.Join(c.Entrypoint, " "))
+	}
+	if len(c.Cmd) > 0 {
+		pf("Cmd:", strings.Join(c.Cmd, " "))
+	}
+	if c.MinReplicas != nil {
+		pf("Min Replicas:", strconv.Itoa(*c.MinReplicas))
+	}
+	if c.MaxReplicas > 0 {
+		pf("Max Replicas:", strconv.Itoa(c.MaxReplicas))
+	}
+	if c.Concurrency > 0 {
+		pf("Concurrency:", strconv.Itoa(c.Concurrency))
+	}
+	if c.QueuePreset != "" {
+		q := c.QueuePreset
+		if c.QueueLoad > 0 {
+			q += " (threshold " + strconv.Itoa(c.QueueLoad) + ")"
+		}
+		pf("Queue:", q)
+	}
+	if c.CPUUtil > 0 {
+		pf("CPU Util:", strconv.Itoa(c.CPUUtil)+"%")
+	}
+	if c.GPUUtil > 0 {
+		pf("GPU Util:", strconv.Itoa(c.GPUUtil)+"%")
+	}
+	pf("Scale Down Delay:", c.ScaleDownDelay)
+	pf("Request TTL:", c.RequestTTL)
+	if len(c.SecretMounts) > 0 {
+		pf("Secret Mounts:", strings.Join(c.SecretMounts, ", "))
+	}
+}
+
+// pairsLine flattens a map to a sorted, comma-joined "K<sep>V" line.
+func pairsLine(m map[string]string, sep string) string {
+	pairs := make([]string, 0, len(m))
+	for k, v := range m {
+		pairs = append(pairs, k+sep+v)
+	}
+	sort.Strings(pairs)
+	return strings.Join(pairs, ", ")
 }

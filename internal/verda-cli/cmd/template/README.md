@@ -21,14 +21,17 @@ All commands with `[resource/name]` show an interactive picker when the argument
 ### Create
 
 ```bash
-# Interactive (prompts for name and runs VM wizard)
+# Interactive (pick a resource type — Instance (VM) or Serverless container —
+# prompts for name and runs the matching wizard)
 verda template create
 
 # Create a template with a specific name
 verda template create gpu-training
 ```
 
-The create command runs the VM wizard in **template mode** -- the same 10 configuration steps (billing type through startup script) but without hostname, description, or confirm-deploy. In template mode, instance types come from the instance-types API (not filtered by availability) and location is optional ("None — decide at deploy time"). The resulting settings are saved to disk.
+The create command runs the matching wizard in **template mode**: for VMs that's the 10 config steps without hostname/description/confirm-deploy; for containers it's the create flow minus the name step plus a template description. In template mode, instance types come from the instance-types API (not filtered by availability) and location is optional ("None — decide at deploy time"). The resulting settings are saved to disk (`~/.verda/templates/<resource>/<name>.yaml`).
+
+Container templates apply with `verda container create --from <name>`; explicit flags always override template values.
 
 ### Edit
 
@@ -41,6 +44,8 @@ verda template edit vm/gpu-training
 ```
 
 Shows a menu of all template fields with their current values. Pick a field to change, edit it with the appropriate prompt (static choices for simple fields, API-backed selection for instance type/location/image/SSH keys/startup script). Location includes a "None (decide at deploy time)" option to clear the value. Repeat until "Save & exit".
+
+Container templates are refused with a message naming the YAML file (the field menu is VM-shaped); edit the file directly for now.
 
 ### List
 
@@ -70,7 +75,7 @@ verda template show vm/gpu-training
 verda template show vm/gpu-training -o json
 ```
 
-Displays all template fields including hostname pattern, storage skip, and startup script skip status. Unset fields show `-`, explicitly skipped fields show `None (skipped)`.
+Displays all template fields including hostname pattern, storage skip, and startup script skip status. Unset fields show `-`, explicitly skipped fields show `None (skipped)`. Container templates show the container block (compute, image, env, scaling, durations) instead of the VM grid.
 
 ### Delete
 

@@ -50,7 +50,7 @@ func NewCmdList(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&resourceType, "type", "", "Filter by resource type (e.g. vm)")
+	cmd.Flags().StringVar(&resourceType, "type", "", "Filter by resource type (e.g. vm, container)")
 	return cmd
 }
 

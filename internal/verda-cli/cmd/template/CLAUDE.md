@@ -19,7 +19,7 @@ All fields except `resource` are optional. Stored at `~/.verda/templates/<resour
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `resource` | string | Resource type, currently only `"vm"` |
+| `resource` | string | Resource type — `"vm"` or `"container"` (absent reads as `"vm"` for legacy files) |
 | `billing_type` | string | `"on-demand"` or `"spot"` |
 | `contract` | string | `"PAY_AS_YOU_GO"`, `"SPOT"`, `"LONG_TERM"` |
 | `kind` | string | `"GPU"` or `"CPU"` (lowercase in template, case-insensitive in matching) |
@@ -33,6 +33,12 @@ All fields except `resource` are optional. Stored at `~/.verda/templates/<resour
 | `startup_script` | string | Script **name** (not ID) |
 | `startup_script_skip` | bool | Skip startup script step in wizard |
 | `hostname_pattern` | string | Pattern with `{random}` and `{location}` placeholders |
+
+Container templates add a `container:` block (`ContainerSpec`) mirroring the `container create` flags (`compute`, `compute_size`, `image`, `env` map, `min_replicas` pointer, durations as strings, …). Validation at load (`Template.Validate`, called by `LoadFromPath`): `resource: container` requires the block and rejects VM fields (naming them); `resource: vm` rejects the block; unknown resources error. **List/ListAll deliberately load WITHOUT Validate** so the listing stays forward-compatible with resource kinds added later — deploy paths validate hard.
+
+### Container templates and `verda template edit`
+
+The edit command's field menu is VM-shaped; container templates are refused with a pointer to the YAML file (`edit.go`). `show` renders the container block via `printContainerSpec`; `list` shows `container/<name>` rows like any other resource.
 
 ### Name Validation and Auto-Reformatting
 - Valid names match `^[a-z0-9]([a-z0-9-]*[a-z0-9])?$` (no trailing hyphens)

@@ -44,6 +44,24 @@ verda container create \
 
 **Required flags** (agent mode): `--name`, `--image`, `--compute`. Interactive mode launches the wizard if any are missing.
 
+### Create from a template
+
+```bash
+# Create a container template (wizard minus the name step, plus description)
+verda template create          # pick "Serverless container"
+
+# Deploy from it — template values are defaults; any explicit flag wins
+verda container create --from llm-api --name my-endpoint
+
+# Bare --from opens an interactive picker over saved container templates
+verda container create --from
+
+# In --agent mode, --from needs an explicit name (no picker ever)
+verda container create --agent --from llm-api --name x --yes
+```
+
+Templates live at `~/.verda/templates/container/<name>.yaml` under a `container:` block (`resource: container`). Fields mirror the create flags; `env`/`env_secret` are maps, durations are Go strings (`"5m"`, `"300s"`). The wizard still runs for any field the template leaves empty.
+
 **Images must use a specific tag.** `:latest` (explicit or implicit) is rejected before the API call.
 
 **Deployment names** are URL slugs (`[a-z0-9]([-a-z0-9]*[a-z0-9])?`, max 63 chars). They become part of `https://containers.datacrunch.io/<name>` and are **immutable** after create.

@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -84,6 +85,13 @@ func runEdit(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams,
 	tmpl, err := Load(baseDir, resource, name)
 	if err != nil {
 		return err
+	}
+
+	// The field menu is VM-shaped; a container template's fields would show
+	// empty and edits would silently no-op. Refuse clearly instead.
+	if tmpl.Container != nil {
+		path := filepath.Join(baseDir, resource, name+".yaml")
+		return fmt.Errorf("template %s/%s is a container template — the interactive editor only supports VM templates for now; edit %s directly", resource, name, path)
 	}
 
 	ctx := cmd.Context()
