@@ -96,6 +96,106 @@ func NewStartupScriptViews(scripts []verda.StartupScript) []StartupScriptView {
 	return views
 }
 
+// InstanceView is the JSON/YAML shape for one instance. Every field of
+// verda.Instance is mirrored with its own json key — TestInstanceViewCoversSDKFields
+// fails if the SDK grows a field this view would silently drop.
+//
+// Nested types (CPU, GPU, …) are reused from the SDK: they carry no zero-time
+// field, so there is nothing to omit, and re-declaring them would be four more
+// structs to keep in sync.
+type InstanceView struct {
+	ID              string                `json:"id"                   yaml:"id"`
+	IP              *string               `json:"ip"                   yaml:"ip"`
+	Status          string                `json:"status"               yaml:"status"`
+	CreatedAt       *time.Time            `json:"created_at,omitempty" yaml:"created_at,omitempty"`
+	CPU             verda.InstanceCPU     `json:"cpu"                  yaml:"cpu"`
+	GPU             verda.InstanceGPU     `json:"gpu"                  yaml:"gpu"`
+	GPUMemory       verda.InstanceMemory  `json:"gpu_memory"           yaml:"gpu_memory"`
+	Memory          verda.InstanceMemory  `json:"memory"               yaml:"memory"`
+	Storage         verda.InstanceStorage `json:"storage"              yaml:"storage"`
+	Hostname        string                `json:"hostname"             yaml:"hostname"`
+	Description     string                `json:"description"          yaml:"description"`
+	Location        string                `json:"location"             yaml:"location"`
+	PricePerHour    verda.FlexibleFloat   `json:"price_per_hour"       yaml:"price_per_hour"`
+	IsSpot          bool                  `json:"is_spot"              yaml:"is_spot"`
+	InstanceType    string                `json:"instance_type"        yaml:"instance_type"`
+	Image           string                `json:"image"                yaml:"image"`
+	OSName          string                `json:"os_name"              yaml:"os_name"`
+	StartupScriptID *string               `json:"startup_script_id"    yaml:"startup_script_id"`
+	SSHKeyIDs       []string              `json:"ssh_key_ids"          yaml:"ssh_key_ids"`
+	OSVolumeID      *string               `json:"os_volume_id"         yaml:"os_volume_id"`
+	JupyterToken    string                `json:"jupyter_token"        yaml:"jupyter_token"`
+	Contract        string                `json:"contract"             yaml:"contract"`
+	Pricing         string                `json:"pricing"              yaml:"pricing"`
+	VolumeIDs       []string              `json:"volume_ids"           yaml:"volume_ids"`
+}
+
+// NewInstanceView converts one SDK instance to its output shape.
+func NewInstanceView(i *verda.Instance) InstanceView {
+	return InstanceView{
+		ID:              i.ID,
+		IP:              i.IP,
+		Status:          i.Status,
+		CreatedAt:       nilIfZero(i.CreatedAt),
+		CPU:             i.CPU,
+		GPU:             i.GPU,
+		GPUMemory:       i.GPUMemory,
+		Memory:          i.Memory,
+		Storage:         i.Storage,
+		Hostname:        i.Hostname,
+		Description:     i.Description,
+		Location:        i.Location,
+		PricePerHour:    i.PricePerHour,
+		IsSpot:          i.IsSpot,
+		InstanceType:    i.InstanceType,
+		Image:           i.Image,
+		OSName:          i.OSName,
+		StartupScriptID: i.StartupScriptID,
+		SSHKeyIDs:       i.SSHKeyIDs,
+		OSVolumeID:      i.OSVolumeID,
+		JupyterToken:    i.JupyterToken,
+		Contract:        i.Contract,
+		Pricing:         i.Pricing,
+		VolumeIDs:       i.VolumeIDs,
+	}
+}
+
+// NewInstanceViews converts a slice of SDK instances, preserving order.
+func NewInstanceViews(instances []verda.Instance) []InstanceView {
+	views := make([]InstanceView, len(instances))
+	for i := range instances {
+		views[i] = NewInstanceView(&instances[i])
+	}
+	return views
+}
+
+// JobDeploymentShortView is the JSON/YAML shape for one batch-job deployment
+// summary. Serverless is a hidden feature; the view exists so the surface does
+// not carry the same zero-timestamp defect when it ships.
+type JobDeploymentShortView struct {
+	Name      string                  `json:"name"                 yaml:"name"`
+	CreatedAt *time.Time              `json:"created_at,omitempty" yaml:"created_at,omitempty"`
+	Compute   *verda.ContainerCompute `json:"compute"              yaml:"compute"`
+}
+
+// NewJobDeploymentShortView converts one SDK job deployment summary.
+func NewJobDeploymentShortView(j *verda.JobDeploymentShortInfo) JobDeploymentShortView {
+	return JobDeploymentShortView{
+		Name:      j.Name,
+		CreatedAt: nilIfZero(j.CreatedAt),
+		Compute:   j.Compute,
+	}
+}
+
+// NewJobDeploymentShortViews converts a slice, preserving order.
+func NewJobDeploymentShortViews(jobs []verda.JobDeploymentShortInfo) []JobDeploymentShortView {
+	views := make([]JobDeploymentShortView, len(jobs))
+	for i := range jobs {
+		views[i] = NewJobDeploymentShortView(&jobs[i])
+	}
+	return views
+}
+
 // TimeColumn renders a timestamp for table output. An absent value prints as
 // "-" rather than 0001-01-01, so a human reading the table sees "unknown"
 // instead of a plausible-looking date.

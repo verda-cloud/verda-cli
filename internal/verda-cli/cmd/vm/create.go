@@ -246,7 +246,7 @@ func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 	}
 
 	// Structured output: emit JSON and return (optionally after waiting).
-	if wrote, werr := cmdutil.WriteStructured(ioStreams.Out, f.OutputFormat(), instance); wrote {
+	if wrote, werr := cmdutil.WriteStructured(ioStreams.Out, f.OutputFormat(), cmdutil.NewInstanceView(instance)); wrote {
 		if werr != nil {
 			return werr
 		}

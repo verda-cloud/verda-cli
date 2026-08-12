@@ -57,7 +57,7 @@ func runBatchjobList(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IO
 
 	cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), "Jobs:", jobs)
 
-	if wrote, werr := cmdutil.WriteStructured(ioStreams.Out, f.OutputFormat(), jobs); wrote {
+	if wrote, werr := cmdutil.WriteStructured(ioStreams.Out, f.OutputFormat(), cmdutil.NewJobDeploymentShortViews(jobs)); wrote {
 		return werr
 	}
 

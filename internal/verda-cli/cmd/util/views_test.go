@@ -16,6 +16,7 @@ package util
 
 import (
 	"bytes"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -175,5 +176,129 @@ func TestTextColumn(t *testing.T) {
 	}
 	if got := TextColumn("SHA256:abc"); got != "SHA256:abc" {
 		t.Errorf("got %q", got)
+	}
+}
+
+// jsonKeys returns the json tag names declared on a struct type, ignoring
+// options like ",omitempty".
+func jsonKeys(t *testing.T, v any) map[string]bool {
+	t.Helper()
+
+	rt := reflect.TypeOf(v)
+	keys := make(map[string]bool, rt.NumField())
+	for i := range rt.NumField() {
+		tag := rt.Field(i).Tag.Get("json")
+		if tag == "" || tag == "-" {
+			continue
+		}
+		keys[strings.Split(tag, ",")[0]] = true
+	}
+	return keys
+}
+
+// A view that mirrors an SDK struct field-by-field silently drops any field the
+// SDK adds later — and for the agent JSON contract, a silently missing field is
+// a broken consumer. This test is the tripwire: it fails when verda.Instance
+// grows a field InstanceView does not carry.
+func TestInstanceViewCoversSDKFields(t *testing.T) {
+	t.Parallel()
+
+	sdk := jsonKeys(t, verda.Instance{})
+	view := jsonKeys(t, InstanceView{})
+
+	for key := range sdk {
+		if !view[key] {
+			t.Errorf("verda.Instance has json key %q that InstanceView drops — add it to the view", key)
+		}
+	}
+	for key := range view {
+		if !sdk[key] {
+			t.Errorf("InstanceView invents json key %q that verda.Instance does not have", key)
+		}
+	}
+}
+
+func TestJobDeploymentShortViewCoversSDKFields(t *testing.T) {
+	t.Parallel()
+
+	sdk := jsonKeys(t, verda.JobDeploymentShortInfo{})
+	view := jsonKeys(t, JobDeploymentShortView{})
+
+	for key := range sdk {
+		if !view[key] {
+			t.Errorf("verda.JobDeploymentShortInfo has json key %q that the view drops", key)
+		}
+	}
+	for key := range view {
+		if !sdk[key] {
+			t.Errorf("view invents json key %q", key)
+		}
+	}
+}
+
+func TestInstanceViewOmitsZeroCreatedAt(t *testing.T) {
+	t.Parallel()
+
+	gotJSON, gotYAML := marshalBoth(t, NewInstanceView(&verda.Instance{ID: "inst-1", Hostname: "box"}))
+
+	if strings.Contains(gotJSON, "created_at") {
+		t.Errorf("zero CreatedAt emitted in JSON: %s", gotJSON)
+	}
+	if !strings.Contains(gotJSON, `"hostname": "box"`) {
+		t.Errorf("hostname lost: %s", gotJSON)
+	}
+	if strings.Contains(gotYAML, "0001-01-01") || strings.Contains(gotYAML, "createdat") {
+		t.Errorf("YAML leaks a zero timestamp or an untagged key:\n%s", gotYAML)
+	}
+}
+
+func TestInstanceViewKeepsRealCreatedAt(t *testing.T) {
+	t.Parallel()
+
+	ts := time.Date(2026, 8, 11, 18, 51, 12, 0, time.UTC)
+	gotJSON, gotYAML := marshalBoth(t, NewInstanceView(&verda.Instance{ID: "inst-1", CreatedAt: ts}))
+
+	if !strings.Contains(gotJSON, `"created_at": "2026-08-11T18:51:12Z"`) {
+		t.Errorf("real timestamp lost or reformatted: %s", gotJSON)
+	}
+	if !strings.Contains(gotYAML, "created_at:") {
+		t.Errorf("YAML lost created_at:\n%s", gotYAML)
+	}
+}
+
+func TestInstanceViewsPreserveOrderAndPerRowOmission(t *testing.T) {
+	t.Parallel()
+
+	ts := time.Date(2026, 8, 11, 18, 51, 12, 0, time.UTC)
+	views := NewInstanceViews([]verda.Instance{
+		{ID: "a"},
+		{ID: "b", CreatedAt: ts},
+	})
+	if len(views) != 2 || views[0].ID != "a" || views[1].ID != "b" {
+		t.Fatalf("order or length changed: %+v", views)
+	}
+	if views[0].CreatedAt != nil {
+		t.Errorf("row 0 gained a timestamp: %v", views[0].CreatedAt)
+	}
+	if views[1].CreatedAt == nil || !views[1].CreatedAt.Equal(ts) {
+		t.Errorf("row 1 lost its timestamp: %v", views[1].CreatedAt)
+	}
+}
+
+func TestJobDeploymentShortViewOmitsZeroCreatedAt(t *testing.T) {
+	t.Parallel()
+
+	gotJSON, gotYAML := marshalBoth(t, NewJobDeploymentShortView(&verda.JobDeploymentShortInfo{Name: "job-a"}))
+	if strings.Contains(gotJSON, "created_at") {
+		t.Errorf("zero CreatedAt emitted in JSON: %s", gotJSON)
+	}
+	if strings.Contains(gotYAML, "0001-01-01") {
+		t.Errorf("zero CreatedAt emitted in YAML:\n%s", gotYAML)
+	}
+
+	ts := time.Date(2026, 8, 11, 18, 51, 12, 0, time.UTC)
+	realJSON, _ := marshalBoth(t, NewJobDeploymentShortView(&verda.JobDeploymentShortInfo{Name: "job-b", CreatedAt: ts}))
+	if !strings.Contains(realJSON, "2026-08-11T18:51:12Z") {
+		t.Errorf("real timestamp lost: %s", realJSON)
 	}
 }
