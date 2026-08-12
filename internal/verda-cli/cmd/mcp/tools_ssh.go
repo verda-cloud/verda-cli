@@ -21,6 +21,8 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
+
+	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
 
 func (s *Server) registerSSHTools() {
@@ -80,7 +82,7 @@ func (s *Server) handleListSSHKeys(ctx context.Context, req mcp.CallToolRequest)
 		keys = filtered
 	}
 
-	return jsonResult(keys)
+	return jsonResult(cmdutil.NewSSHKeyViews(keys))
 }
 
 //nolint:gocritic // hugeParam: handler signature defined by mcp-go.
@@ -106,7 +108,7 @@ func (s *Server) handleAddSSHKey(ctx context.Context, req mcp.CallToolRequest) (
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
-	return jsonResult(key)
+	return jsonResult(cmdutil.NewSSHKeyView(key))
 }
 
 //nolint:gocritic // hugeParam: handler signature defined by mcp-go.
