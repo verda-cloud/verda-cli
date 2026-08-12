@@ -129,3 +129,61 @@ func TestListSSHKeysSearchStillFilters(t *testing.T) {
 		t.Errorf("filtered result still emits a zero timestamp:\n%s", got)
 	}
 }
+
+// add_ssh_key returns the created key to the agent, so it is the second place a
+// zero timestamp can reach a reaper. AddSSHKey POSTs, gets a plain-text id back,
+// then re-reads the key — both stubs are needed.
+func TestAddSSHKeyOmitsZeroCreatedAt(t *testing.T) {
+	t.Parallel()
+
+	const keyID = "4d13391d-bdef-49ec-84de-53a2f6174905"
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /oauth2/token", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"access_token": "test-token",
+			"token_type":   "Bearer",
+		})
+	})
+	mux.HandleFunc("POST /ssh-keys", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = w.Write([]byte(keyID))
+	})
+	// Re-read after create: same shape as the list endpoint, no created_at.
+	mux.HandleFunc("GET /ssh-keys/"+keyID, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{"id":"` + keyID + `","name":"meng",` +
+			`"key":"ssh-ed25519 AAAA","fingerprint":null}]`))
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	client, err := verda.NewClient(
+		verda.WithBaseURL(srv.URL),
+		verda.WithClientID("test-id"),
+		verda.WithClientSecret("test-secret"),
+	)
+	if err != nil {
+		t.Fatalf("creating client: %v", err)
+	}
+
+	res, err := NewServer(client).handleAddSSHKey(context.Background(), callReq("add_ssh_key", map[string]any{
+		"name":       "meng",
+		"public_key": "ssh-ed25519 AAAA",
+	}))
+	if err != nil {
+		t.Fatalf("handleAddSSHKey: %v", err)
+	}
+	got := resultText(t, res)
+
+	if strings.Contains(got, "0001-01-01") {
+		t.Errorf("add_ssh_key emits a zero timestamp as data:\n%s", got)
+	}
+	if strings.Contains(got, "created_at") {
+		t.Errorf("created_at present though the API never sent it:\n%s", got)
+	}
+	if !strings.Contains(got, keyID) {
+		t.Errorf("created key id missing from the result:\n%s", got)
+	}
+}

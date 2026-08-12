@@ -147,3 +147,85 @@ verda_s3_region = eu-west-1
 		t.Errorf("staging show leaked the default profile's endpoint:\n%s", stdout)
 	}
 }
+
+// show must report what the transfer commands will actually use. Before env
+// support it read the file only, so an env-only setup that `ls` handles fine
+// showed up here as "not configured".
+func TestShow_EnvOnlyIsReportedConfigured(t *testing.T) {
+	// no t.Parallel — t.Setenv
+	t.Setenv("VERDA_S3_ACCESS_KEY", "REPLACE_ME_ENV_KEY")
+	t.Setenv("VERDA_S3_SECRET_KEY", "REPLACE_ME_ENV_SECRET")
+	t.Setenv("VERDA_S3_ENDPOINT", "https://env.example.invalid")
+	t.Setenv("VERDA_S3_REGION", "eu-north-1")
+
+	stdout, stderr := runShow(t, filepath.Join(t.TempDir(), "absent"))
+
+	for _, want := range []string{
+		"access_key_loaded: true",
+		"secret_key_loaded: true",
+		"https://env.example.invalid",
+		"eu-north-1",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("stdout missing %q:\n%s", want, stdout)
+		}
+	}
+	if strings.Contains(stdout, "s3_configured:     false") {
+		t.Errorf("env-only credentials reported as not configured:\n%s", stdout)
+	}
+	if strings.Contains(stderr, "No S3 credentials found") {
+		t.Errorf("unexpected 'not found' warning for an env-only setup:\n%s", stderr)
+	}
+}
+
+// The env_overrides line names the variables in play and must never print a
+// value — this is the one command whose whole job is explaining credentials.
+func TestShow_EnvOverridesNamesVariablesNotValues(t *testing.T) {
+	// no t.Parallel — t.Setenv
+	path := writeCredsFile(t, `[default]
+verda_s3_access_key = AKIA123
+verda_s3_secret_key = secret456
+verda_s3_endpoint = https://objects.example.com
+verda_s3_region = eu-north-1
+`)
+	t.Setenv("VERDA_S3_ENDPOINT", "https://env.example.invalid")
+
+	stdout, _ := runShow(t, path)
+
+	if !strings.Contains(stdout, "env_overrides:     VERDA_S3_ENDPOINT") {
+		t.Errorf("env_overrides line missing or wrong:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "VERDA_S3_ACCESS_KEY") {
+		t.Errorf("listed a variable that was not set:\n%s", stdout)
+	}
+	// Per-field merge: the file's key material survives an endpoint override.
+	if !strings.Contains(stdout, "https://env.example.invalid") {
+		t.Errorf("endpoint not overridden by env:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "access_key_loaded: true") {
+		t.Errorf("file key material lost:\n%s", stdout)
+	}
+}
+
+// No credentials anywhere must still read as not configured.
+func TestShow_NoFileNoEnvStaysNotConfigured(t *testing.T) {
+	// no t.Parallel — t.Setenv
+	for _, v := range []string{
+		"VERDA_S3_ACCESS_KEY", "VERDA_S3_SECRET_KEY",
+		"VERDA_S3_ENDPOINT", "VERDA_S3_REGION", "VERDA_S3_AUTH_MODE",
+	} {
+		t.Setenv(v, "")
+	}
+
+	stdout, stderr := runShow(t, filepath.Join(t.TempDir(), "absent"))
+
+	if !strings.Contains(stdout, "s3_configured:     false") {
+		t.Errorf("expected s3_configured: false:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "env_overrides:") {
+		t.Errorf("env_overrides printed with nothing set:\n%s", stdout)
+	}
+	if !strings.Contains(stderr, "No S3 credentials found") {
+		t.Errorf("expected the not-found hint on stderr:\n%s", stderr)
+	}
+}

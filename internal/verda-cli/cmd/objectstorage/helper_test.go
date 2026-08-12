@@ -243,3 +243,41 @@ func redactedCreds(c *options.S3Credentials) map[string]any {
 		"auth_mode":      c.AuthMode,
 	}
 }
+
+// Every object-storage verb (ls/cp/mv/sync/rm/mb/rb/presign) builds its client
+// through buildClientDefault, so this one test covers the env path for all of
+// them. It calls the real builder, not the swapped fake.
+func TestBuildClientDefaultResolvesEnvCredentials(t *testing.T) {
+	// No t.Parallel: t.Setenv.
+	t.Setenv("VERDA_PROFILE", "default")
+	t.Setenv("VERDA_SHARED_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "absent"))
+	t.Setenv("VERDA_S3_ACCESS_KEY", "REPLACE_ME_ENV_KEY")
+	t.Setenv("VERDA_S3_SECRET_KEY", "REPLACE_ME_ENV_SECRET")
+	t.Setenv("VERDA_S3_ENDPOINT", "https://env.example.invalid")
+
+	client, err := buildClientDefault(context.Background(), s3TestFactory(), ClientOverrides{})
+	if err != nil {
+		t.Fatalf("buildClientDefault with env-only credentials: %v", err)
+	}
+	if client == nil {
+		t.Fatal("client is nil")
+	}
+}
+
+// Same funnel, nothing configured: the friendly hint must survive.
+func TestBuildClientDefaultWithoutCredentialsStillHints(t *testing.T) {
+	// No t.Parallel: t.Setenv.
+	t.Setenv("VERDA_PROFILE", "default")
+	t.Setenv("VERDA_SHARED_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "absent"))
+	for _, v := range []string{"VERDA_S3_ACCESS_KEY", "VERDA_S3_SECRET_KEY", "VERDA_S3_ENDPOINT"} {
+		t.Setenv(v, "")
+	}
+
+	_, err := buildClientDefault(context.Background(), s3TestFactory(), ClientOverrides{})
+	if err == nil {
+		t.Fatal("expected the 'no S3 credentials configured' error")
+	}
+	if !strings.Contains(err.Error(), "object-storage configure") {
+		t.Errorf("error lost the configure hint: %v", err)
+	}
+}
