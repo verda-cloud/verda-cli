@@ -15,6 +15,7 @@
 package cost
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
@@ -100,5 +101,33 @@ func TestRunningCostSummaryTotals(t *testing.T) {
 	}
 	if s.Total.Monthly != 423.4 {
 		t.Fatalf("expected total monthly 423.4, got %f", s.Total.Monthly)
+	}
+}
+
+// The web console is the billing source of truth, so a CLI total must read as an
+// estimate. This pins the wording that says so.
+func TestRenderRunningLabelsTheTotalAsAnEstimate(t *testing.T) {
+	t.Parallel()
+
+	s := &RunningCostSummary{
+		Instances: []RunningInstanceCost{{
+			Hostname: "box-a", InstanceType: "CPU.4V.16G",
+			Hourly: 0.0279, Daily: 0.6696, Monthly: 20.367,
+		}},
+	}
+	s.computeTotals()
+
+	var b strings.Builder
+	renderRunning(&b, s)
+	out := b.String()
+
+	if !strings.Contains(out, "Est. Burn") {
+		t.Errorf("total is not labeled as an estimate:\n%s", out)
+	}
+	if strings.Contains(out, "Total Burn") {
+		t.Errorf("total still reads as an authoritative charge:\n%s", out)
+	}
+	if !strings.Contains(out, "Verda dashboard for actual charges") {
+		t.Errorf("missing the pointer to the billing source of truth:\n%s", out)
 	}
 }

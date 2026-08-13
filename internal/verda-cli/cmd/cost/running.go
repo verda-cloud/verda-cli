@@ -29,11 +29,14 @@ import (
 func newCmdRunning(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 	return &cobra.Command{
 		Use:   "running",
-		Short: "Show costs of currently running instances",
+		Short: "Estimate the ongoing cost of running instances",
 		Long: cmdutil.LongDesc(`
-			Calculate the cost of all currently running instances,
-			including their attached volumes. Shows per-instance
-			breakdown and total burn rate.
+			Estimate what currently running instances and their attached volumes
+			cost per hour, day and month, with a per-instance breakdown.
+
+			This is a sum of catalog prices, not an invoice: it excludes credits,
+			discounts, contract terms and partial-hour handling. Check the Verda
+			dashboard for actual charges.
 		`),
 		Example: cmdutil.Examples(`
 			verda cost running
@@ -211,9 +214,12 @@ func renderRunning(w interface{ Write([]byte) (int, error) }, s *RunningCostSumm
 
 	_, _ = fmt.Fprintf(w, "  %s\n", sep)
 	_, _ = fmt.Fprintf(w, "  %s     %s/hr  %s/day  %s/mo\n",
-		bold.Render("Total Burn"),
+		bold.Render("Est. Burn "),
 		bold.Render(price.Render(formatPrice(s.Total.Hourly))),
 		bold.Render(price.Render(formatPrice(s.Total.Daily))),
 		bold.Render(price.Render(formatPrice(s.Total.Monthly))))
-	_, _ = fmt.Fprintf(w, "  %s\n\n", sep)
+	_, _ = fmt.Fprintf(w, "  %s\n", sep)
+	// The dashboard owns billing; this total is catalog arithmetic.
+	_, _ = fmt.Fprintf(w, "  %s\n\n",
+		dim.Render("Estimate from catalog prices — see the Verda dashboard for actual charges."))
 }
