@@ -131,6 +131,14 @@ func (m pagerModel) View() tea.View {
 func (p *Prompter) Pager(ctx context.Context, content string, opts ...tui.PagerOption) error {
 	cfg := tui.ResolvePagerConfig(opts)
 
+	// Paging needs a terminal to page in; elsewhere the content is just data.
+	// Without this, terminalHeight's 24-line fallback sends anything longer into
+	// an alt-screen program that waits forever for keys nobody can send.
+	if !rendersToTerminal(p.out) {
+		_, err := fmt.Fprint(p.dataOut, content)
+		return err
+	}
+
 	// Auto-detect: if content fits in terminal, just print it. The
 	// print-through path is data, so it goes to dataOut (house rule).
 	lines := strings.Count(content, "\n") + 1
