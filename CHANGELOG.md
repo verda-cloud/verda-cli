@@ -1,6 +1,9 @@
 # Changelog
 
 
+## [Unreleased]
+- [`6ecf036`] Hotfix/v1.8.0
+
 ## [v1.8.0] - 2026-08-09
 - [`59bf886`] Refactor(tui): move TUI core in-tree under pkg/, remove GitNexus
 - [`98c3c45`] Fix(vm): don't offer "None (skip)" after queuing storage volumes
