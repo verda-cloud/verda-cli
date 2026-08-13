@@ -174,6 +174,7 @@ func renderDeploymentSummary(opts *createOptions, cache *apiCache) string {
 	total := computeHourly + storageHourly
 	fmt.Fprintf(&b, "  %s  %s\n", bold.Render(fmt.Sprintf("%-40s", "Total")), bold.Render(fmt.Sprintf("$%.4f/hr", total)))
 	fmt.Fprintf(&b, "  %s\n", dim.Render(strings.Repeat("─", 50)))
+	fmt.Fprintf(&b, "  %s\n", dim.Render(cmdutil.PriceDisclaimer))
 
 	return b.String()
 }

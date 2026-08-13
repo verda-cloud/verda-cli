@@ -39,10 +39,14 @@ func NewCmdInstanceTypes(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.
 	cmd := &cobra.Command{
 		Use:     "instance-types",
 		Aliases: []string{"types"},
-		Short:   "List available instance types with specs and pricing",
+		Short:   "List the instance type catalog with specs and pricing",
 		Long: cmdutil.LongDesc(`
-			List all available instance types with their specifications
-			and pricing. Filter by GPU or CPU to narrow results.
+			List every instance type Verda offers, with specifications and pricing.
+			Filter by GPU or CPU to narrow results.
+
+			This is the catalog, not live stock: a type listed here may have no
+			capacity in any location right now. Run "verda availability" for what
+			is actually deployable, per location.
 		`),
 		Example: cmdutil.Examples(`
 			# All instance types
@@ -163,6 +167,7 @@ func renderTypes(w interface{ Write([]byte) (int, error) }, types []verda.Instan
 		}
 	}
 
+	_, _ = fmt.Fprintf(w, "\n  %s\n", dim.Render(cmdutil.PriceDisclaimer))
 	_, _ = fmt.Fprintln(w)
 }
 

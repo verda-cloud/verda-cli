@@ -204,6 +204,21 @@ Per-file progress lines (`uploaded`, `downloaded`, `copied`, `moved`, `deleted`)
 ## Environment
 
 - `VERDA_SHARED_CREDENTIALS_FILE` -- override the default credentials path (`~/.verda/credentials`)
+- `VERDA_S3_ACCESS_KEY`, `VERDA_S3_SECRET_KEY`, `VERDA_S3_ENDPOINT`, `VERDA_S3_REGION`, `VERDA_S3_AUTH_MODE` -- S3 credentials from the environment
+
+Resolution is per field: **flags > environment > credentials-file profile**.
+Setting only `VERDA_S3_ENDPOINT` overrides the endpoint and leaves the profile's
+keys alone; an empty variable counts as unset. A complete environment set needs
+no credentials file at all, so CI never has to write secrets to disk:
+
+```bash
+export VERDA_S3_ACCESS_KEY=... VERDA_S3_SECRET_KEY=...
+export VERDA_S3_ENDPOINT=https://objects.fin-03.verda.storage
+verda object-storage ls s3://my-bucket
+```
+
+`verda object-storage show` lists which variables are in effect under
+`env_overrides:` (names only -- never values).
 
 ## Multiple profiles
 

@@ -19,11 +19,27 @@
 ## Domain-Specific Logic
 
 ### Credential resolution order
-Resolved in `client.go` `NewClient` + `resolveEndpoint`:
+Loaded by `options.ResolveS3Credentials` (file + env), then flags applied in
+`client.go` `NewClient` + `resolveEndpoint`:
 1. Per-invocation flag overrides: `--endpoint`, `--access-key`, `--secret-key`, `--region`
-2. `~/.verda/credentials` profile, keys prefixed `verda_s3_`
-3. `DefaultEndpoint` fallback for endpoint only (host/region are required via flag or profile)
-4. `verda_s3_auth_mode`: `credentials` (implemented), `api` (stub -- not yet implemented)
+2. `VERDA_S3_ACCESS_KEY` / `_SECRET_KEY` / `_ENDPOINT` / `_REGION` / `_AUTH_MODE`
+3. `~/.verda/credentials` profile, keys prefixed `verda_s3_`
+4. `DefaultEndpoint` fallback for endpoint only (host/region are required via flag or profile)
+5. `verda_s3_auth_mode`: `credentials` (implemented), `api` (stub -- not yet implemented)
+
+The env overlay is **per field**, not wholesale: `VERDA_S3_ENDPOINT` alone
+overrides the endpoint and keeps the profile's keys. An empty or whitespace-only
+variable counts as unset, so `export VERDA_S3_REGION=` cannot blank a good
+profile. A complete env set needs no credentials file at all — that is the CI
+case, and `loadCredsFromFactory` even tolerates an unresolvable file path (no
+`HOME`) when env alone is complete. `HasCredentials()` (access key + secret +
+endpoint) still gates, so a partial env fails loudly instead of half-overriding.
+
+`show` uses the same resolver and prints an `env_overrides:` line naming the
+variables in play (**names only, never values**) — without it, `show` would
+report "not configured" for an env-only setup that `ls`/`cp` handle fine.
+`wizard.go`'s profile picker deliberately does *not* apply the overlay: it
+enumerates what is in the file, and an overlay there would invent a profile.
 
 ### Profile fallback (s3-specific)
 S3 commands are in `skipCredentialResolution` (see `cmd/cmd.go`), so `Options.Complete()` never runs and `AuthOptions.Profile` stays empty. `loadCredsFromFactory` in `helper.go` therefore falls back to `defaultProfileName` ("default") when `Profile == ""`. Without this, `LoadS3CredentialsForProfile(path, "")` would load ini.v1's synthetic `DEFAULT` section instead of the user's `[default]` section, and `s3 ls`/`cp`/etc. would falsely report "no S3 credentials configured" right after a successful `s3 configure`. `s3 show` applies the same fallback inline.

@@ -84,7 +84,7 @@ func runDescribe(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStre
 	cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), "Instance details:", inst)
 
 	// Structured output.
-	if wrote, err := cmdutil.WriteStructured(ioStreams.Out, f.OutputFormat(), inst); wrote {
+	if wrote, err := cmdutil.WriteStructured(ioStreams.Out, f.OutputFormat(), cmdutil.NewInstanceView(inst)); wrote {
 		return err
 	}
 

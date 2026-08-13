@@ -172,6 +172,7 @@ func NewCmdCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 	flags.StringVar(&opts.Image, "os", "", "OS image slug or an existing detached OS volume ID")
 	flags.StringVar(&opts.Image, "image", "", "Alias of --os")
 	flags.StringVar(&opts.Hostname, "hostname", "", "Hostname for the new VM")
+	// No length limit documented: the API enforces none at 101 characters.
 	flags.StringVar(&opts.Description, "description", "", "Human-readable description; defaults to the hostname")
 	flags.StringSliceVar(&opts.SSHKeyIDs, "ssh-key", nil, "SSH key ID to inject into the instance; repeat the flag for multiple keys")
 	flags.StringSliceVar(&opts.SSHKeyIDs, "ssh-key-id", nil, "Alias of --ssh-key")
@@ -185,9 +186,9 @@ func NewCmdCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 	flags.BoolVar(&opts.IsSpot, "is-spot", false, "Request a spot instance")
 	flags.BoolVar(&opts.IsSpot, "spot", false, "Alias of --is-spot")
 	flags.StringVar(&opts.Coupon, "coupon", "", "Coupon code to apply to the instance creation")
-	flags.StringVar(&opts.OSVolumeName, "os-volume-name", "", "Name of the OS volume to create")
-	flags.IntVar(&opts.OSVolumeSize, "os-volume-size", 0, "Size of the OS volume in GiB")
-	flags.StringVar(&opts.OSVolumeOnSpotDiscontinue, "os-volume-on-spot-discontinue", "", "Spot discontinue policy for the OS volume: keep_detached, move_to_trash, or delete_permanently")
+	flags.StringVar(&opts.OSVolumeName, "os-volume-name", "", "Name of the OS volume to create; requires --os-volume-size")
+	flags.IntVar(&opts.OSVolumeSize, "os-volume-size", 0, "Size of the OS volume in GiB; required if any other --os-volume-* flag is set")
+	flags.StringVar(&opts.OSVolumeOnSpotDiscontinue, "os-volume-on-spot-discontinue", "", "Spot discontinue policy for the OS volume: keep_detached, move_to_trash, or delete_permanently; requires --os-volume-size and --is-spot")
 	flags.StringVar(&opts.StorageName, "storage-name", "", "Name of the optional additional storage volume; defaults to <hostname>-storage")
 	flags.IntVar(&opts.StorageSize, "storage-size", 0, "Size of the optional additional storage volume in GiB")
 	flags.StringVar(&opts.StorageType, "storage-type", opts.StorageType, "Type of the optional additional storage volume")
@@ -246,7 +247,7 @@ func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 	}
 
 	// Structured output: emit JSON and return (optionally after waiting).
-	if wrote, werr := cmdutil.WriteStructured(ioStreams.Out, f.OutputFormat(), instance); wrote {
+	if wrote, werr := cmdutil.WriteStructured(ioStreams.Out, f.OutputFormat(), cmdutil.NewInstanceView(instance)); wrote {
 		if werr != nil {
 			return werr
 		}

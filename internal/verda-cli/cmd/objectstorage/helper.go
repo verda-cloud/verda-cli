@@ -63,9 +63,14 @@ func loadCredsFromFactory(f cmdutil.Factory) (*options.S3Credentials, error) {
 	}
 	path, err := resolveCredentialsFile("")
 	if err != nil {
+		// No file path to resolve (e.g. no HOME in a container) — VERDA_S3_* may
+		// still carry a complete set on its own.
+		if creds, _, envErr := options.ResolveS3Credentials("", profile); envErr == nil {
+			return creds, nil
+		}
 		return nil, err
 	}
-	creds, err := options.LoadS3CredentialsForProfile(path, profile)
+	creds, _, err := options.ResolveS3Credentials(path, profile)
 	if err != nil {
 		return &options.S3Credentials{}, nil //nolint:nilerr // intentional: missing creds → empty struct so NewClient surfaces the "verda object-storage configure" hint
 	}

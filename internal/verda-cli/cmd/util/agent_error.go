@@ -237,8 +237,34 @@ func classifyAPIError(apiErr *verda.APIError) *AgentError {
 			Details:  map[string]any{"status": apiErr.StatusCode},
 			ExitCode: ExitInsufficientBal,
 		}
+	case http.StatusBadRequest:
+		if ae := sshKeyRequired(apiErr); ae != nil {
+			return ae
+		}
+		return NewAPIError(apiErr.Error(), apiErr.StatusCode)
 	default:
 		return NewAPIError(apiErr.Error(), apiErr.StatusCode)
+	}
+}
+
+// sshKeyRequired maps the create-time 400 whose upstream text contradicts
+// itself: POST /instances rejects an absent ssh_key_ids while listing "not
+// defined" as valid, so the wording is unactionable and moves to details.
+// nil for any other 400. Delete when the API accepts an absent value.
+func sshKeyRequired(apiErr *verda.APIError) *AgentError {
+	if !strings.Contains(strings.ToLower(apiErr.Message), "ssh key") {
+		return nil
+	}
+	return &AgentError{
+		Code: "SSH_KEY_REQUIRED",
+		Message: "the API requires at least one SSH key to create an instance, and this request had none: " +
+			"pass --ssh-key <id> (CLI) or ssh_key_ids (MCP); list ids with \"verda ssh-key list\"",
+		Details: map[string]any{
+			"status": apiErr.StatusCode,
+			// Upstream text, verbatim, for debugging.
+			"api_message": apiErr.Message,
+		},
+		ExitCode: ExitBadArgs,
 	}
 }
 

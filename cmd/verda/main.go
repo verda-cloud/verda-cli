@@ -35,14 +35,16 @@ func main() {
 		// agent-mode branch so a cancel stays silent there too.
 		return
 	} else if err != nil {
-		// In agent mode, always emit structured JSON errors.
+		// One classifier, two renderers: JSON envelope for agents, the same
+		// classified message as plain text for humans.
+		ae := cmdutil.ClassifyError(err)
+
 		if opts.Agent || cmdutil.IsAgentError(err) {
-			ae := cmdutil.ClassifyError(err)
 			cmdutil.WriteAgentError(os.Stderr, ae)
 			os.Exit(ae.ExitCode)
 		}
-		// Normal mode: plain text error.
-		msg := err.Error()
+
+		msg := ae.Message
 		// For auth-related errors, append profile context so the user
 		// knows which profile was used and how to switch.
 		if isAuthRelated(msg) && opts.AuthOptions != nil {
@@ -51,6 +53,8 @@ func main() {
 			msg += "\n  hint: run 'verda auth use' to switch profile, or 'verda auth show' to check credentials"
 		}
 		fmt.Fprintln(os.Stderr, msg)
+		// Human failures stay exit 1; ae.ExitCode is agent-mode only, so `$?`
+		// keeps its meaning for existing callers.
 		os.Exit(1)
 	}
 }

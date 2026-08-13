@@ -67,21 +67,25 @@ func runList(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams)
 
 	cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), fmt.Sprintf("API response: %d startup script(s):", len(scripts)), scripts)
 
+	views := cmdutil.NewStartupScriptViews(scripts)
+
 	// Structured output: emit JSON/YAML and return.
-	if wrote, err := cmdutil.WriteStructured(ioStreams.Out, f.OutputFormat(), scripts); wrote {
+	if wrote, err := cmdutil.WriteStructured(ioStreams.Out, f.OutputFormat(), views); wrote {
 		return err
 	}
 
-	if len(scripts) == 0 {
+	if len(views) == 0 {
 		_, _ = fmt.Fprintln(ioStreams.Out, "No startup scripts found.")
 		return nil
 	}
 
-	_, _ = fmt.Fprintf(ioStreams.Out, "  %d startup script(s) found\n\n", len(scripts))
+	_, _ = fmt.Fprintf(ioStreams.Out, "  %d startup script(s) found\n\n", len(views))
 	_, _ = fmt.Fprintf(ioStreams.Out, "  %-20s  %-36s  %s\n", "NAME", "ID", "CREATED")
 	_, _ = fmt.Fprintf(ioStreams.Out, "  %-20s  %-36s  %s\n", "----", "--", "-------")
-	for _, s := range scripts {
-		_, _ = fmt.Fprintf(ioStreams.Out, "  %-20s  %-36s  %s\n", s.Name, s.ID, s.CreatedAt.Format("2006-01-02 15:04"))
+	for i := range views {
+		v := &views[i]
+		_, _ = fmt.Fprintf(ioStreams.Out, "  %-20s  %-36s  %s\n",
+			v.Name, v.ID, cmdutil.TimeColumn(v.CreatedAt, "2006-01-02 15:04"))
 	}
 	return nil
 }

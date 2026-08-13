@@ -25,6 +25,13 @@ import (
 // matching the web frontend's hoursInMonth.
 const HoursInMonth = 730
 
+// PriceDisclaimer accompanies every rendered price. The web console owns billing;
+// catalog arithmetic here cannot see credits, discounts or contract terms, so it
+// must never read as the amount charged. One constant so the wording cannot drift
+// between surfaces; callers style it (cmdutil stays presentation-free).
+// Human-facing only — structured output carries no disclaimer field.
+const PriceDisclaimer = "Estimates — the web console is authoritative for charges."
+
 // VolumeHourlyPrice converts volume pricing (monthlyPerGB per GiB) to the
 // hourly rate for a sizeGB volume: monthlyPerGB*sizeGB spread over the month,
 // rounded up to 4 decimals. The ceiling is applied AFTER multiplying by size —

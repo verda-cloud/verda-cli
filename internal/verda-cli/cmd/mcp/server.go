@@ -17,7 +17,6 @@ package mcp
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -27,6 +26,8 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 	pkgversion "github.com/verda-cloud/verda-cli/pkg/version"
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
+
+	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
 
 // clientFunc is a function that returns a Verda client on demand.
@@ -52,6 +53,39 @@ func NewLazyServer(getClient clientFunc) *Server {
 	return newServer(getClient)
 }
 
+// serverInstructions carries the confirm gate and the error envelope — the two
+// contracts that decide whether an agent spends money correctly. It is prompt
+// context in every session, so keep it short.
+const serverInstructions = `Verda Cloud: GPU/CPU instances, volumes, SSH keys, object storage.
+
+CONFIRM GATE — tools that create billing or destructive changes (create_vm,
+create_volume, and vm_action with shutdown/force_shutdown/hibernate/delete)
+refuse to run unless you pass confirm: true. Show the user the exact target and
+its cost first, then retry with confirm. A refused call has no side effects.
+
+ERRORS — a failed tool returns isError with a JSON text payload:
+  {"error": {"code": "...", "message": "...", "details": {...}}}
+Branch on code, not on message text. Codes you should handle:
+  CONFIRMATION_REQUIRED   - retry with confirm: true after telling the user
+  MISSING_REQUIRED_FLAGS  - details.missing lists the arguments to supply
+  VALIDATION_ERROR        - details.field + details.reason
+  SSH_KEY_REQUIRED        - call list_ssh_keys, retry with ssh_key_ids
+  AUTH_ERROR              - credentials problem; the user must fix them, not you
+  NOT_FOUND               - re-list to find the correct id
+  INSUFFICIENT_BALANCE    - stop and tell the user; do not retry
+  API_ERROR               - upstream failure; details.status has the HTTP status
+details.api_message, when present, is the upstream text kept verbatim.
+
+STATUS HONESTY — create/action tools return status "accepted" unless you pass
+wait: true, which polls and returns "completed". Never tell the user a resource
+is ready on an "accepted" result.
+
+PRICING — every figure these tools return is an estimate from the catalog. It
+cannot see credits, discounts or contract terms, and you may misread or
+miscalculate it. Never present a number as the amount the user will be charged,
+never sum or convert figures for them without saying you did, and always point
+them at the web console, which is authoritative for charges.`
+
 func newServer(getClient clientFunc) *Server {
 	s := &Server{getClient: getClient}
 
@@ -59,6 +93,9 @@ func newServer(getClient clientFunc) *Server {
 	s.mcpServer = server.NewMCPServer(
 		"verda-cloud",
 		ver,
+		// Rides the initialize response: clients learn the contracts before
+		// their first tool call, with no client-side change.
+		server.WithInstructions(serverInstructions),
 	)
 
 	s.registerDiscoveryTools()
@@ -99,59 +136,56 @@ func jsonResult(data any) (*mcp.CallToolResult, error) {
 	return mcp.NewToolResultText(string(b)), nil
 }
 
-// argError is a typed argument error carrying the CLI agent-contract code and
-// details (docs/agent-errors.md), rendered into MCP tool-error payloads.
-type argError struct {
-	code    string
-	message string
-	details map[string]any
-}
+// Argument errors are cmdutil.AgentError values: one error type across both
+// surfaces (docs/agent-errors.md). Wording is MCP's ("argument", not "flag");
+// codes and details are the shared contract. ExitCode is inert over MCP.
 
-func (e *argError) Error() string { return e.message }
-
-func missingArgError(name string) *argError {
-	return &argError{
-		code:    "MISSING_REQUIRED_FLAGS",
-		message: fmt.Sprintf("missing required argument %q", name),
-		details: map[string]any{"missing": []string{name}},
+func missingArgError(name string) *cmdutil.AgentError {
+	return &cmdutil.AgentError{
+		Code:     "MISSING_REQUIRED_FLAGS",
+		Message:  fmt.Sprintf("missing required argument %q", name),
+		Details:  map[string]any{"missing": []string{name}},
+		ExitCode: cmdutil.ExitBadArgs,
 	}
 }
 
-func invalidArgError(name, reason string) *argError {
-	return &argError{
-		code:    "VALIDATION_ERROR",
-		message: fmt.Sprintf("invalid value for %s: %s", name, reason),
-		details: map[string]any{"field": name, "reason": reason},
+func invalidArgError(name, reason string) *cmdutil.AgentError {
+	return &cmdutil.AgentError{
+		Code:     "VALIDATION_ERROR",
+		Message:  fmt.Sprintf("invalid value for %s: %s", name, reason),
+		Details:  map[string]any{"field": name, "reason": reason},
+		ExitCode: cmdutil.ExitBadArgs,
 	}
 }
 
 // confirmationRequiredError mirrors the CLI's agent-mode CONFIRMATION_REQUIRED
 // contract: destructive and billing tools refuse to run without confirm=true.
-func confirmationRequiredError(action string) *argError {
-	return &argError{
-		code:    "CONFIRMATION_REQUIRED",
-		message: fmt.Sprintf("action %q creates billing or destructive changes and requires an explicit confirm: true argument", action),
-		details: map[string]any{"action": action},
+func confirmationRequiredError(action string) *cmdutil.AgentError {
+	return &cmdutil.AgentError{
+		Code:     "CONFIRMATION_REQUIRED",
+		Message:  fmt.Sprintf("action %q creates billing or destructive changes and requires an explicit confirm: true argument", action),
+		Details:  map[string]any{"action": action},
+		ExitCode: cmdutil.ExitBadArgs,
 	}
 }
 
-// toolErrorResult renders err as an MCP tool-error result. argErrors serialize
-// to the agent-contract JSON envelope ({"error": {code, message, details}}) so
-// agents can branch on code the same way as with `verda --agent` stderr.
+// toolErrorResult renders any error as the agent-contract envelope
+// ({"error": {code, message, details}}) via cmdutil.ClassifyError — the CLI's
+// funnel — so a code added there reaches MCP clients without a change here.
 func toolErrorResult(err error) *mcp.CallToolResult {
-	var ae *argError
-	if !errors.As(err, &ae) {
-		return mcp.NewToolResultError(err.Error())
+	ae := cmdutil.ClassifyError(err)
+	if ae == nil {
+		return mcp.NewToolResultError("unknown error")
 	}
 	b, mErr := json.Marshal(map[string]any{
 		"error": map[string]any{
-			"code":    ae.code,
-			"message": ae.message,
-			"details": ae.details,
+			"code":    ae.Code,
+			"message": ae.Message,
+			"details": ae.Details,
 		},
 	})
 	if mErr != nil {
-		return mcp.NewToolResultError(ae.message)
+		return mcp.NewToolResultError(ae.Message)
 	}
 	return mcp.NewToolResultError(string(b))
 }

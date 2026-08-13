@@ -16,6 +16,8 @@ package sshkey
 
 import (
 	"bytes"
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -66,5 +68,80 @@ func TestDeleteHasYesFlag(t *testing.T) {
 	}
 	if deleteCmd.Flags().Lookup("yes") == nil {
 		t.Error("delete missing --yes flag")
+	}
+}
+
+// deleteCmdErr runs `ssh-key delete` with args and returns the error. No client
+// is configured, so a run that gets as far as resolving one returns ErrNoClient
+// — which is exactly how we prove argument parsing succeeded.
+func deleteCmdErr(t *testing.T, agent bool, args ...string) error {
+	t.Helper()
+
+	var buf bytes.Buffer
+	ioStreams := cmdutil.IOStreams{Out: &buf, ErrOut: &buf}
+	f := &cmdutil.TestFactory{AgentModeOverride: agent}
+
+	root := &cobra.Command{Use: "verda", SilenceUsage: true, SilenceErrors: true}
+	root.AddCommand(NewCmdSSHKey(f, ioStreams))
+	root.SetArgs(append([]string{"ssh-key", "delete"}, args...))
+	return root.Execute()
+}
+
+// vm delete and volume delete both take an optional positional id; these two
+// commands were --id only, so scripts could not use one calling convention.
+func TestDeleteAcceptsPositionalID(t *testing.T) {
+	t.Parallel()
+
+	err := deleteCmdErr(t, false, "key-123", "--yes")
+	if !errors.Is(err, cmdutil.ErrNoClient) {
+		t.Fatalf("err = %v, want ErrNoClient (the positional id was rejected before the API)", err)
+	}
+}
+
+// --id is published; it must keep working exactly as before.
+func TestDeleteStillAcceptsIDFlag(t *testing.T) {
+	t.Parallel()
+
+	err := deleteCmdErr(t, false, "--id", "key-123", "--yes")
+	if !errors.Is(err, cmdutil.ErrNoClient) {
+		t.Fatalf("err = %v, want ErrNoClient", err)
+	}
+}
+
+// Two ids in one invocation is a typo, not an intent — refuse rather than
+// silently picking one (vm's shortcut lets the positional win; not copied).
+func TestDeleteRejectsPositionalAndFlagTogether(t *testing.T) {
+	t.Parallel()
+
+	err := deleteCmdErr(t, false, "key-123", "--id", "key-456", "--yes")
+	if err == nil {
+		t.Fatal("expected a usage error when both a positional id and --id are given")
+	}
+	if errors.Is(err, cmdutil.ErrNoClient) {
+		t.Fatal("conflicting ids reached the API layer; must fail before that")
+	}
+	if !strings.Contains(err.Error(), "--id") {
+		t.Errorf("error should name the conflicting flag, got: %v", err)
+	}
+}
+
+// The agent guard must still fire before any API call when the id is positional.
+func TestDeleteAgentModePositionalRequiresYes(t *testing.T) {
+	t.Parallel()
+
+	err := deleteCmdErr(t, true, "key-123")
+	if err == nil {
+		t.Fatal("expected error: agent mode delete requires --yes")
+	}
+	if ae := cmdutil.ClassifyError(err); ae.Code != "CONFIRMATION_REQUIRED" {
+		t.Fatalf("code = %q, want CONFIRMATION_REQUIRED (err: %v)", ae.Code, err)
+	}
+}
+
+func TestDeleteRejectsTwoPositionals(t *testing.T) {
+	t.Parallel()
+
+	if err := deleteCmdErr(t, false, "key-123", "key-456", "--yes"); err == nil {
+		t.Fatal("expected an error for two positional ids")
 	}
 }

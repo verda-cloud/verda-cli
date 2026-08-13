@@ -18,6 +18,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/charmbracelet/colorprofile"
 	"github.com/charmbracelet/x/term"
 )
 
@@ -30,11 +31,20 @@ type IOStreams struct {
 }
 
 // NewStdIOStreams returns an IOStreams wired to os.Stdin, os.Stdout, and os.Stderr.
+//
+// Both writers are wrapped in a colorprofile writer, which detects what the
+// destination can display and downsamples or strips ANSI accordingly. lipgloss
+// v2 always emits escapes from Style.Render — stripping is the writer's job, not
+// the style's — so this is the single point where a piped or redirected stream
+// stops receiving color. Per-command IsStdoutTerminal checks remain useful for
+// choosing a *layout* (interactive picker vs plain list); this handles color.
+//
+// Tests build IOStreams directly, so they keep raw buffers and are unaffected.
 func NewStdIOStreams() IOStreams {
 	return IOStreams{
 		In:     os.Stdin,
-		Out:    os.Stdout,
-		ErrOut: os.Stderr,
+		Out:    colorprofile.NewWriter(os.Stdout, os.Environ()),
+		ErrOut: colorprofile.NewWriter(os.Stderr, os.Environ()),
 	}
 }
 

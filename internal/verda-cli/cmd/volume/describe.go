@@ -86,7 +86,7 @@ func runDescribe(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStre
 	cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), "Volume details:", vol)
 
 	// Structured output.
-	if wrote, err := cmdutil.WriteStructured(ioStreams.Out, f.OutputFormat(), vol); wrote {
+	if wrote, err := cmdutil.WriteStructured(ioStreams.Out, f.OutputFormat(), cmdutil.NewVolumeView(vol)); wrote {
 		return err
 	}
 

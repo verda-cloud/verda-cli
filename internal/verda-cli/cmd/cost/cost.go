@@ -24,9 +24,14 @@ import (
 func NewCmdCost(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "cost",
-		Short: "Cost estimation, pricing, and billing",
+		Short: "Cost estimates, pricing, and account balance",
 		Long: cmdutil.LongDesc(`
-			Estimate costs, view price history, and check account balance.
+			Estimate costs, view pricing, and check account balance.
+
+			Figures here are estimates built from catalog prices, for planning.
+			The web console is the authority on what you are charged: it
+			accounts for credits, discounts and contract terms this CLI cannot
+			see. Where the two differ, the web console is right.
 		`),
 		Run: cmdutil.DefaultSubCommandRun(ioStreams.Out),
 	}

@@ -20,9 +20,9 @@ import (
 	"strings"
 	"time"
 
-	"charm.land/lipgloss/v2"
 	"github.com/spf13/cobra"
 	"github.com/verda-cloud/verda-cli/pkg/tui"
+	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
 
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
@@ -69,14 +69,17 @@ func runTrash(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams
 
 	cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), fmt.Sprintf("API response: %d trashed volume(s):", len(volumes)), volumes)
 
+	if wrote, werr := cmdutil.WriteStructured(ioStreams.Out, f.OutputFormat(), cmdutil.NewVolumeInTrashViews(volumes)); wrote {
+		return werr
+	}
+
 	if len(volumes) == 0 {
 		_, _ = fmt.Fprintln(ioStreams.Out, "Trash is empty.")
 		return nil
 	}
 
-	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-	bold := lipgloss.NewStyle().Bold(true)
-	warnStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
+	// Table mode by construction here; styling still depends on the destination.
+	dim, bold, warnStyle := trashStyles(cmdutil.IsStdoutTerminal() && !f.AgentMode())
 
 	var b strings.Builder
 	_, _ = fmt.Fprintf(&b, "  %d volume(s) in trash\n\n", len(volumes))
@@ -101,7 +104,7 @@ func runTrash(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams
 		if v.MonthlyPrice > 0 {
 			_, _ = fmt.Fprintf(&b, "    %s  $%.2f/mo (%s)\n", dim.Render("Price:   "), v.MonthlyPrice, v.Currency)
 		}
-		_, _ = fmt.Fprintf(&b, "    %s  %s\n", dim.Render("Deleted: "), v.DeletedAt.Format("2 Jan 2006, 15:04"))
+		_, _ = fmt.Fprintf(&b, "    %s  %s\n", dim.Render("Deleted: "), cmdutil.TimeColumn(deletedAt(v), "2 Jan 2006, 15:04"))
 
 		if !v.IsPermanentlyDeleted && !v.DeletedAt.IsZero() {
 			expiresAt := v.DeletedAt.Add(96 * time.Hour)
@@ -112,6 +115,7 @@ func runTrash(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams
 		}
 		_, _ = fmt.Fprintln(&b)
 	}
+	_, _ = fmt.Fprintf(&b, "  %s\n\n", dim.Render(cmdutil.PriceDisclaimer))
 
 	// Use pager for scrollable output when list is long.
 	if status := f.Status(); status != nil {
@@ -119,6 +123,15 @@ func runTrash(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams
 	}
 	_, _ = fmt.Fprint(ioStreams.Out, b.String())
 	return nil
+}
+
+// deletedAt keeps the table honest about an absent timestamp: an unset value
+// prints "-" rather than 1 Jan 0001, matching the JSON view's omission.
+func deletedAt(v *verda.VolumeInTrash) *time.Time {
+	if v.DeletedAt.IsZero() {
+		return nil
+	}
+	return &v.DeletedAt
 }
 
 func formatDuration(d time.Duration) string {

@@ -195,3 +195,41 @@ func TestClassifyError_UsageError(t *testing.T) {
 		t.Error("wrapped UsageError lost the VALIDATION_ERROR classification")
 	}
 }
+
+// Unactionable upstream wording becomes a code both surfaces can act on, with
+// the original preserved in details.
+func TestClassifySSHKeyRequired(t *testing.T) {
+	t.Parallel()
+
+	const apiMsg = "SSH keys can be an array of UUID's, a single UUID string, null value or not defined"
+	ae := ClassifyError(&verda.APIError{StatusCode: 400, Message: apiMsg})
+
+	if ae.Code != "SSH_KEY_REQUIRED" {
+		t.Fatalf("code = %q, want SSH_KEY_REQUIRED", ae.Code)
+	}
+	if ae.ExitCode != ExitBadArgs {
+		t.Errorf("exit = %d, want %d (bad input, not an API fault)", ae.ExitCode, ExitBadArgs)
+	}
+	if !strings.Contains(ae.Message, "--ssh-key") {
+		t.Errorf("message must name the CLI flag: %q", ae.Message)
+	}
+	if got := ae.Details["api_message"]; got != apiMsg {
+		t.Errorf("details.api_message = %v, want the verbatim server text", got)
+	}
+	if got := ae.Details["status"]; got != 400 {
+		t.Errorf("details.status = %v, want 400", got)
+	}
+}
+
+// Any other 400 keeps the generic mapping — the special case must not widen.
+func TestClassifyOtherBadRequestStaysAPIError(t *testing.T) {
+	t.Parallel()
+
+	ae := ClassifyError(&verda.APIError{StatusCode: 400, Message: "hostname already in use"})
+	if ae.Code != "API_ERROR" {
+		t.Errorf("code = %q, want API_ERROR", ae.Code)
+	}
+	if ae.ExitCode != ExitAPI {
+		t.Errorf("exit = %d, want %d", ae.ExitCode, ExitAPI)
+	}
+}

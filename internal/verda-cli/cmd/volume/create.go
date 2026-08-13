@@ -176,6 +176,7 @@ func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 	_, _ = fmt.Fprintf(ioStreams.ErrOut, "  %-30s %s\n", "Unit price", priceStyle.Render(fmt.Sprintf("$%.2f/GB/mo", monthlyPerGB)))
 	_, _ = fmt.Fprintf(ioStreams.ErrOut, "  %-30s %s\n", "Monthly", priceStyle.Render(fmt.Sprintf("$%.2f/mo", monthly)))
 	_, _ = fmt.Fprintf(ioStreams.ErrOut, "  %s  %s\n", bold.Render(fmt.Sprintf("%-30s", "Hourly")), bold.Render(priceStyle.Render(fmt.Sprintf("$%.4f/hr", hourly))))
+	_, _ = fmt.Fprintf(ioStreams.ErrOut, "  %s\n", dim.Render(cmdutil.PriceDisclaimer))
 	_, _ = fmt.Fprintf(ioStreams.ErrOut, "  %s\n\n", dim.Render(strings.Repeat("─", 45)))
 
 	if !opts.Yes {
@@ -242,7 +243,7 @@ func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 			return err
 		}
 		if vol != nil {
-			if wrote, werr := cmdutil.WriteStructured(ioStreams.Out, f.OutputFormat(), vol); wrote {
+			if wrote, werr := cmdutil.WriteStructured(ioStreams.Out, f.OutputFormat(), cmdutil.NewVolumeView(vol)); wrote {
 				return werr
 			}
 		}

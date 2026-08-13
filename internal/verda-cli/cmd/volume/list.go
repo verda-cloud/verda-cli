@@ -86,7 +86,7 @@ func runList(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams,
 	cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), fmt.Sprintf("API response: %d volume(s):", len(volumes)), volumes)
 
 	// Structured output: emit JSON/YAML and return.
-	if wrote, err := cmdutil.WriteStructured(ioStreams.Out, f.OutputFormat(), volumes); wrote {
+	if wrote, err := cmdutil.WriteStructured(ioStreams.Out, f.OutputFormat(), cmdutil.NewVolumeViews(volumes)); wrote {
 		return err
 	}
 

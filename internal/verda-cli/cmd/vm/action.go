@@ -156,7 +156,7 @@ func NewCmdAction(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 	cmd.Flags().StringVar(&opts.InstanceID, "id", "", "Instance ID to act on")
 	cmd.Flags().StringVar(&opts.Action, "action", "", "Action to perform: start, shutdown, force_shutdown, hibernate, delete")
 	cmd.Flags().BoolVar(&opts.Yes, "yes", false, "Skip confirmation for destructive actions (required in agent mode)")
-	cmd.Flags().BoolVar(&opts.WithVolumes, "with-volumes", false, "Also delete all attached volumes (delete only)")
+	cmd.Flags().BoolVar(&opts.WithVolumes, "with-volumes", false, "Also delete all attached volumes (delete only); without it the OS volume survives detached and keeps billing")
 	// Hidden like on non-delete shortcuts: `vm delete --with-volumes` is the
 	// canonical UX; the flag works here for `--action delete` (agent parity).
 	_ = cmd.Flags().MarkHidden("with-volumes")

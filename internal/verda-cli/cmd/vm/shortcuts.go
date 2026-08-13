@@ -82,7 +82,7 @@ func newShortcutCmd(f cmdutil.Factory, ioStreams cmdutil.IOStreams, def shortcut
 	cmd.Flags().BoolVar(&opts.All, "all", false, "Target all instances (use with --status/--hostname to filter)")
 	cmd.Flags().StringVar(&opts.Status, "status", "", "Filter by status, requires --all (e.g., running, offline)")
 	cmd.Flags().StringVar(&opts.Hostname, "hostname", "", "Filter by hostname glob pattern, requires --all (e.g., \"test-*\")")
-	cmd.Flags().BoolVar(&opts.WithVolumes, "with-volumes", false, "Also delete all attached volumes (delete only)")
+	cmd.Flags().BoolVar(&opts.WithVolumes, "with-volumes", false, "Also delete all attached volumes (delete only); without it the OS volume survives detached and keeps billing")
 	opts.Wait.AddFlags(cmd.Flags(), true)
 
 	if def.Action != verda.ActionDelete {

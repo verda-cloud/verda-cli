@@ -19,11 +19,25 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
+
+	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
 
+// trashStyles returns dim/bold/warning styles, or unstyled ones when the
+// destination is not a terminal — lipgloss renders escapes into a buffer with no
+// knowledge of where that buffer ends up.
+func trashStyles(styled bool) (dim, bold, warn lipgloss.Style) {
+	if !styled {
+		plain := lipgloss.NewStyle()
+		return plain, plain, plain
+	}
+	return lipgloss.NewStyle().Foreground(lipgloss.Color("8")),
+		lipgloss.NewStyle().Bold(true),
+		lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
+}
+
 func renderVolumeSummary(w interface{ Write([]byte) (int, error) }, vol *verda.Volume) {
-	bold := lipgloss.NewStyle().Bold(true)
-	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	dim, bold, _ := trashStyles(cmdutil.IsStdoutTerminal())
 
 	status := vol.Status
 	if vol.IsOSVolume {

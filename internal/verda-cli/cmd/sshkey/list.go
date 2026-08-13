@@ -67,21 +67,24 @@ func runList(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams)
 
 	cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), fmt.Sprintf("API response: %d SSH key(s):", len(keys)), keys)
 
+	views := cmdutil.NewSSHKeyViews(keys)
+
 	// Structured output: emit JSON/YAML and return.
-	if wrote, err := cmdutil.WriteStructured(ioStreams.Out, f.OutputFormat(), keys); wrote {
+	if wrote, err := cmdutil.WriteStructured(ioStreams.Out, f.OutputFormat(), views); wrote {
 		return err
 	}
 
-	if len(keys) == 0 {
+	if len(views) == 0 {
 		_, _ = fmt.Fprintln(ioStreams.Out, "No SSH keys found.")
 		return nil
 	}
 
-	_, _ = fmt.Fprintf(ioStreams.Out, "  %d SSH key(s) found\n\n", len(keys))
+	_, _ = fmt.Fprintf(ioStreams.Out, "  %d SSH key(s) found\n\n", len(views))
 	_, _ = fmt.Fprintf(ioStreams.Out, "  %-20s  %-36s  %s\n", "NAME", "ID", "FINGERPRINT")
 	_, _ = fmt.Fprintf(ioStreams.Out, "  %-20s  %-36s  %s\n", "----", "--", "-----------")
-	for _, k := range keys {
-		_, _ = fmt.Fprintf(ioStreams.Out, "  %-20s  %-36s  %s\n", k.Name, k.ID, k.Fingerprint)
+	for i := range views {
+		v := &views[i]
+		_, _ = fmt.Fprintf(ioStreams.Out, "  %-20s  %-36s  %s\n", v.Name, v.ID, cmdutil.TextColumn(v.Fingerprint))
 	}
 	return nil
 }

@@ -6,7 +6,7 @@
 |---------|-------------|-----------|
 | `verda ssh-key list` | List all SSH keys (Name, ID, Fingerprint) | _(none)_ |
 | `verda ssh-key add` | Add an SSH key to your account | `--name`, `--public-key` |
-| `verda ssh-key delete` | Delete an SSH key from your account | `--id`, `--yes` |
+| `verda ssh-key delete [<id>]` | Delete an SSH key from your account | `--id`, `--yes` |
 
 ## Usage Examples
 
@@ -30,11 +30,12 @@ verda ssh-key add --name my-key --public-key "ssh-ed25519 AAAA..."
 # Interactive (select from list, then confirm)
 verda ssh-key delete
 
-# Non-interactive
+# Non-interactive (positional id, or --id -- not both)
+verda ssh-key delete abc-123
 verda ssh-key delete --id abc-123
 
 # Agent mode (structured result, no prompts)
-verda --agent ssh-key delete --id abc-123 --yes
+verda --agent ssh-key delete abc-123 --yes
 ```
 
 ## Interactive vs Non-Interactive
@@ -42,10 +43,10 @@ verda --agent ssh-key delete --id abc-123 --yes
 | Command | Non-interactive flags | Prompted when missing |
 |---------|----------------------|----------------------|
 | `add` | `--name`, `--public-key` | Name via text input, public key via text input |
-| `delete` | `--id`, `--yes` | Fetches all keys, presents select list, then confirms |
+| `delete` | positional `<id>` or `--id`, plus `--yes` | Fetches all keys, presents select list, then confirms |
 | `list` | _(always non-interactive)_ | N/A |
 
-Destructive deletes ask for confirmation interactively; pass `--yes` to skip it. In agent mode (`--agent`), `--id` and `--yes` are required — without `--yes` the command fails with `CONFIRMATION_REQUIRED`, and success prints a structured JSON result.
+Destructive deletes ask for confirmation interactively; pass `--yes` to skip it. In agent mode (`--agent`), an id and `--yes` are required — without `--yes` the command fails with `CONFIRMATION_REQUIRED`, and success prints a structured JSON result.
 
 ## Architecture Notes
 

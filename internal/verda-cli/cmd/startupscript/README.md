@@ -6,7 +6,7 @@
 |---------|-------------|-----------|
 | `verda startup-script list` | List all startup scripts (Name, ID, Created) | _(none)_ |
 | `verda startup-script add` | Add a startup script | `--name`, `--file`, `--script` |
-| `verda startup-script delete` | Delete a startup script | `--id`, `--yes` |
+| `verda startup-script delete [<id>]` | Delete a startup script | `--id`, `--yes` |
 
 ## Usage Examples
 
@@ -34,10 +34,11 @@ verda startup-script add --name setup --script "#!/bin/bash\napt update"
 verda startup-script delete
 
 # Non-interactive
+verda startup-script delete abc-123
 verda startup-script delete --id abc-123
 
 # Agent mode (structured result, no prompts)
-verda --agent startup-script delete --id abc-123 --yes
+verda --agent startup-script delete abc-123 --yes
 ```
 
 ## Interactive vs Non-Interactive
@@ -45,10 +46,10 @@ verda --agent startup-script delete --id abc-123 --yes
 | Command | Non-interactive flags | Prompted when missing |
 |---------|----------------------|----------------------|
 | `add` | `--name`, `--file` or `--script` | Name via text input; script source via select ("Load from file" / "Paste content") |
-| `delete` | `--id`, `--yes` | Fetches all scripts, presents select list, then confirms |
+| `delete` | positional `<id>` or `--id`, plus `--yes` | Fetches all scripts, presents select list, then confirms |
 | `list` | _(always non-interactive)_ | N/A |
 
-Destructive deletes ask for confirmation interactively; pass `--yes` to skip it. In agent mode (`--agent`), `--id` and `--yes` are required — without `--yes` the command fails with `CONFIRMATION_REQUIRED`, and success prints a structured JSON result.
+Destructive deletes ask for confirmation interactively; pass `--yes` to skip it. In agent mode (`--agent`), an id and `--yes` are required — without `--yes` the command fails with `CONFIRMATION_REQUIRED`, and success prints a structured JSON result.
 
 ## Architecture Notes
 

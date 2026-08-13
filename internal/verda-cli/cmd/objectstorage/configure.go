@@ -61,6 +61,17 @@ func NewCmdConfigure(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Comm
 
 			Default file: ~/.verda/credentials
 			Override with --credentials-file or VERDA_SHARED_CREDENTIALS_FILE.
+
+			Resolution order for every object-storage command, per field:
+			  1. Command flags (--access-key, --secret-key, --endpoint, --region)
+			  2. VERDA_S3_ACCESS_KEY, VERDA_S3_SECRET_KEY, VERDA_S3_ENDPOINT,
+			     VERDA_S3_REGION, VERDA_S3_AUTH_MODE
+			  3. The credentials-file profile above
+
+			The merge is per field, not all-or-nothing: setting only
+			VERDA_S3_ENDPOINT overrides the endpoint and keeps the profile's keys.
+			An empty variable counts as unset. A complete env set needs no file at
+			all, which is how CI avoids writing secrets to disk.
 		`),
 		Example: cmdutil.Examples(`
 			# Interactive wizard (prompts for all fields)

@@ -35,31 +35,39 @@ func NewCmdDelete(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 	opts := &deleteOptions{}
 
 	cmd := &cobra.Command{
-		Use:     "delete",
+		Use:     "delete [<id>]",
 		Aliases: []string{"rm"},
 		Short:   "Delete a startup script",
 		Long: cmdutil.LongDesc(`
 			Delete a startup script from your account. In interactive mode you
-			will be prompted to select a script and confirm deletion. Use --id
-			for non-interactive use. Agent mode requires --id and --yes.
+			will be prompted to select a script and confirm deletion. Pass the
+			script id as an argument or with --id for non-interactive use. Agent
+			mode requires an id and --yes.
 		`),
 		Example: cmdutil.Examples(`
 			# Interactive
 			verda startup-script delete
 
 			# Non-interactive
+			verda startup-script delete abc-123
 			verda startup-script delete --id abc-123
 
 			# Agent mode
-			verda --agent startup-script delete --id abc-123 --yes
+			verda --agent startup-script delete abc-123 --yes
 		`),
-		Args: cobra.NoArgs,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) > 0 {
+				if opts.ID != "" {
+					return cmdutil.UsageErrorf(cmd, "pass the startup script id either as an argument or with --id, not both")
+				}
+				opts.ID = args[0]
+			}
 			return runDelete(cmd, f, ioStreams, opts)
 		},
 	}
 
-	cmd.Flags().StringVar(&opts.ID, "id", "", "Startup script ID to delete")
+	cmd.Flags().StringVar(&opts.ID, "id", "", "Startup script ID to delete (alternative to the positional argument)")
 	cmd.Flags().BoolVar(&opts.Yes, "yes", false, "Skip confirmation for destructive actions (required in agent mode)")
 
 	return cmd

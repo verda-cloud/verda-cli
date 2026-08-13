@@ -283,7 +283,8 @@ func renderEstimate(w interface{ Write([]byte) (int, error) }, e *Estimate) {
 		bold.Render(price.Render(fmt.Sprintf("%10s", formatPrice(e.Total.Hourly)))),
 		bold.Render(price.Render(fmt.Sprintf("%10s", formatPrice(e.Total.Daily)))),
 		bold.Render(price.Render(fmt.Sprintf("%12s", formatPrice(e.Total.Monthly)))))
-	_, _ = fmt.Fprintf(w, "  %s\n\n", sep)
+	_, _ = fmt.Fprintf(w, "  %s\n", sep)
+	_, _ = fmt.Fprintf(w, "  %s\n\n", dim.Render(cmdutil.PriceDisclaimer))
 }
 
 func renderLine(w interface{ Write([]byte) (int, error) }, label string, item LineItem, priceStyle *lipgloss.Style) {

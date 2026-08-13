@@ -219,7 +219,7 @@ func (s *Server) handleListVMs(ctx context.Context, req mcp.CallToolRequest) (*m
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
-	return jsonResult(instances)
+	return jsonResult(cmdutil.NewInstanceViews(instances))
 }
 
 //nolint:gocritic // hugeParam: handler signature defined by mcp-go.
@@ -238,7 +238,7 @@ func (s *Server) handleDescribeVM(ctx context.Context, req mcp.CallToolRequest) 
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
-	return jsonResult(inst)
+	return jsonResult(cmdutil.NewInstanceView(inst))
 }
 
 //nolint:gocritic,gocyclo // hugeParam + complexity from auto-resolving location/SSH keys.
@@ -385,7 +385,9 @@ func (s *Server) handleCreateVM(ctx context.Context, req mcp.CallToolRequest) (*
 
 	inst, err := client.Instances.Create(ctx, createReq)
 	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
+		// Envelope, not a bare string: agents branch on create failures
+		// (SSH_KEY_REQUIRED, INSUFFICIENT_BALANCE).
+		return toolErrorResult(err), nil
 	}
 
 	if wait {
