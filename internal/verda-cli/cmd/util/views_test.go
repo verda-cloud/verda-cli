@@ -320,7 +320,8 @@ func fillNonZero(t *testing.T, v reflect.Value, n *int) {
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		v.SetInt(int64(*n))
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		v.SetUint(uint64(*n))
+		// n is incremented from 0 on entry (line above), so it is never negative here.
+		v.SetUint(uint64(*n)) //nolint:gosec // G115: *n >= 1 by construction
 	case reflect.Float32, reflect.Float64:
 		v.SetFloat(float64(*n) + 0.25)
 	case reflect.Pointer:
