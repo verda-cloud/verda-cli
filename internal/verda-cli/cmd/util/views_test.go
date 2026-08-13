@@ -411,3 +411,101 @@ func TestEmptyInstanceOnlyDropsCreatedAt(t *testing.T) {
 		t.Errorf("view has %d keys, SDK has %d; want exactly one fewer", len(view), len(sdk))
 	}
 }
+
+func TestVolumeViewCoversSDKFields(t *testing.T) {
+	t.Parallel()
+
+	sdk := jsonKeys(t, verda.Volume{})
+	view := jsonKeys(t, VolumeView{})
+	for key := range sdk {
+		if !view[key] {
+			t.Errorf("verda.Volume has json key %q that VolumeView drops", key)
+		}
+	}
+	for key := range view {
+		if !sdk[key] {
+			t.Errorf("VolumeView invents json key %q", key)
+		}
+	}
+}
+
+func TestVolumeInTrashViewCoversSDKFields(t *testing.T) {
+	t.Parallel()
+
+	sdk := jsonKeys(t, verda.VolumeInTrash{})
+	view := jsonKeys(t, VolumeInTrashView{})
+	for key := range sdk {
+		if !view[key] {
+			t.Errorf("verda.VolumeInTrash has json key %q that the view drops", key)
+		}
+	}
+	for key := range view {
+		if !sdk[key] {
+			t.Errorf("VolumeInTrashView invents json key %q", key)
+		}
+	}
+}
+
+func TestVolumeViewCopiesEveryValue(t *testing.T) {
+	t.Parallel()
+
+	var vol verda.Volume
+	n := 0
+	fillNonZero(t, reflect.ValueOf(&vol).Elem(), &n)
+
+	sdk := marshalToMap(t, vol)
+	view := marshalToMap(t, NewVolumeView(&vol))
+	for key, want := range sdk {
+		got, ok := view[key]
+		if !ok {
+			t.Errorf("view dropped key %q", key)
+			continue
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("key %q: view has %#v, SDK has %#v", key, got, want)
+		}
+	}
+}
+
+func TestVolumeInTrashViewCopiesEveryValue(t *testing.T) {
+	t.Parallel()
+
+	var vol verda.VolumeInTrash
+	n := 0
+	fillNonZero(t, reflect.ValueOf(&vol).Elem(), &n)
+
+	sdk := marshalToMap(t, vol)
+	view := marshalToMap(t, NewVolumeInTrashView(&vol))
+	for key, want := range sdk {
+		got, ok := view[key]
+		if !ok {
+			t.Errorf("view dropped key %q", key)
+			continue
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("key %q: view has %#v, SDK has %#v", key, got, want)
+		}
+	}
+}
+
+// A trashed volume with no deleted_at must not gain one: that field drives the
+// 96-hour recovery countdown.
+func TestVolumeInTrashViewOmitsZeroTimes(t *testing.T) {
+	t.Parallel()
+
+	gotJSON, gotYAML := marshalBoth(t, NewVolumeInTrashView(&verda.VolumeInTrash{ID: "vol-1", Name: "orphan"}))
+	for _, out := range []string{gotJSON, gotYAML} {
+		if strings.Contains(out, "0001-01-01") {
+			t.Errorf("zero timestamp emitted:\n%s", out)
+		}
+		if strings.Contains(out, "deleted_at") || strings.Contains(out, "created_at") {
+			t.Errorf("absent timestamps present as keys:\n%s", out)
+		}
+	}
+
+	ts := time.Date(2026, 8, 11, 18, 51, 12, 0, time.UTC)
+	realJSON, _ := marshalBoth(t, NewVolumeInTrashView(&verda.VolumeInTrash{ID: "vol-2", DeletedAt: ts}))
+	if !strings.Contains(realJSON, `"deleted_at": "2026-08-11T18:51:12Z"`) {
+		t.Errorf("real deleted_at lost: %s", realJSON)
+	}
+}

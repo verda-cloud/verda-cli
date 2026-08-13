@@ -165,6 +165,125 @@ func NewInstanceViews(instances []verda.Instance) []InstanceView {
 	return views
 }
 
+// VolumeView is the JSON/YAML shape for one volume, mirroring every
+// verda.Volume field; TestVolumeViewCoversSDKFields guards against drift.
+type VolumeView struct {
+	ID                       string                         `json:"id"                          yaml:"id"`
+	Name                     string                         `json:"name"                        yaml:"name"`
+	Size                     int                            `json:"size"                        yaml:"size"`
+	Type                     string                         `json:"type"                        yaml:"type"`
+	Status                   string                         `json:"status"                      yaml:"status"`
+	CreatedAt                *time.Time                     `json:"created_at,omitempty"        yaml:"created_at,omitempty"`
+	InstanceID               *string                        `json:"instance_id"                 yaml:"instance_id"`
+	Instances                []verda.VolumeAttachedInstance `json:"instances"                   yaml:"instances"`
+	Location                 string                         `json:"location"                    yaml:"location"`
+	Contract                 string                         `json:"contract,omitempty"          yaml:"contract,omitempty"`
+	IsOSVolume               bool                           `json:"is_os_volume"                yaml:"is_os_volume"`
+	Target                   *string                        `json:"target"                      yaml:"target"`
+	SSHKeyIDs                []string                       `json:"ssh_key_ids"                 yaml:"ssh_key_ids"`
+	PseudoPath               *string                        `json:"pseudo_path"                 yaml:"pseudo_path"`
+	CreateDirectoryCommand   *string                        `json:"create_directory_command"    yaml:"create_directory_command"`
+	MountCommand             *string                        `json:"mount_command"               yaml:"mount_command"`
+	FilesystemToFstabCommand *string                        `json:"filesystem_to_fstab_command" yaml:"filesystem_to_fstab_command"`
+	BaseHourlyCost           float64                        `json:"base_hourly_cost"            yaml:"base_hourly_cost"`
+	MonthlyPrice             float64                        `json:"monthly_price"               yaml:"monthly_price"`
+	Currency                 string                         `json:"currency"                    yaml:"currency"`
+	LongTerm                 *verda.VolumeLongTerm          `json:"long_term"                   yaml:"long_term"`
+}
+
+// NewVolumeView converts one SDK volume to its output shape.
+func NewVolumeView(v *verda.Volume) VolumeView {
+	return VolumeView{
+		ID:                       v.ID,
+		Name:                     v.Name,
+		Size:                     v.Size,
+		Type:                     v.Type,
+		Status:                   v.Status,
+		CreatedAt:                nilIfZero(v.CreatedAt),
+		InstanceID:               v.InstanceID,
+		Instances:                v.Instances,
+		Location:                 v.Location,
+		Contract:                 v.Contract,
+		IsOSVolume:               v.IsOSVolume,
+		Target:                   v.Target,
+		SSHKeyIDs:                v.SSHKeyIDs,
+		PseudoPath:               v.PseudoPath,
+		CreateDirectoryCommand:   v.CreateDirectoryCommand,
+		MountCommand:             v.MountCommand,
+		FilesystemToFstabCommand: v.FilesystemToFstabCommand,
+		BaseHourlyCost:           v.BaseHourlyCost,
+		MonthlyPrice:             v.MonthlyPrice,
+		Currency:                 v.Currency,
+		LongTerm:                 v.LongTerm,
+	}
+}
+
+// NewVolumeViews converts a slice of SDK volumes, preserving order.
+func NewVolumeViews(volumes []verda.Volume) []VolumeView {
+	views := make([]VolumeView, len(volumes))
+	for i := range volumes {
+		views[i] = NewVolumeView(&volumes[i])
+	}
+	return views
+}
+
+// VolumeInTrashView is the JSON/YAML shape for one trashed volume. Both
+// timestamps are optional: DeletedAt drives the 96-hour recovery countdown, so a
+// fabricated date here would misreport how long a volume can still be restored.
+type VolumeInTrashView struct {
+	ID                   string                         `json:"id"                     yaml:"id"`
+	Name                 string                         `json:"name"                   yaml:"name"`
+	Size                 int                            `json:"size"                   yaml:"size"`
+	Type                 string                         `json:"type"                   yaml:"type"`
+	Status               string                         `json:"status"                 yaml:"status"`
+	CreatedAt            *time.Time                     `json:"created_at,omitempty"   yaml:"created_at,omitempty"`
+	DeletedAt            *time.Time                     `json:"deleted_at,omitempty"   yaml:"deleted_at,omitempty"`
+	InstanceID           *string                        `json:"instance_id"            yaml:"instance_id"`
+	Instances            []verda.VolumeAttachedInstance `json:"instances"              yaml:"instances"`
+	Location             string                         `json:"location"               yaml:"location"`
+	Contract             string                         `json:"contract"               yaml:"contract"`
+	IsOSVolume           bool                           `json:"is_os_volume"           yaml:"is_os_volume"`
+	Target               *string                        `json:"target"                 yaml:"target"`
+	SSHKeyIDs            []string                       `json:"ssh_key_ids"            yaml:"ssh_key_ids"`
+	BaseHourlyCost       float64                        `json:"base_hourly_cost"       yaml:"base_hourly_cost"`
+	MonthlyPrice         float64                        `json:"monthly_price"          yaml:"monthly_price"`
+	Currency             string                         `json:"currency"               yaml:"currency"`
+	IsPermanentlyDeleted bool                           `json:"is_permanently_deleted" yaml:"is_permanently_deleted"`
+}
+
+// NewVolumeInTrashView converts one SDK trashed volume to its output shape.
+func NewVolumeInTrashView(v *verda.VolumeInTrash) VolumeInTrashView {
+	return VolumeInTrashView{
+		ID:                   v.ID,
+		Name:                 v.Name,
+		Size:                 v.Size,
+		Type:                 v.Type,
+		Status:               v.Status,
+		CreatedAt:            nilIfZero(v.CreatedAt),
+		DeletedAt:            nilIfZero(v.DeletedAt),
+		InstanceID:           v.InstanceID,
+		Instances:            v.Instances,
+		Location:             v.Location,
+		Contract:             v.Contract,
+		IsOSVolume:           v.IsOSVolume,
+		Target:               v.Target,
+		SSHKeyIDs:            v.SSHKeyIDs,
+		BaseHourlyCost:       v.BaseHourlyCost,
+		MonthlyPrice:         v.MonthlyPrice,
+		Currency:             v.Currency,
+		IsPermanentlyDeleted: v.IsPermanentlyDeleted,
+	}
+}
+
+// NewVolumeInTrashViews converts a slice, preserving order.
+func NewVolumeInTrashViews(volumes []verda.VolumeInTrash) []VolumeInTrashView {
+	views := make([]VolumeInTrashView, len(volumes))
+	for i := range volumes {
+		views[i] = NewVolumeInTrashView(&volumes[i])
+	}
+	return views
+}
+
 // JobDeploymentShortView is the JSON/YAML shape for one batch-job deployment
 // summary. Serverless is a hidden feature; the view exists so the surface does
 // not carry the same zero-timestamp defect when it ships.

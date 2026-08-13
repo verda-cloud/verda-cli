@@ -242,7 +242,7 @@ func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 			return err
 		}
 		if vol != nil {
-			if wrote, werr := cmdutil.WriteStructured(ioStreams.Out, f.OutputFormat(), vol); wrote {
+			if wrote, werr := cmdutil.WriteStructured(ioStreams.Out, f.OutputFormat(), cmdutil.NewVolumeView(vol)); wrote {
 				return werr
 			}
 		}
