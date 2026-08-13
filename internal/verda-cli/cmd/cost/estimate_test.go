@@ -15,6 +15,7 @@
 package cost
 
 import (
+	"bytes"
 	"math"
 	"strings"
 	"testing"
@@ -185,5 +186,28 @@ func TestEstimateTotals(t *testing.T) {
 	}
 	if e.Total.Monthly != 321.20+10.00+50.00 {
 		t.Fatalf("expected total monthly $381.20, got $%.2f", e.Total.Monthly)
+	}
+}
+
+// The disclaimer belongs in human output only: adding it to JSON/YAML would
+// change the contract agents parse.
+func TestEstimateStructuredOutputHasNoDisclaimer(t *testing.T) {
+	t.Parallel()
+
+	e := Estimate{
+		InstanceType: "CPU.4V.16G",
+		Instance:     LineItem{Hourly: 0.0279, Daily: 0.6696, Monthly: 20.367},
+	}
+	e.computeTotals()
+
+	var buf bytes.Buffer
+	if _, err := cmdutil.WriteStructured(&buf, "json", e); err != nil {
+		t.Fatalf("WriteStructured: %v", err)
+	}
+	if strings.Contains(buf.String(), cmdutil.PriceDisclaimer) {
+		t.Errorf("disclaimer leaked into JSON:\n%s", buf.String())
+	}
+	if strings.Contains(buf.String(), "disclaimer") {
+		t.Errorf("JSON gained a disclaimer field:\n%s", buf.String())
 	}
 }

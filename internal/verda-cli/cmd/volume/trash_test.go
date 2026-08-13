@@ -105,6 +105,10 @@ func TestTrashHonorsJSONOutput(t *testing.T) {
 	if rows[0]["name"] != "box-a-os" || rows[0]["size"] != float64(50) {
 		t.Errorf("identity fields lost: %v", rows[0])
 	}
+	// The disclaimer is human-facing; it must never enter the machine contract.
+	if strings.Contains(got, cmdutil.PriceDisclaimer) {
+		t.Errorf("disclaimer leaked into structured output:\n%s", got)
+	}
 }
 
 // DeletedAt drives the 96-hour recovery countdown, so a fabricated date here
