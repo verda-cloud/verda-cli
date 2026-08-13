@@ -127,7 +127,7 @@ func TestRenderRunningLabelsTheTotalAsAnEstimate(t *testing.T) {
 	if strings.Contains(out, "Total Burn") {
 		t.Errorf("total still reads as an authoritative charge:\n%s", out)
 	}
-	if !strings.Contains(out, "Verda dashboard for actual charges") {
-		t.Errorf("missing the pointer to the billing source of truth:\n%s", out)
+	if !strings.Contains(out, cmdutil.PriceDisclaimer) {
+		t.Errorf("missing the shared price disclaimer:\n%s", out)
 	}
 }

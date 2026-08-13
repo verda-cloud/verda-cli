@@ -115,6 +115,7 @@ func runTrash(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams
 		}
 		_, _ = fmt.Fprintln(&b)
 	}
+	_, _ = fmt.Fprintf(&b, "  %s\n\n", dim.Render(cmdutil.PriceDisclaimer))
 
 	// Use pager for scrollable output when list is long.
 	if status := f.Status(); status != nil {

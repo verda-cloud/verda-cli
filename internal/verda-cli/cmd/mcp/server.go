@@ -78,7 +78,13 @@ details.api_message, when present, is the upstream text kept verbatim.
 
 STATUS HONESTY — create/action tools return status "accepted" unless you pass
 wait: true, which polls and returns "completed". Never tell the user a resource
-is ready on an "accepted" result.`
+is ready on an "accepted" result.
+
+PRICING — every figure these tools return is an estimate from the catalog. It
+cannot see credits, discounts or contract terms, and you may misread or
+miscalculate it. Never present a number as the amount the user will be charged,
+never sum or convert figures for them without saying you did, and always point
+them at the web console, which is authoritative for charges.`
 
 func newServer(getClient clientFunc) *Server {
 	s := &Server{getClient: getClient}

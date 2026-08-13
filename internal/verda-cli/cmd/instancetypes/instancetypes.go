@@ -167,6 +167,7 @@ func renderTypes(w interface{ Write([]byte) (int, error) }, types []verda.Instan
 		}
 	}
 
+	_, _ = fmt.Fprintf(w, "\n  %s\n", dim.Render(cmdutil.PriceDisclaimer))
 	_, _ = fmt.Fprintln(w)
 }
 

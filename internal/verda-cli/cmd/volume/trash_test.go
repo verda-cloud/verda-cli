@@ -153,3 +153,14 @@ func TestTrashEmpty(t *testing.T) {
 		t.Errorf("empty json = %q, want []", got)
 	}
 }
+
+// Trashed volumes report a monthly_price, so the table must carry the disclaimer
+// that the web console — not this output — is authoritative for charges.
+func TestTrashTableCarriesPriceDisclaimer(t *testing.T) {
+	t.Parallel()
+
+	got := runTrashCmd(t, trashBody, "table", true)
+	if !strings.Contains(got, cmdutil.PriceDisclaimer) {
+		t.Errorf("missing the price disclaimer:\n%s", got)
+	}
+}

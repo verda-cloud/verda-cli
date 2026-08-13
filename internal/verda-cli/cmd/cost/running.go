@@ -35,8 +35,8 @@ func newCmdRunning(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Comman
 			cost per hour, day and month, with a per-instance breakdown.
 
 			This is a sum of catalog prices, not an invoice: it excludes credits,
-			discounts, contract terms and partial-hour handling. Check the Verda
-			dashboard for actual charges.
+			discounts, contract terms and partial-hour handling. Check the web console
+			for actual charges.
 		`),
 		Example: cmdutil.Examples(`
 			verda cost running
@@ -219,7 +219,5 @@ func renderRunning(w interface{ Write([]byte) (int, error) }, s *RunningCostSumm
 		bold.Render(price.Render(formatPrice(s.Total.Daily))),
 		bold.Render(price.Render(formatPrice(s.Total.Monthly))))
 	_, _ = fmt.Fprintf(w, "  %s\n", sep)
-	// The dashboard owns billing; this total is catalog arithmetic.
-	_, _ = fmt.Fprintf(w, "  %s\n\n",
-		dim.Render("Estimate from catalog prices — see the Verda dashboard for actual charges."))
+	_, _ = fmt.Fprintf(w, "  %s\n\n", dim.Render(cmdutil.PriceDisclaimer))
 }
