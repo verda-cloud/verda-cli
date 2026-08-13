@@ -247,16 +247,10 @@ func classifyAPIError(apiErr *verda.APIError) *AgentError {
 	}
 }
 
-// sshKeyRequired recognizes the one API 400 whose own text cannot be shown to a
-// user: POST /instances rejects a request that omits ssh_key_ids with "SSH keys
-// can be an array of UUID's, a single UUID string, null value or not defined" —
-// while the field *was* not defined. Verified live on staging 2026-08-12 with the
-// request body captured via --debug: no ssh_key_ids key was sent. Passing that
-// through tells the user their correct input was wrong, in the one wording they
-// cannot act on.
-//
-// Returns nil for any other 400 so the generic API_ERROR path still applies.
-// Delete this once the API either accepts an absent value or says what it means.
+// sshKeyRequired maps the create-time 400 whose upstream text contradicts
+// itself: POST /instances rejects an absent ssh_key_ids while listing "not
+// defined" as valid, so the wording is unactionable and moves to details.
+// nil for any other 400. Delete when the API accepts an absent value.
 func sshKeyRequired(apiErr *verda.APIError) *AgentError {
 	if !strings.Contains(strings.ToLower(apiErr.Message), "ssh key") {
 		return nil
@@ -267,7 +261,7 @@ func sshKeyRequired(apiErr *verda.APIError) *AgentError {
 			"pass --ssh-key <id> (CLI) or ssh_key_ids (MCP); list ids with \"verda ssh-key list\"",
 		Details: map[string]any{
 			"status": apiErr.StatusCode,
-			// Verbatim: the only record of what the server actually said.
+			// Upstream text, verbatim, for debugging.
 			"api_message": apiErr.Message,
 		},
 		ExitCode: ExitBadArgs,

@@ -25,10 +25,9 @@ import (
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
 
-// /v1/instances omits created_at, exactly like /v1/ssh-keys — verified against
-// the captured staging payload (temp/docs/c1-ondemand-instance.json has no
-// time-valued key at all). Emitting Go's zero time here is worse than for keys:
-// an age-based reaper acts on running instances.
+// verda.Instance.CreatedAt has no omitempty, so an absent created_at would
+// marshal as 0001-01-01 — a plausible date an age-based reaper acts on.
+// /v1/instances populates the field today; the view removes the trap either way.
 const instancesBodyNoCreatedAt = `[{"id":"inst-1","hostname":"box-a","status":"running",` +
 	`"instance_type":"1V100.6V","location":"FIN-01","price_per_hour":1.23},` +
 	`{"id":"inst-2","hostname":"box-b","status":"offline",` +
@@ -126,9 +125,7 @@ func TestDescribeOmitsZeroCreatedAt(t *testing.T) {
 	}
 }
 
-// The API rejects a create that omits ssh_key_ids while its own text says an
-// absent value is fine (live staging capture, 2026-08-12: the request body had
-// no ssh_key_ids key). The CLI must not relay that wording.
+// The upstream 400 contradicts itself; the CLI must not relay that wording.
 func TestCreateSSHKeyRequiredIsActionable(t *testing.T) {
 	t.Parallel()
 

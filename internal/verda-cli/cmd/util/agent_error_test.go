@@ -196,9 +196,8 @@ func TestClassifyError_UsageError(t *testing.T) {
 	}
 }
 
-// The API rejects a create that omits ssh_key_ids with text that lists an absent
-// value as valid (verified live on staging 2026-08-12). Agents and humans get a
-// code they can act on instead, and the server's wording survives in details.
+// Unactionable upstream wording becomes a code both surfaces can act on, with
+// the original preserved in details.
 func TestClassifySSHKeyRequired(t *testing.T) {
 	t.Parallel()
 

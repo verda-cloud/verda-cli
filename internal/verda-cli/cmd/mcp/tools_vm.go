@@ -385,8 +385,8 @@ func (s *Server) handleCreateVM(ctx context.Context, req mcp.CallToolRequest) (*
 
 	inst, err := client.Instances.Create(ctx, createReq)
 	if err != nil {
-		// Contract envelope, not a bare string: a create failure is the one an
-		// agent most needs to branch on (SSH_KEY_REQUIRED, INSUFFICIENT_BALANCE).
+		// Envelope, not a bare string: agents branch on create failures
+		// (SSH_KEY_REQUIRED, INSUFFICIENT_BALANCE).
 		return toolErrorResult(err), nil
 	}
 

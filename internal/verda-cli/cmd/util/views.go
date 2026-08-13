@@ -96,13 +96,9 @@ func NewStartupScriptViews(scripts []verda.StartupScript) []StartupScriptView {
 	return views
 }
 
-// InstanceView is the JSON/YAML shape for one instance. Every field of
-// verda.Instance is mirrored with its own json key — TestInstanceViewCoversSDKFields
-// fails if the SDK grows a field this view would silently drop.
-//
-// Nested types (CPU, GPU, …) are reused from the SDK: they carry no zero-time
-// field, so there is nothing to omit, and re-declaring them would be four more
-// structs to keep in sync.
+// InstanceView is the JSON/YAML shape for one instance, mirroring every
+// verda.Instance field; TestInstanceViewCoversSDKFields guards against drift.
+// Nested types are reused from the SDK — none carries a zero-time field.
 type InstanceView struct {
 	ID              string                `json:"id"                   yaml:"id"`
 	IP              *string               `json:"ip"                   yaml:"ip"`

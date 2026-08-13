@@ -360,11 +360,9 @@ func marshalToMap(t *testing.T, v any) map[string]any {
 	return m
 }
 
-// The tag-name drift guard cannot see a field InstanceView declares but
-// NewInstanceView never assigns: it would marshal as a zero value and still
-// pass — the very defect class these views exist to prevent. Fill every SDK
-// field with a distinctive value and compare the marshaled maps.
-// Credit: hole identified by session 862d36ab's cross-check of c27e9df.
+// A tag-name guard cannot see a field the view declares but the constructor
+// never assigns — it marshals as a zero value and passes. Fill every SDK field
+// with a distinctive value and compare the marshaled maps.
 func TestInstanceViewCopiesEveryValue(t *testing.T) {
 	t.Parallel()
 

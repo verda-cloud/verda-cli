@@ -80,9 +80,8 @@ func TestRequiredString(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for missing arg")
 	}
-	// errors.As must succeed — the old form (`As(...) && code != x`) passed
-	// silently whenever the type assertion failed, which is the case this
-	// asserts.
+	// errors.As must succeed: `As(...) && code != x` passes silently when the
+	// type assertion fails, which is the case under test.
 	var ae *cmdutil.AgentError
 	if !errors.As(err, &ae) {
 		t.Fatalf("error is not a *cmdutil.AgentError: %T %v", err, err)
@@ -233,9 +232,7 @@ func TestToolErrorResultEnvelope(t *testing.T) {
 		t.Errorf("details.action = %v, want create_vm", env.Error.Details["action"])
 	}
 
-	// CONTRACT CHANGE: every error now carries the envelope, not just MCP's own
-	// argument errors. An agent can branch on code for API failures too, which
-	// is what docs/agent-errors.md always claimed MCP did.
+	// Every error carries the envelope, not only MCP's own argument errors.
 	res = toolErrorResult(errors.New("boom"))
 	if !res.IsError {
 		t.Fatal("expected IsError")
@@ -259,8 +256,7 @@ func TestToolErrorResultEnvelope(t *testing.T) {
 		t.Errorf("code = %q, want NOT_FOUND", env.Error.Code)
 	}
 
-	// The create-time SSH-key 400: the API's self-contradictory text must be
-	// replaced by something actionable, with the original kept in details.
+	// Create-time SSH-key 400: actionable message, upstream text in details.
 	res = toolErrorResult(&verda.APIError{
 		StatusCode: 400,
 		Message:    "SSH keys can be an array of UUID's, a single UUID string, null value or not defined",
