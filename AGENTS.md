@@ -34,6 +34,7 @@ Skipping these steps leads to pattern violations, broken dual-mode, and pricing 
 - **Interactive hint bar** — every direct `prompter.Select(...)` outside the wizard engine must pass `tui.WithShowHints(true)` (and the equivalent option on `MultiSelect`) so the prompt renders its key hints below the choices. Wizard steps are exempt — the composite already renders the hint bar
 - **Ctrl+C exits immediately, no confirmation** — use `cmdutil.IsPromptCancel(err)` to detect either Esc or Ctrl+C and return cleanly. When a flow needs different behavior per key (e.g. a "Back to list / Exit" gate where Esc means back), split with `IsPromptInterrupt(err)` (Ctrl+C) and `IsPromptBack(err)` (Esc). Never show an "Exit?" confirmation dialog — Unix users expect Ctrl+C to be terminal
 - **`pkg/` is in-tree** — the TUI core (`pkg/tui*`), `pkg/log`, `pkg/version` are part of this repo; edit them directly
+- **Never run the binary against the real config dir** — every manual, scripted, or pty-driven `./bin/verda` run sets `VERDA_HOME=$(mktemp -d)` (or uses `make run.sandbox`). `VERDA_SHARED_CREDENTIALS_FILE` is not enough; it leaves `config.yaml` and `EnsureVerdaDir` pointing at the real `~/.verda`. Driving `auth login` to completion once overwrote a developer's real credentials, and a clobbered client secret cannot be recovered from the API. See CLAUDE.md § "NEVER run the binary against the real config dir"
 - **Commit only when asked** — don't auto-commit
 
 ## Risky Areas — Slow Down
@@ -44,6 +45,7 @@ Skipping these steps leads to pattern violations, broken dual-mode, and pricing 
 | `options/credentials.go` | Break auth = break everything | Test all profiles, expired tokens |
 | Agent mode (`--agent`) | JSON contract change = break downstream | Check structured error format |
 | Wizard steps | Step ordering, cache invalidation | Map dependencies before coding |
+| Running `auth login` / any binary run | Overwrites the real `~/.verda`; lost secrets are unrecoverable | Set `VERDA_HOME=$(mktemp -d)` first, always |
 
 ## Done Checklist
 
@@ -54,5 +56,6 @@ Skipping these steps leads to pattern violations, broken dual-mode, and pricing 
 - [ ] Interactive and non-interactive modes both work
 - [ ] Interactive Selects pass `tui.WithShowHints(true)` so the hint bar renders
 - [ ] No leftover debug code, TODOs, or commented-out blocks
+- [ ] Every manual/pty run of the binary set `VERDA_HOME` to a temp dir — the real `~/.verda` is untouched
 
 If `make lint` reports issues, fix them *before* announcing completion. See `CLAUDE.md` § "Go House Style" for the patterns that prevent the common hits (http.NoBody, American spelling, reused constants, rangeValCopy, nilerr annotations, etc.).

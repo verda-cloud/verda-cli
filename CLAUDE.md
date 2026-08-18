@@ -174,6 +174,31 @@ If you modified a command, also verify:
 - `--agent -o json` mode works (structured output, no TUI)
 - `--debug` shows request/response payloads
 
+### NEVER run the binary against the real config dir
+
+Any manual, scripted, or pty-driven run of `./bin/verda` MUST set `VERDA_HOME` to a
+throwaway directory:
+
+```bash
+VERDA_HOME=$(mktemp -d) ./bin/verda <command>   # or: make run.sandbox ARGS="<command>"
+```
+
+`VERDA_HOME` (see `options.VerdaDir`) redirects the whole config dir — credentials *and*
+`config.yaml`. `VERDA_SHARED_CREDENTIALS_FILE` covers only the credentials file, so
+`auth use`, `settings`, and `EnsureVerdaDir` still hit the real `~/.verda`. Use
+`VERDA_HOME`.
+
+This is not hypothetical: driving the `auth login` wizard to completion to verify a TUI
+fix overwrote a developer's real `~/.verda/credentials` with test values.
+`auth login` replaces an existing profile with no warning — the documented re-auth
+behavior — and **a client secret cannot be read back from the API, so a clobber is
+unrecoverable**. Assume any command may write to the config dir, not just the obviously
+auth-shaped ones.
+
+The repo's own suites already do this — copy them, don't hand-roll a harness:
+`tests/contract/main_test.go` (`cliEnv` strips every inherited `VERDA_*`, then sets
+`VERDA_HOME=t.TempDir()`) and `options/registry_credentials_test.go:168`.
+
 ## Other Agents
 
 This repo targets Claude Code and OpenAI Codex. Claude auto-loads this file; Codex auto-loads `AGENTS.md` (execution contract). A `.cursor/rules/main.mdc` pointer exists for Cursor users but is not a primary target — if Cursor drops out of the stack, delete it rather than letting it drift.

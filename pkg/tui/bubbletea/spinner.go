@@ -18,7 +18,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"sync"
 
 	"charm.land/bubbles/v2/spinner"
@@ -166,8 +165,12 @@ func (silentProgress) Interrupted() bool  { return false }
 
 // rendersToTerminal reports whether w is a terminal — the precondition for
 // animated UI (spinner/progress) to be visible instead of polluting a pipe.
+// Matches term.File rather than *os.File: the CLI hands us a writer that wraps
+// the stream to strip ANSI, and a wrapper that forwards Fd() is still a
+// terminal. Asserting the concrete type instead silently disables every
+// spinner, progress bar and pager on a real tty.
 func rendersToTerminal(w io.Writer) bool {
-	f, ok := w.(*os.File)
+	f, ok := w.(term.File)
 	return ok && term.IsTerminal(f.Fd())
 }
 

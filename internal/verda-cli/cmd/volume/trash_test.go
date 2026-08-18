@@ -22,17 +22,29 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
 
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
 
-const trashBody = `[{"id":"vol-1","name":"box-a-os","size":50,"type":"NVMe_Shared",` +
-	`"location":"FIN-00","contract":"PAY_AS_YOU_GO","is_os_volume":true,` +
-	`"monthly_price":10,"currency":"usd","deleted_at":"2026-08-11T18:51:12Z"},` +
-	`{"id":"vol-2","name":"undated","size":20,"type":"NVMe_Shared",` +
-	`"location":"FIN-00","contract":"PAY_AS_YOU_GO","is_os_volume":false}]`
+// trash.go counts down from deleted_at + 96h and prints "Expires:" only while
+// that window is still open, so the fixture's timestamp must be relative to now.
+// A pinned date silently stops rendering the countdown once it ages out — this
+// fixture was written with a hardcoded 2026-08-11 and began failing on
+// 2026-08-15, four days later, having passed in CI the whole time in between.
+func recentDeletion() time.Time {
+	return time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+}
+
+func trashBodyDeletedAt(deletedAt time.Time) string {
+	return `[{"id":"vol-1","name":"box-a-os","size":50,"type":"NVMe_Shared",` +
+		`"location":"FIN-00","contract":"PAY_AS_YOU_GO","is_os_volume":true,` +
+		`"monthly_price":10,"currency":"usd","deleted_at":"` + deletedAt.Format(time.RFC3339) + `"},` +
+		`{"id":"vol-2","name":"undated","size":20,"type":"NVMe_Shared",` +
+		`"location":"FIN-00","contract":"PAY_AS_YOU_GO","is_os_volume":false}]`
+}
 
 func runTrashCmd(t *testing.T, body, format string, agent bool) string {
 	t.Helper()
@@ -81,7 +93,8 @@ func runTrashCmd(t *testing.T, body, format string, agent bool) string {
 func TestTrashHonorsJSONOutput(t *testing.T) {
 	t.Parallel()
 
-	got := runTrashCmd(t, trashBody, "json", true)
+	deletedAt := recentDeletion()
+	got := runTrashCmd(t, trashBodyDeletedAt(deletedAt), "json", true)
 
 	if strings.ContainsRune(got, '\033') {
 		t.Errorf("JSON output carries ANSI escapes:\n%q", got)
@@ -93,8 +106,8 @@ func TestTrashHonorsJSONOutput(t *testing.T) {
 	if len(rows) != 2 {
 		t.Fatalf("len = %d, want 2", len(rows))
 	}
-	if rows[0]["deleted_at"] != "2026-08-11T18:51:12Z" {
-		t.Errorf("deleted_at = %v, want it preserved", rows[0]["deleted_at"])
+	if rows[0]["deleted_at"] != deletedAt.Format(time.RFC3339) {
+		t.Errorf("deleted_at = %v, want %v preserved", rows[0]["deleted_at"], deletedAt.Format(time.RFC3339))
 	}
 	if _, ok := rows[1]["deleted_at"]; ok {
 		t.Errorf("undated volume carries deleted_at: %v", rows[1])
@@ -116,7 +129,8 @@ func TestTrashHonorsJSONOutput(t *testing.T) {
 func TestTrashTableMarksAbsentDeletedAt(t *testing.T) {
 	t.Parallel()
 
-	got := runTrashCmd(t, trashBody, "table", true)
+	deletedAt := recentDeletion()
+	got := runTrashCmd(t, trashBodyDeletedAt(deletedAt), "table", true)
 
 	if strings.Contains(got, "0001") {
 		t.Errorf("table emits a zero timestamp:\n%s", got)
@@ -124,8 +138,8 @@ func TestTrashTableMarksAbsentDeletedAt(t *testing.T) {
 	if !strings.Contains(got, "2 volume(s) in trash") {
 		t.Errorf("missing the count line:\n%s", got)
 	}
-	if !strings.Contains(got, "11 Aug 2026") {
-		t.Errorf("real deleted_at not rendered:\n%s", got)
+	if want := deletedAt.Format("2 Jan 2006, 15:04"); !strings.Contains(got, want) {
+		t.Errorf("real deleted_at %q not rendered:\n%s", want, got)
 	}
 	if !strings.Contains(got, "Deleted:   -\n") {
 		t.Errorf("absent timestamp not rendered as %q:\n%s", "-", got)
@@ -141,7 +155,7 @@ func TestTrashTableMarksAbsentDeletedAt(t *testing.T) {
 func TestTrashTableHasNoANSIWhenNotATerminal(t *testing.T) {
 	t.Parallel()
 
-	got := runTrashCmd(t, trashBody, "table", true)
+	got := runTrashCmd(t, trashBodyDeletedAt(recentDeletion()), "table", true)
 	if strings.ContainsRune(got, '\033') {
 		t.Errorf("table output carries ANSI escapes:\n%q", got)
 	}
@@ -163,7 +177,7 @@ func TestTrashEmpty(t *testing.T) {
 func TestTrashTableCarriesPriceDisclaimer(t *testing.T) {
 	t.Parallel()
 
-	got := runTrashCmd(t, trashBody, "table", true)
+	got := runTrashCmd(t, trashBodyDeletedAt(recentDeletion()), "table", true)
 	if !strings.Contains(got, cmdutil.PriceDisclaimer) {
 		t.Errorf("missing the price disclaimer:\n%s", got)
 	}

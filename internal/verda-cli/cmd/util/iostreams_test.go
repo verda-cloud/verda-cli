@@ -17,12 +17,14 @@ package util
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"testing"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/colorprofile"
+	"github.com/charmbracelet/x/term"
 )
 
 // styled is what every table and card in this CLI produces: lipgloss always
@@ -84,31 +86,62 @@ func TestColorProfileWriterKeepsColorWhenSupported(t *testing.T) {
 	}
 }
 
-// Pins the wiring itself: unwrapping either stream silently reintroduces ANSI on
-// every piped command, which no per-command test would notice.
+// Pins both halves of the wiring, each invisible to a per-command test:
+// unwrapping a stream reintroduces ANSI on every piped command, and hiding the
+// fd behind the wrapper costs bubbletea term.GetSize — which blanks every
+// prompt, spinner and pager on a real terminal.
 func TestNewStdIOStreamsWrapsBothWriters(t *testing.T) {
 	t.Parallel()
 
 	s := NewStdIOStreams()
 
-	out, ok := s.Out.(*colorprofile.Writer)
-	if !ok {
-		t.Fatalf("Out is %T, want *colorprofile.Writer", s.Out)
+	cases := []struct {
+		name string
+		w    io.Writer
+		file *os.File
+	}{
+		{"Out", s.Out, os.Stdout},
+		{"ErrOut", s.ErrOut, os.Stderr},
 	}
-	if out.Forward != os.Stdout {
-		t.Errorf("Out forwards to %v, want os.Stdout", out.Forward)
-	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 
-	errOut, ok := s.ErrOut.(*colorprofile.Writer)
-	if !ok {
-		t.Fatalf("ErrOut is %T, want *colorprofile.Writer", s.ErrOut)
-	}
-	if errOut.Forward != os.Stderr {
-		t.Errorf("ErrOut forwards to %v, want os.Stderr", errOut.Forward)
+			tw, ok := tc.w.(*terminalWriter)
+			if !ok {
+				t.Fatalf("%s is %T, want *terminalWriter", tc.name, tc.w)
+			}
+			if tw.Writer == nil {
+				t.Fatalf("%s has no colorprofile writer; ANSI would survive a pipe", tc.name)
+			}
+			if tw.Forward != tc.file {
+				t.Errorf("%s forwards to %v, want %v", tc.name, tw.Forward, tc.file)
+			}
+
+			f, ok := tc.w.(term.File)
+			if !ok {
+				t.Fatalf("%s does not satisfy term.File; bubbletea renders into a 0x0 viewport", tc.name)
+			}
+			if f.Fd() != tc.file.Fd() {
+				t.Errorf("%s Fd() = %d, want %d", tc.name, f.Fd(), tc.file.Fd())
+			}
+		})
 	}
 
 	if s.In != os.Stdin {
 		t.Errorf("In = %v, want os.Stdin", s.In)
+	}
+}
+
+// Close must not take the process's stdout with it.
+func TestTerminalWriterCloseIsNoop(t *testing.T) {
+	t.Parallel()
+
+	if err := newTerminalWriter(os.Stdout).Close(); err != nil {
+		t.Fatalf("Close() = %v, want nil", err)
+	}
+	if _, err := fmt.Fprint(io.Discard, "still usable"); err != nil {
+		t.Fatalf("stdout unusable after Close: %v", err)
 	}
 }
 

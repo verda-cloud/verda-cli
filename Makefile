@@ -1,6 +1,6 @@
 OUTPUT_DIR ?= bin
 
-.PHONY: all build clean lint lint.fix security test test.integration test-s3-integration fmt changelog changelog.unreleased hooks.install pre-commit help
+.PHONY: all build clean run.sandbox lint lint.fix security test test.integration test-s3-integration fmt changelog changelog.unreleased hooks.install pre-commit help
 
 ## Build -------------------------------------------------------------------
 
@@ -13,6 +13,12 @@ build: ## Build the binary into bin/
 
 clean: ## Remove build artifacts
 	@rm -rf $(OUTPUT_DIR)
+
+# Never drive the binary against the real ~/.verda: auth login replaces a profile
+# with no warning, and a clobbered client secret cannot be read back from the API.
+# VERDA_HOME redirects the whole config dir; VERDA_SHARED_CREDENTIALS_FILE does not.
+run.sandbox: build ## Run the binary against a throwaway config dir, e.g. make run.sandbox ARGS="auth login"
+	@dir=$$(mktemp -d) && echo "VERDA_HOME=$$dir" && VERDA_HOME=$$dir $(OUTPUT_DIR)/verda $(ARGS)
 
 ## Quality -----------------------------------------------------------------
 
