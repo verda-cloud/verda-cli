@@ -89,6 +89,10 @@ type Engine struct {
 	resultOverride chan promptResult // test-only: bypasses composite model
 	program        *tea.Program      // the running composite program (nil in test mode)
 	resultCh       chan promptResult // channel for receiving prompt results
+	// progErrCh carries the composite program's Run error. Nil in test mode.
+	// The engine's answer to a prompt only ever arrives from a live program, so
+	// its exit has to be a wait condition too — see awaitPromptResult.
+	progErrCh chan error
 
 	// validationMsg is set when a step fails Validate; printed above the
 	// re-drawn prompt so a rejected answer isn't a silent redraw.
@@ -210,6 +214,7 @@ func (e *Engine) Run(ctx context.Context, flow *Flow) error {
 	// In test mode (WithTestResults), bypass the composite program entirely.
 	e.resultCh = e.resultOverride
 	e.program = nil
+	e.progErrCh = nil
 
 	// Turn SIGINT into a context cancellation so Ctrl+C works during
 	// Loader execution, when the terminal is in cooked mode and no
@@ -273,11 +278,7 @@ func (e *Engine) runPersistentProgram(ctx context.Context) error {
 		tea.WithInput(e.reader),
 	}
 	e.program = tea.NewProgram(&composite, progOpts...)
-	progDone := make(chan struct{})
-	go func() {
-		defer close(progDone)
-		_, _ = e.program.Run()
-	}()
+	progDone := e.runProgram()
 	defer func() {
 		e.program.Quit()
 		<-progDone
@@ -339,7 +340,7 @@ func (e *Engine) stepLoop(ctx context.Context) error {
 
 		// In per-prompt mode (no persistent program), start a fresh program.
 		perPrompt := e.program == nil && e.resultOverride == nil
-		var progDone chan struct{}
+		var progDone chan error
 		if perPrompt {
 			progDone = e.startProgram()
 		}
@@ -358,7 +359,13 @@ func (e *Engine) stepLoop(ctx context.Context) error {
 		}
 
 		// Wait for result from composite and process it.
-		result := <-e.resultCh
+		result, waitErr := e.awaitPromptResult()
+		if waitErr != nil {
+			if perPrompt {
+				e.stopProgram(progDone)
+			}
+			return waitErr
+		}
 		done, err := e.handlePromptResult(result, step, choices, canGoBack)
 
 		if perPrompt {
@@ -383,7 +390,7 @@ func (e *Engine) stepLoop(ctx context.Context) error {
 // startProgram creates and starts a new composite tea.Program for one prompt.
 // Returns a channel that closes when the program exits.
 // In test mode (resultOverride set), this is a no-op.
-func (e *Engine) startProgram() chan struct{} {
+func (e *Engine) startProgram() chan error {
 	if e.resultOverride != nil {
 		return nil // test mode — no real program
 	}
@@ -398,17 +405,50 @@ func (e *Engine) startProgram() chan struct{} {
 		progOpts = append(progOpts, tea.WithInput(e.reader))
 	}
 	e.program = tea.NewProgram(&composite, progOpts...)
-	done := make(chan struct{})
+	return e.runProgram()
+}
+
+// runProgram runs e.program in the background and publishes its exit on a
+// channel that is closed after the error is queued, so a second receiver (the
+// stopProgram / defer wait) never blocks on an already-drained send.
+func (e *Engine) runProgram() chan error {
+	done := make(chan error, 1)
+	e.progErrCh = done
 	go func() {
 		defer close(done)
-		_, _ = e.program.Run()
+		_, err := e.program.Run()
+		done <- err
 	}()
 	return done
 }
 
+// awaitPromptResult blocks for the composite's answer, treating the program
+// exiting first as fatal: only a live program writes resultCh, so a bare
+// receive turns any startup failure into a permanent hang with a blank screen.
+// Bubbletea fails this way when it cannot claim the terminal — a non-file
+// output, an OpenTTY error, a panic inside Run.
+func (e *Engine) awaitPromptResult() (promptResult, error) {
+	select {
+	case result := <-e.resultCh:
+		return result, nil
+	case runErr := <-e.progErrCh:
+		// The composite may have queued an answer just before exiting; a
+		// delivered result outranks the exit.
+		select {
+		case result := <-e.resultCh:
+			return result, nil
+		default:
+		}
+		if runErr != nil {
+			return promptResult{}, fmt.Errorf("wizard prompt program exited: %w", runErr)
+		}
+		return promptResult{}, errors.New("wizard prompt program exited without returning a result")
+	}
+}
+
 // stopProgram quits the composite program and waits for it to fully exit
 // so the terminal is restored before the next Loader or prompt.
-func (e *Engine) stopProgram(done chan struct{}) {
+func (e *Engine) stopProgram(done chan error) {
 	if e.program == nil {
 		return
 	}

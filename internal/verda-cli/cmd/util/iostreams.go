@@ -30,6 +30,34 @@ type IOStreams struct {
 	ErrOut io.Writer
 }
 
+// terminalWriter is a colorprofile writer that still answers Fd().
+//
+// The fd must stay reachable through the wrapper: bubbletea and this repo's own
+// rendersToTerminal both identify a terminal by asserting the writer to
+// term.File and asking for its descriptor. A bare colorprofile.Writer hides it,
+// which costs bubbletea term.GetSize — leaving every prompt rendering into a
+// 0x0 viewport (a blank screen that looks like a hang) and silencing every
+// spinner, progress bar and pager.
+//
+// Write is promoted from the embedded colorprofile.Writer, so ANSI is still
+// downsampled or stripped to suit the destination.
+type terminalWriter struct {
+	*colorprofile.Writer
+	file *os.File
+}
+
+func newTerminalWriter(f *os.File) *terminalWriter {
+	return &terminalWriter{Writer: colorprofile.NewWriter(f, os.Environ()), file: f}
+}
+
+func (w *terminalWriter) Fd() uintptr { return w.file.Fd() }
+
+// Read and Close exist only to satisfy term.File; nothing in the stack calls
+// either on an output stream. Close is a deliberate no-op — closing the
+// process's own stdout or stderr is never what a caller wants.
+func (w *terminalWriter) Read(p []byte) (int, error) { return w.file.Read(p) }
+func (w *terminalWriter) Close() error               { return nil }
+
 // NewStdIOStreams returns an IOStreams wired to os.Stdin, os.Stdout, and os.Stderr.
 //
 // Both writers are wrapped in a colorprofile writer, which detects what the
@@ -43,8 +71,8 @@ type IOStreams struct {
 func NewStdIOStreams() IOStreams {
 	return IOStreams{
 		In:     os.Stdin,
-		Out:    colorprofile.NewWriter(os.Stdout, os.Environ()),
-		ErrOut: colorprofile.NewWriter(os.Stderr, os.Environ()),
+		Out:    newTerminalWriter(os.Stdout),
+		ErrOut: newTerminalWriter(os.Stderr),
 	}
 }
 
