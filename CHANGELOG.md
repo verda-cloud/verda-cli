@@ -1,6 +1,11 @@
 # Changelog
 
 
+## [Unreleased]
+- [`b77ff90`] Fix(cli): Detect and fix terminal race condition
+- [`0abc56b`] Chore(agents): Add warnings on running config creation commands without proper precautions, update vulnerable Go version
+- [`e4112ce`] Merge pull request #59 from verda-cloud/fix/terminal-race-condition
+
 ## [v1.8.1] - 2026-08-13
 - [`6ecf036`] Hotfix/v1.8.0
 
