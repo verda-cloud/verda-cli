@@ -117,3 +117,28 @@ func TestVersionValue_Type(t *testing.T) {
 		t.Errorf("Type() = %q, want 'version'", v.Type())
 	}
 }
+
+func TestIsTaggedVersion(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want bool
+	}{
+		{"real tag", "v1.8.2", true},
+		{"real prerelease tag", "v1.8.2-rc.1", true},
+		{"incompatible tag", "v2.0.0+incompatible", true},
+		{"empty", "", false},
+		{"devel", "(devel)", false},
+		{"pseudo-version", "v1.8.2-0.20260818162257-0abc56bfdc8e", false},
+		{"dirty pseudo-version", "v1.8.2-0.20260818162257-0abc56bfdc8e+dirty", false},
+		{"pseudo-version off a prerelease", "v1.8.2-rc.1.0.20260818162257-0abc56bfdc8e", false},
+		{"pseudo-version with no base tag", "v0.0.0-20260818162257-0abc56bfdc8e", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isTaggedVersion(tt.in); got != tt.want {
+				t.Errorf("isTaggedVersion(%q) = %v, want %v", tt.in, got, tt.want)
+			}
+		})
+	}
+}

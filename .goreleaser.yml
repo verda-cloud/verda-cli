@@ -8,8 +8,19 @@ builds:
   - id: verda
     binary: verda
     main: ./cmd/verda/
+    # buildDate carries .CommitDate, not .Date: the stamp is a property of the
+    # tag, so re-running a release does not change it, and it matches the
+    # vcs.time fallback in version.GetFromDebugInfo.
     ldflags:
-      - -s -w -X github.com/verda-cloud/verda-cli/pkg/version.gitVersion={{ .Version }}
+      - -s -w
+      - -X github.com/verda-cloud/verda-cli/pkg/version.gitVersion={{ .Version }}
+      - -X github.com/verda-cloud/verda-cli/pkg/version.gitCommit={{ .FullCommit }}
+      - -X github.com/verda-cloud/verda-cli/pkg/version.gitTreeState={{ .GitTreeState }}
+      - -X github.com/verda-cloud/verda-cli/pkg/version.buildDate={{ .CommitDate }}
+    # -trimpath strips absolute build paths, so the output depends only on the
+    # tag and not on where CI happened to check out.
+    flags:
+      - -trimpath
     env:
       - CGO_ENABLED=0
     goos:

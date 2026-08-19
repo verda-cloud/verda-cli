@@ -25,6 +25,7 @@ package version
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"runtime"
 	"runtime/debug"
 )
@@ -32,11 +33,18 @@ import (
 const (
 	unknownValue = "unknown"
 	trueValue    = "true"
+	devVersion   = "v0.0.0-dev"
 )
+
+// Go synthesizes a pseudo-version as Main.Version for a build from local
+// source. The separator before the timestamp is '.' when the pseudo-version
+// has a base tag (v1.8.2-0.<ts>-<sha>) and '-' when it does not
+// (v0.0.0-<ts>-<sha>). A real tag never ends this way.
+var pseudoVersionRe = regexp.MustCompile(`[-.]\d{14}-[0-9a-f]{12}(\+[\w.]+)?$`)
 
 // Build-time variables set via -ldflags.
 var (
-	gitVersion   = "v0.0.0-dev"
+	gitVersion   = devVersion
 	gitCommit    = unknownValue
 	gitTreeState = unknownValue
 	buildDate    = unknownValue
@@ -77,14 +85,17 @@ func GetFromDebugInfo(modulePath string) Info {
 		return info
 	}
 
-	if info.GitVersion == "v0.0.0-dev" {
+	if info.GitVersion == devVersion {
 		for _, dep := range bi.Deps {
 			if dep.Path == modulePath {
 				info.GitVersion = dep.Version
 				break
 			}
 		}
-		if info.GitVersion == "v0.0.0-dev" && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
+		// Main.Version is a real tag for `go install pkg@v1.2.3` but a
+		// pseudo-version for a local `go build`. Keep the sentinel for the
+		// latter: GitCommit/GitTreeState already say what a dev build is.
+		if info.GitVersion == devVersion && isTaggedVersion(bi.Main.Version) {
 			info.GitVersion = bi.Main.Version
 		}
 	}
@@ -111,6 +122,10 @@ func GetFromDebugInfo(modulePath string) Info {
 	}
 
 	return info
+}
+
+func isTaggedVersion(v string) bool {
+	return v != "" && v != "(devel)" && !pseudoVersionRe.MatchString(v)
 }
 
 // String returns the git version string.
