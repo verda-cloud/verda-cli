@@ -60,7 +60,7 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) (*cobra.Command, *clioptions.Op
 	var showVersion bool
 
 	cmd := &cobra.Command{
-		Use:   "verda",
+		Use:   rootCmdName,
 		Short: "Command-line interface for Verda Cloud",
 		Long: cmdutil.LongDesc(`
 			Command-line interface for Verda Cloud.`),
@@ -193,6 +193,7 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) (*cobra.Command, *clioptions.Op
 				doctor.NewCmdDoctor(f, ioStreams),
 				settings.NewCmdSettings(f, ioStreams),
 				update.NewCmdUpdate(f, ioStreams),
+				newVersionCommand(ioStreams),
 			},
 		},
 	)
@@ -234,7 +235,9 @@ func skipCredentialResolution(cmd *cobra.Command) bool {
 		return true
 	case pName == "registry":
 		return true
-	case cmd.Name() == "doctor" && pName == "verda":
+	case cmd.Name() == "doctor" && pName == rootCmdName:
+		return true
+	case cmd.Name() == "version" && pName == rootCmdName:
 		return true
 	}
 	return false
@@ -246,7 +249,7 @@ func shouldCheckVersion(cmd *cobra.Command) bool {
 	switch cmd.Name() {
 	case "help":
 		return true
-	case "verda":
+	case rootCmdName:
 		// Root with no subcommand (prints help then PostRun).
 		return true
 	}
@@ -257,18 +260,41 @@ func shouldCheckVersion(cmd *cobra.Command) bool {
 // Callers should check for this error and exit 0 instead of printing it.
 var ErrVersionRequested = errors.New("version requested")
 
-// versionOutput returns the formatted version string.
+const (
+	rootCmdName   = "verda"
+	cliModulePath = "github.com/verda-cloud/verda-cli"
+	sdkModulePath = "github.com/verda-cloud/verdacloud-sdk-go"
+)
+
+// versionOutput returns the formatted version string. GetFromDebugInfo (not
+// Get) so commit/date survive builds without ldflags — `go install`, `make
+// build` — by falling back to the vcs.* stamps Go embeds.
 func versionOutput() string {
-	info := version.Get()
-	sdkVer := depVersion("github.com/verda-cloud/verdacloud-sdk-go")
-	return fmt.Sprintf("  Version:  %s\n  Platform: %s\n  SDK:      %s\n",
-		info.GitVersion, info.Platform, sdkVer)
+	info := version.GetFromDebugInfo(cliModulePath)
+
+	out := "  Version:  " + info.GitVersion + "\n"
+	if info.GitCommit != unknownVersionValue {
+		out += "  Commit:   " + info.GitCommit
+		if info.GitTreeState == "dirty" {
+			out += " (dirty)"
+		}
+		out += "\n"
+	}
+	if info.BuildDate != unknownVersionValue {
+		out += "  Built:    " + info.BuildDate + "\n"
+	}
+	out += "  Platform: " + info.Platform + "\n"
+	out += "  SDK:      " + depVersion(sdkModulePath) + "\n"
+	return out
 }
+
+// Mirrors the sentinel pkg/version uses for unstamped build vars.
+const unknownVersionValue = "unknown"
 
 func depVersion(modulePath string) string {
 	bi, ok := debug.ReadBuildInfo()
 	if !ok {
-		return "unknown"
+		return unknownVersionValue
 	}
 	for _, dep := range bi.Deps {
 		if dep.Path == modulePath {
@@ -278,5 +304,5 @@ func depVersion(modulePath string) string {
 			return dep.Version
 		}
 	}
-	return "unknown"
+	return unknownVersionValue
 }

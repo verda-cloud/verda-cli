@@ -11,6 +11,7 @@ on:
 permissions:
   contents: write
   id-token: write
+  attestations: write
 
 jobs:
   release:
@@ -114,6 +115,23 @@ jobs:
 
           echo "--- Binary checksums ---"
           cat "$SUMFILE"
+
+          # Shell-scoped VER is not visible to YAML expressions in later steps.
+          echo "VER=${VER}" >> "$GITHUB_ENV"
+
+      # Provenance covers the same two sets the cosign steps sign, driven off the
+      # checksum files rather than a dist/ glob so the subject list cannot drift
+      # from the signed one. Verification needs no .sig/.pem handling:
+      #   gh attestation verify ./verda --repo verda-cloud/verda-cli
+      - name: Attest archives and packages
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-checksums: dist/verda_${{ env.VER }}_SHA256SUMS
+
+      - name: Attest binaries
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-checksums: dist/verda_${{ env.VER }}_binary_SHA256SUMS
 
       - name: Sign checksum files with cosign
         # Keyless signing via GitHub OIDC. The certificate identity will be:
