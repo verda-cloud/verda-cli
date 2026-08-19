@@ -1,6 +1,10 @@
 # Changelog
 
 
+## [Unreleased]
+- [`ebc44f0`] Include ldflags in builds, have a version command where it's normally found from
+- [`10f0725`] Merge pull request #60 from verda-cloud/chore/ldflags-in-builds
+
 ## [v1.8.2] - 2026-08-18
 - [`b77ff90`] Fix(cli): Detect and fix terminal race condition
 - [`0abc56b`] Chore(agents): Add warnings on running config creation commands without proper precautions, update vulnerable Go version
