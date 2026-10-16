@@ -29,7 +29,7 @@ import (
 
 // DefaultEndpoint is the bundled Verda S3 endpoint — the configure wizard's
 // pre-filled default and the fallback when no endpoint is set.
-const DefaultEndpoint = "https://objects.fin-03.verda.storage"
+const DefaultEndpoint = "https://objects.eu-north-3.verda.storage"
 
 // API is the minimal subset of the AWS S3 client used by this package.
 // It exists to allow tests to inject fake clients without depending on
@@ -72,7 +72,7 @@ func NewClient(ctx context.Context, creds *options.S3Credentials, authMode strin
 
 	accessKey := firstNonEmpty(ov.AccessKey, creds.AccessKey)
 	secretKey := firstNonEmpty(ov.SecretKey, creds.SecretKey)
-	region := firstNonEmpty(ov.Region, creds.Region, "us-east-1")
+	region := firstNonEmpty(ov.Region, creds.Region, defaultRegion)
 	endpoint := resolveEndpoint(creds, ov.Endpoint)
 
 	if accessKey == "" || secretKey == "" {

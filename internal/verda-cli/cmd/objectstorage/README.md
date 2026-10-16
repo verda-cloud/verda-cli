@@ -23,7 +23,7 @@ First create an access key in the Verda dashboard: **log in → select your
 project → Project management → Credentials → Object Storage Access Keys.**
 
 Interactive wizard — the endpoint and region come pre-filled with defaults
-(`https://objects.fin-03.verda.storage`, `us-east-1`), so you normally just pick
+(`https://objects.eu-north-3.verda.storage`, `eu-north-3`), so you normally just pick
 a profile and paste the access key + secret:
 ```bash
 verda object-storage configure
@@ -213,7 +213,7 @@ no credentials file at all, so CI never has to write secrets to disk:
 
 ```bash
 export VERDA_S3_ACCESS_KEY=... VERDA_S3_SECRET_KEY=...
-export VERDA_S3_ENDPOINT=https://objects.fin-03.verda.storage
+export VERDA_S3_ENDPOINT=https://objects.eu-north-3.verda.storage
 verda object-storage ls s3://my-bucket
 ```
 
@@ -291,8 +291,8 @@ Wizard flow (`configure`):
 2. New profile name — only when "Create new" was chosen.
 3. S3 access key ID
 4. S3 secret access key (password prompt)
-5. S3 endpoint URL (pre-filled with `https://objects.fin-03.verda.storage`; must start with `http://`/`https://`)
-6. S3 region (default `us-east-1`)
+5. S3 endpoint URL (pre-filled with `https://objects.eu-north-3.verda.storage`; must start with `http://`/`https://`)
+6. S3 region (default `eu-north-3`)
 
 Steps are skipped individually when the corresponding flag is already set — so `verda object-storage configure --access-key X --endpoint Y` only prompts for the secret and region, and `--profile staging` skips the profile picker entirely (targeting `[staging]`).
 
