@@ -28,7 +28,7 @@ import (
 
 const (
 	defaultProfileName = "default"
-	defaultRegion      = "us-east-1"
+	defaultRegion      = "eu-north-3"
 	// newProfileSentinel is the Choice value for "create a new profile". A NUL
 	// byte can't occur in an INI section name, so it never collides with a real
 	// profile.
