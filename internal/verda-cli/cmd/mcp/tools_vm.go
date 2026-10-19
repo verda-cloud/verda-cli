@@ -81,10 +81,10 @@ func (s *Server) registerVMTools() {
 
 	s.mcpServer.AddTool(
 		mcp.NewTool("vm_action",
-			mcp.WithDescription("Perform an action on a VM: start, shutdown, force_shutdown, hibernate, or delete. Destructive actions (shutdown, force_shutdown, hibernate, delete) REQUIRE confirm: true — confirm with the user first; without it the tool fails with CONFIRMATION_REQUIRED. Returns status 'accepted' once the API has accepted the action; pass wait: true to poll until the instance reaches its expected status and report status 'completed' (a failed transition, e.g. the instance entering 'error', is a tool error). delete is not polled and always returns 'accepted'."),
+			mcp.WithDescription("Perform an action on a VM: start, shutdown, force_shutdown, or delete. Destructive actions (shutdown, force_shutdown, delete) REQUIRE confirm: true — confirm with the user first; without it the tool fails with CONFIRMATION_REQUIRED. Returns status 'accepted' once the API has accepted the action; pass wait: true to poll until the instance reaches its expected status and report status 'completed' (a failed transition, e.g. the instance entering 'error', is a tool error). delete is not polled and always returns 'accepted'."),
 			mcp.WithString("id", mcp.Required(), mcp.Description("Instance ID")),
-			mcp.WithString("action", mcp.Required(), mcp.Description("Action: start, shutdown, force_shutdown, hibernate, delete")),
-			mcp.WithBoolean("confirm", mcp.Description("Set true to confirm destructive actions (shutdown, force_shutdown, hibernate, delete). Not needed for start.")),
+			mcp.WithString("action", mcp.Required(), mcp.Description("Action: start, shutdown, force_shutdown, delete")),
+			mcp.WithBoolean("confirm", mcp.Description("Set true to confirm destructive actions (shutdown, force_shutdown, delete). Not needed for start.")),
 			mcp.WithBoolean("wait", mcp.Description("Poll until the instance reaches the action's expected status (default false: return 'accepted' immediately)")),
 		),
 		s.handleVMAction,
@@ -417,7 +417,7 @@ type vmAction struct {
 }
 
 // vmActions mirrors the CLI's vm action table (cmd/vm/action.go): ExpectStatus
-// and the destructive set (shutdown/force_shutdown/hibernate carry warnings
+// and the destructive set (shutdown/force_shutdown carry warnings
 // there; delete is special-cased) must stay in sync.
 var vmActions = map[string]vmAction{
 	verda.ActionStart: {
@@ -433,11 +433,6 @@ var vmActions = map[string]vmAction{
 		expectStatus: verda.StatusOffline,
 		destructive:  true,
 		exec:         func(ctx context.Context, c *verda.Client, id string) error { return c.Instances.ForceShutdown(ctx, id) },
-	},
-	verda.ActionHibernate: {
-		expectStatus: verda.StatusOffline,
-		destructive:  true,
-		exec:         func(ctx context.Context, c *verda.Client, id string) error { return c.Instances.Hibernate(ctx, id) },
 	},
 	verda.ActionDelete: {
 		destructive: true,

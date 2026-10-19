@@ -44,11 +44,6 @@ var shortcuts = []shortcutDef{
 		Action: verda.ActionShutdown,
 	},
 	{
-		Use:    "hibernate <instance-id>",
-		Short:  "Hibernate a VM instance",
-		Action: verda.ActionHibernate,
-	},
-	{
 		Use:     "delete <instance-id>",
 		Aliases: []string{"rm"},
 		Short:   "Delete a VM instance",

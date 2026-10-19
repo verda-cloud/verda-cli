@@ -277,8 +277,6 @@ func actionNameToAPI(action string) string {
 		return verda.ActionShutdown
 	case "force_shutdown", "force-shutdown":
 		return verda.ActionForceShutdown
-	case "hibernate":
-		return verda.ActionHibernate
 	case actionNameDelete:
 		return verda.ActionDelete
 	default:

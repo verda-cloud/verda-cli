@@ -58,9 +58,6 @@ func TestAvailableActions_Running(t *testing.T) {
 	if !labels["Force shutdown"] {
 		t.Error("expected Force shutdown action for running instances")
 	}
-	if !labels["Hibernate"] {
-		t.Error("expected Hibernate action for running instances")
-	}
 	if !labels["Delete instance"] {
 		t.Error("expected Delete action (always available)")
 	}

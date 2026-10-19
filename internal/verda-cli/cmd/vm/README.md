@@ -13,7 +13,6 @@ Parent command for creating and managing Verda Cloud VM instances (GPU and CPU).
 | `verda vm action` | Perform actions on a VM instance | `--id` |
 | `verda vm start` | Start an offline instance | `--all`, `--status`, `--hostname` |
 | `verda vm shutdown` | Shutdown a running instance | `--all`, `--status`, `--hostname` |
-| `verda vm hibernate` | Hibernate a running instance | `--all`, `--status`, `--hostname` |
 | `verda vm delete` | Delete an instance | `--all`, `--status`, `--hostname`, `--with-volumes` |
 
 Aliases: `verda instance`, `verda instances`
@@ -127,7 +126,6 @@ Interactive instance selector appears when `--id` is not provided. Available act
 | Start | offline |
 | Shutdown | running |
 | Force shutdown | running |
-| Hibernate | running |
 | Delete instance | always |
 
 Destructive actions (Shutdown, Force shutdown, Delete) show confirmation prompts with warnings. Delete has a sub-flow for selecting which attached volumes to also delete.
@@ -148,7 +146,7 @@ Destructive actions (Shutdown, Force shutdown, Delete) show confirmation prompts
 - **availability.go** -- `vm availability` with pricing table and spot price column
 - **action.go** -- `vm action` command, `instanceAction` data-driven action definitions, status-filtered action menu, confirmation flows, delete sub-flow with volume selection
 - **batch.go** -- Batch operations (`--all`, `--hostname` glob), per-instance error reporting, agent-mode structured JSON output
-- **shortcuts.go** -- Generated shortcut commands (`vm start`, `vm shutdown`, `vm hibernate`, `vm delete`) from `shortcutDef` structs
+- **shortcuts.go** -- Generated shortcut commands (`vm start`, `vm shutdown`, `vm delete`) from `shortcutDef` structs
 - **instances.go** -- Shared `fetchInstances` helper with spinner and status filtering, `filterByStatus`
 - **status_view.go** -- Instance card renderer, status-to-color mappings
 
@@ -157,7 +155,7 @@ Destructive actions (Shutdown, Force shutdown, Delete) show confirmation prompts
 - `client.Instances.Create` -- Create instance
 - `client.Instances.Get` -- List instances (with optional status filter)
 - `client.Instances.GetByID` -- Get instance details
-- `client.Instances.Start` / `Shutdown` / `ForceShutdown` / `Hibernate` -- Instance lifecycle
+- `client.Instances.Start` / `Shutdown` / `ForceShutdown` -- Instance lifecycle
 - `client.Instances.Delete` -- Delete instance with optional volume IDs
 - `client.Instances.Action` -- Bulk action on multiple instances
 - `client.InstanceAvailability.GetAllAvailabilities` -- Location/instance type availability

@@ -40,7 +40,7 @@ Credentials are shared with the CLI — run `verda auth login` first in the same
 
 ## Confirmation contract
 
-Tools that create billed resources (`create_vm`, `create_volume`) or perform destructive actions (`vm_action` with `shutdown`, `force_shutdown`, `hibernate`, `delete`) require the boolean argument `confirm: true`. This mirrors `--yes` in the CLI's `--agent` mode.
+Tools that create billed resources (`create_vm`, `create_volume`) or perform destructive actions (`vm_action` with `shutdown`, `force_shutdown`, `delete`) require the boolean argument `confirm: true`. This mirrors `--yes` in the CLI's `--agent` mode.
 
 Without it, the tool fails with `isError: true` and a JSON payload following the CLI agent-error envelope (see [docs/agent-errors.md](../../../docs/agent-errors.md)):
 
@@ -54,7 +54,7 @@ Without it, the tool fails with `isError: true` and a JSON payload following the
 
 `vm_action` reports `status: "accepted"` by default — the API has accepted the action, nothing more. `shutdown` of a running VM is *not* done at that point; do not tell the user billing stopped.
 
-With `wait: true`, the tool polls the instance (up to 5 minutes) until it reaches the action's expected status (`start`→running, `shutdown`/`force_shutdown`/`hibernate`→offline) and then reports `status: "completed"` plus `instance_status`. A failed transition (instance enters `error`) is a tool error, not a success. `delete` is not polled and always returns `accepted`.
+With `wait: true`, the tool polls the instance (up to 5 minutes) until it reaches the action's expected status (`start`→running, `shutdown`/`force_shutdown`→offline) and then reports `status: "completed"` plus `instance_status`. A failed transition (instance enters `error`) is a tool error, not a success. `delete` is not polled and always returns `accepted`.
 
 `create_vm` keeps `wait: true` as its default and blocks until the instance is `running`; on poll failure it returns the instance plus `poll_error`/`poll_timed_out` fields.
 
@@ -64,7 +64,7 @@ mcp-go does not validate arguments against the declared schema. All handlers typ
 
 - numbers must be numbers — `"500"` for `os_volume_size_gb` is rejected (was: coerced to 0, silently applying the 50 GB default)
 - arrays must be arrays — `ssh_key_ids` as a bare string is rejected (was: dropped, attaching *all* account SSH keys)
-- enums are checked against their allowed sets — `storage_type` accepts only `NVMe`/`HDD`; `vm_action` `action` accepts only the five documented verbs; unknown `estimate_cost` `storage_type` errors listing the types from the API catalog instead of pricing storage at $0
+- enums are checked against their allowed sets — `storage_type` accepts only `NVMe`/`HDD`; `vm_action` `action` accepts only the four documented verbs; unknown `estimate_cost` `storage_type` errors listing the types from the API catalog instead of pricing storage at $0
 - missing required arguments produce `MISSING_REQUIRED_FLAGS`
 
 ## Files

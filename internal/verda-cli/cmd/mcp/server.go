@@ -59,7 +59,7 @@ func NewLazyServer(getClient clientFunc) *Server {
 const serverInstructions = `Verda Cloud: GPU/CPU instances, volumes, SSH keys, object storage.
 
 CONFIRM GATE — tools that create billing or destructive changes (create_vm,
-create_volume, and vm_action with shutdown/force_shutdown/hibernate/delete)
+create_volume, and vm_action with shutdown/force_shutdown/delete)
 refuse to run unless you pass confirm: true. Show the user the exact target and
 its cost first, then retry with confirm. A refused call has no side effects.
 

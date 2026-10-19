@@ -157,7 +157,7 @@ func TestCreateVMConfirmGate(t *testing.T) {
 func TestVMActionConfirmGate(t *testing.T) {
 	t.Parallel()
 
-	destructive := []string{"shutdown", "force_shutdown", "hibernate", "delete"}
+	destructive := []string{"shutdown", "force_shutdown", "delete"}
 	for _, action := range destructive {
 		t.Run(action, func(t *testing.T) {
 			t.Parallel()

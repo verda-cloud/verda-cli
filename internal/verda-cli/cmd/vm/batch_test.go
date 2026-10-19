@@ -323,7 +323,7 @@ func TestShortcutCommandsHaveBatchFlags(t *testing.T) {
 	vmCmd := NewCmdVM(f, ioStreams)
 
 	// The shortcut commands to check. Some may be aliases.
-	wantCommands := []string{"shutdown", "start", "hibernate", "delete"}
+	wantCommands := []string{"shutdown", "start", "delete"}
 	for _, name := range wantCommands {
 		t.Run(name, func(t *testing.T) {
 			var found *cobra.Command
@@ -434,7 +434,7 @@ func TestHostnameFlag(t *testing.T) {
 
 	vmCmd := NewCmdVM(f, ioStreams)
 
-	for _, name := range []string{"shutdown", "start", "hibernate", "delete"} {
+	for _, name := range []string{"shutdown", "start", "delete"} {
 		t.Run(name, func(t *testing.T) {
 			var found *cobra.Command
 			for _, sub := range vmCmd.Commands() {
@@ -462,7 +462,6 @@ func TestActionNameToAPI(t *testing.T) {
 	}{
 		{"start", verda.ActionStart},
 		{"shutdown", verda.ActionShutdown},
-		{"hibernate", verda.ActionHibernate},
 		{"delete", verda.ActionDelete},
 		{"force_shutdown", verda.ActionForceShutdown},
 		{"force-shutdown", verda.ActionForceShutdown},

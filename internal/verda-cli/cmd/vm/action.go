@@ -33,7 +33,6 @@ var actionNameMap = map[string]string{
 	verda.ActionShutdown:      "Shutdown",
 	verda.ActionForceShutdown: "Force shutdown",
 	"force-shutdown":          "Force shutdown", // CLI alias (hyphenated)
-	verda.ActionHibernate:     "Hibernate",
 	verda.ActionDelete:        "Delete instance",
 }
 
@@ -75,16 +74,6 @@ var allActions = []instanceAction{
 		ExpectStatus: verda.StatusOffline,
 		Execute: func(ctx context.Context, c *verda.Client, inst *verda.Instance) error {
 			return c.Instances.ForceShutdown(ctx, inst.ID)
-		},
-	},
-	{
-		Label:     "Hibernate",
-		ValidFrom: []string{verda.StatusRunning},
-		ConfirmMsg: "Hibernating the instance saves its state and stops billing.\n" +
-			"  You can resume it later.",
-		ExpectStatus: verda.StatusOffline,
-		Execute: func(ctx context.Context, c *verda.Client, inst *verda.Instance) error {
-			return c.Instances.Hibernate(ctx, inst.ID)
 		},
 	},
 	{
@@ -131,7 +120,7 @@ func NewCmdAction(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 		Short: "Perform actions on a VM instance",
 		Long: cmdutil.LongDesc(`
 			Select a VM instance and perform an action: start, shutdown,
-			force shutdown, hibernate, or delete.
+			force shutdown, or delete.
 		`),
 		Example: cmdutil.Examples(`
 			# Interactive: select instance then action
@@ -154,7 +143,7 @@ func NewCmdAction(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 	}
 
 	cmd.Flags().StringVar(&opts.InstanceID, "id", "", "Instance ID to act on")
-	cmd.Flags().StringVar(&opts.Action, "action", "", "Action to perform: start, shutdown, force_shutdown, hibernate, delete")
+	cmd.Flags().StringVar(&opts.Action, "action", "", "Action to perform: start, shutdown, force_shutdown, delete")
 	cmd.Flags().BoolVar(&opts.Yes, "yes", false, "Skip confirmation for destructive actions (required in agent mode)")
 	cmd.Flags().BoolVar(&opts.WithVolumes, "with-volumes", false, "Also delete all attached volumes (delete only); without it the OS volume survives detached and keeps billing")
 	// Hidden like on non-delete shortcuts: `vm delete --with-volumes` is the
@@ -575,7 +564,7 @@ func validFromForAction(actionName string) []string {
 func resolveAction(actionName string, validActions []instanceAction) (instanceAction, error) {
 	label, ok := actionNameMap[strings.ToLower(actionName)]
 	if !ok {
-		return instanceAction{}, fmt.Errorf("unknown --action %q: valid actions are start, shutdown, force_shutdown, hibernate, delete", actionName)
+		return instanceAction{}, fmt.Errorf("unknown --action %q: valid actions are start, shutdown, force_shutdown, delete", actionName)
 	}
 	for _, a := range validActions {
 		if a.Label == label {
