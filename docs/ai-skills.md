@@ -82,9 +82,11 @@ verda template edit my-tmpl  # Edit an existing template
 List my running Verda Cloud VMs
 Shut down my Verda Cloud training VM
 Start my Verda Cloud gpu-runner instance back up
-Hibernate my Verda Cloud dev box (deprecated)
+Hibernate my Verda Cloud dev box
 Delete the Verda Cloud instance I'm not using anymore
 ```
+
+Hibernate is deprecated. It discontinues compute and retains volumes. Retained volumes continue billing.
 
 ### Cost management
 

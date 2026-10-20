@@ -78,10 +78,9 @@ var allActions = []instanceAction{
 		},
 	},
 	{
-		Label:     "Hibernate",
-		ValidFrom: []string{verda.StatusRunning},
-		ConfirmMsg: "Hibernating the instance discontinues compute and retains its volumes.\n" +
-			"  Retained volumes continue billing.",
+		Label:        "Hibernate",
+		ValidFrom:    []string{verda.StatusRunning},
+		ConfirmMsg:   "Hibernate does not save runtime state or support resuming the instance.",
 		ExpectStatus: verda.StatusOffline,
 		Execute: func(ctx context.Context, c *verda.Client, inst *verda.Instance) error {
 			return c.Instances.Hibernate(ctx, inst.ID)
@@ -275,13 +274,12 @@ func runAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 		return runDeleteFlow(ctx, f, ioStreams, client, inst)
 	}
 
-	warnDeprecatedAction(ioStreams, action.Label)
-
 	// Confirm with context message and warning.
 	isDestructive := action.ConfirmMsg != "" || action.WarningMsg != ""
 	if isDestructive && f.AgentMode() && !opts.Yes {
 		return cmdutil.NewConfirmationRequiredError(opts.Action)
 	}
+	warnDeprecatedAction(ioStreams, action.Label)
 	if isDestructive && !f.AgentMode() {
 		confirmed, err := confirmDestructive(ctx, ioStreams, prompter, &action, inst)
 		if err != nil {
