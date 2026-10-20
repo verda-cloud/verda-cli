@@ -38,7 +38,7 @@ Credentials are shared with the CLI — run `verda auth login` first in the same
 | `create_vm` | **yes, billing** — `confirm:true` required | `instance_type`, `image`, `hostname`, `confirm` (required); `location`, `description`, `os_volume_size_gb`, `ssh_key_ids`, `startup_script_id`, `spot`, `storage_size_gb`, `storage_type`, `wait` (default true) |
 | `vm_action` | **action-dependent** | `id`, `action` (required); `confirm`, `wait` |
 
-Hibernate is deprecated. It discontinues compute and retains volumes. Retained volumes continue billing.
+Hibernate is deprecated and will be removed in a future version. It discontinues compute and retains volumes. Retained volumes continue billing.
 
 ## Confirmation contract
 

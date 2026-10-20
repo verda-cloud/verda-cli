@@ -131,6 +131,9 @@ func NewCmdAction(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 		Long: cmdutil.LongDesc(`
 			Select a VM instance and perform an action: start, shutdown,
 			force shutdown, hibernate (deprecated), or delete.
+
+			Hibernate is deprecated and will be removed in a future version.
+			It discontinues compute and retains volumes. Retained volumes continue billing.
 		`),
 		Example: cmdutil.Examples(`
 			# Interactive: select instance then action
@@ -604,6 +607,6 @@ func confirmDestructive(ctx context.Context, ioStreams cmdutil.IOStreams, prompt
 
 func warnDeprecatedAction(ioStreams cmdutil.IOStreams, label string) {
 	if label == actionNameMap[verda.ActionHibernate] {
-		_, _ = fmt.Fprintln(ioStreams.ErrOut, "Warning: hibernate is deprecated. It discontinues compute and retains volumes. Retained volumes continue billing.")
+		_, _ = fmt.Fprintln(ioStreams.ErrOut, "Warning: hibernate is deprecated and will be removed in a future version. It discontinues compute and retains volumes. Retained volumes continue billing.")
 	}
 }

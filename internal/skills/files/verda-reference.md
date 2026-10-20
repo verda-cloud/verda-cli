@@ -67,6 +67,8 @@ All commands: `--agent -o json` (except `verda ssh` and `verda auth show`).
 
 ## VM Lifecycle
 
+Hibernate is deprecated and will be removed in a future version. It discontinues compute and retains volumes. Retained volumes continue billing.
+
 | Command | Key Flags |
 |---------|-----------|
 | `verda vm list -o json` | `--status`, `--location`. Fields: `id`, `hostname`, `status`, `instance_type`, `location`, `ip`, `price_per_hour` |
