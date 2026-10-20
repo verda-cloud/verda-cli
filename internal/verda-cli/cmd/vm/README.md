@@ -13,10 +13,12 @@ Parent command for creating and managing Verda Cloud VM instances (GPU and CPU).
 | `verda vm action` | Perform actions on a VM instance | `--id` |
 | `verda vm start` | Start an offline instance | `--all`, `--status`, `--hostname` |
 | `verda vm shutdown` | Shutdown a running instance | `--all`, `--status`, `--hostname` |
-| `verda vm hibernate` | Hibernate a running instance | `--all`, `--status`, `--hostname` |
+| `verda vm hibernate` | Hibernate a running instance (deprecated) | `--all`, `--status`, `--hostname` |
 | `verda vm delete` | Delete an instance | `--all`, `--status`, `--hostname`, `--with-volumes` |
 
 Aliases: `verda instance`, `verda instances`
+
+Hibernate is deprecated. It discontinues compute and retains volumes. Retained volumes continue billing. Use `verda vm delete` and leave all volumes unselected, or omit `--with-volumes` in agent mode.
 
 ## Usage Examples
 
@@ -127,7 +129,7 @@ Interactive instance selector appears when `--id` is not provided. Available act
 | Start | offline |
 | Shutdown | running |
 | Force shutdown | running |
-| Hibernate | running |
+| Hibernate (deprecated) | running |
 | Delete instance | always |
 
 Destructive actions (Shutdown, Force shutdown, Delete) show confirmation prompts with warnings. Delete has a sub-flow for selecting which attached volumes to also delete.

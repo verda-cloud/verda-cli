@@ -16,7 +16,7 @@ All commands: `--agent -o json` (except `verda ssh` and `verda auth show`).
 | "VM info", "instance info", "describe", "show VM" | `vm describe <id>` |
 | "start", "boot", "power on" | `vm start <id>` |
 | "stop", "shut down", "power off" | `vm shutdown <id>` (alias: `stop`) |
-| "hibernate", "suspend", "sleep" | `vm hibernate <id>` |
+| "hibernate" (deprecated) | `vm hibernate <id>` (discontinues compute, retains billable volumes) |
 | "delete VM", "delete instance", "remove", "destroy", "terminate" | `vm delete <id>` (alias: `rm`) |
 | "template", "saved config", "preset", "my templates" | `template list` (alias: `tmpl`) |
 | "deploy from template", "use template", "quick deploy" | `vm create --from <name>` |
@@ -73,7 +73,7 @@ All commands: `--agent -o json` (except `verda ssh` and `verda auth show`).
 | `verda vm describe <id> -o json` | — |
 | `verda vm start <id> --wait` | `--yes` in agent mode |
 | `verda vm shutdown <id> --wait` | `--yes` in agent mode. Alias: `stop` |
-| `verda vm hibernate <id> --wait` | `--yes` in agent mode |
+| `verda vm hibernate <id> --wait` | Deprecated. `--yes` in agent mode |
 | `verda vm delete <id> --wait` | `--yes` **required**. `--with-volumes` to also delete attached volumes. Alias: `rm` |
 
 Batch operations: `--all` with `--status` and/or `--hostname` (glob pattern) to target multiple VMs.

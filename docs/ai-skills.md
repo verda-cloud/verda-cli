@@ -82,7 +82,7 @@ verda template edit my-tmpl  # Edit an existing template
 List my running Verda Cloud VMs
 Shut down my Verda Cloud training VM
 Start my Verda Cloud gpu-runner instance back up
-Hibernate my Verda Cloud dev box
+Delete my Verda Cloud dev box and retain all its volumes
 Delete the Verda Cloud instance I'm not using anymore
 ```
 
