@@ -606,6 +606,6 @@ func confirmDestructive(ctx context.Context, ioStreams cmdutil.IOStreams, prompt
 
 func warnDeprecatedAction(ioStreams cmdutil.IOStreams, label string) {
 	if label == actionNameMap[verda.ActionHibernate] {
-		_, _ = fmt.Fprintln(ioStreams.ErrOut, "Warning: hibernate is deprecated. Use 'verda vm delete' and retain the volumes. Retained volumes continue billing.")
+		_, _ = fmt.Fprintln(ioStreams.ErrOut, "Warning: hibernate is deprecated. It discontinues compute and retains volumes. Retained volumes continue billing.")
 	}
 }

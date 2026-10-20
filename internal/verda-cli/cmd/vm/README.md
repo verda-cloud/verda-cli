@@ -18,7 +18,7 @@ Parent command for creating and managing Verda Cloud VM instances (GPU and CPU).
 
 Aliases: `verda instance`, `verda instances`
 
-Hibernate is deprecated. It discontinues compute and retains volumes. Retained volumes continue billing. Use `verda vm delete` and leave all volumes unselected, or omit `--with-volumes` in agent mode.
+Hibernate is deprecated. It discontinues compute and retains volumes. Retained volumes continue billing.
 
 ## Usage Examples
 
