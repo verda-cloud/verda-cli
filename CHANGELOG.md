@@ -1,7 +1,7 @@
 # Changelog
 
 
-## [Unreleased]
+## [v1.9.0] - 2026-10-22
 - [`ebc44f0`] Include ldflags in builds, have a version command where it's normally found from
 - [`10f0725`] Merge pull request #60 from verda-cloud/chore/ldflags-in-builds
 - [`42dfe37`] Fix(object-storage): default to eu-north-3 endpoint and region
