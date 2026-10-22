@@ -78,10 +78,9 @@ var allActions = []instanceAction{
 		},
 	},
 	{
-		Label:     "Hibernate",
-		ValidFrom: []string{verda.StatusRunning},
-		ConfirmMsg: "Hibernating the instance saves its state and stops billing.\n" +
-			"  You can resume it later.",
+		Label:        "Hibernate",
+		ValidFrom:    []string{verda.StatusRunning},
+		ConfirmMsg:   "Hibernate does not save runtime state or support resuming the instance.",
 		ExpectStatus: verda.StatusOffline,
 		Execute: func(ctx context.Context, c *verda.Client, inst *verda.Instance) error {
 			return c.Instances.Hibernate(ctx, inst.ID)
@@ -131,7 +130,10 @@ func NewCmdAction(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 		Short: "Perform actions on a VM instance",
 		Long: cmdutil.LongDesc(`
 			Select a VM instance and perform an action: start, shutdown,
-			force shutdown, hibernate, or delete.
+			force shutdown, hibernate (deprecated), or delete.
+
+			Hibernate is deprecated and will be removed in a future version.
+			It discontinues compute and retains volumes. Retained volumes continue billing.
 		`),
 		Example: cmdutil.Examples(`
 			# Interactive: select instance then action
@@ -154,7 +156,7 @@ func NewCmdAction(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 	}
 
 	cmd.Flags().StringVar(&opts.InstanceID, "id", "", "Instance ID to act on")
-	cmd.Flags().StringVar(&opts.Action, "action", "", "Action to perform: start, shutdown, force_shutdown, hibernate, delete")
+	cmd.Flags().StringVar(&opts.Action, "action", "", "Action to perform: start, shutdown, force_shutdown, hibernate (deprecated), delete")
 	cmd.Flags().BoolVar(&opts.Yes, "yes", false, "Skip confirmation for destructive actions (required in agent mode)")
 	cmd.Flags().BoolVar(&opts.WithVolumes, "with-volumes", false, "Also delete all attached volumes (delete only); without it the OS volume survives detached and keeps billing")
 	// Hidden like on non-delete shortcuts: `vm delete --with-volumes` is the
@@ -280,6 +282,7 @@ func runAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 	if isDestructive && f.AgentMode() && !opts.Yes {
 		return cmdutil.NewConfirmationRequiredError(opts.Action)
 	}
+	warnDeprecatedAction(ioStreams, action.Label)
 	if isDestructive && !f.AgentMode() {
 		confirmed, err := confirmDestructive(ctx, ioStreams, prompter, &action, inst)
 		if err != nil {
@@ -450,7 +453,11 @@ func selectAction(ctx context.Context, ioStreams cmdutil.IOStreams, prompter tui
 
 	actionLabels := make([]string, 0, len(validActions)+1)
 	for _, a := range validActions {
-		actionLabels = append(actionLabels, a.Label)
+		label := a.Label
+		if label == actionNameMap[verda.ActionHibernate] {
+			label += " (deprecated)"
+		}
+		actionLabels = append(actionLabels, label)
 	}
 	actionLabels = append(actionLabels, "Cancel")
 
@@ -596,4 +603,10 @@ func confirmDestructive(ctx context.Context, ioStreams cmdutil.IOStreams, prompt
 	}
 	_, _ = fmt.Fprintln(ioStreams.ErrOut)
 	return prompter.Confirm(ctx, fmt.Sprintf("Would you like to continue? (%s on %s)", action.Label, inst.Hostname))
+}
+
+func warnDeprecatedAction(ioStreams cmdutil.IOStreams, label string) {
+	if label == actionNameMap[verda.ActionHibernate] {
+		_, _ = fmt.Fprintln(ioStreams.ErrOut, "Warning: hibernate is deprecated and will be removed in a future version. It discontinues compute and retains volumes. Retained volumes continue billing.")
+	}
 }

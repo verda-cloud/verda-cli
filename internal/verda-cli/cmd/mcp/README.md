@@ -38,9 +38,11 @@ Credentials are shared with the CLI — run `verda auth login` first in the same
 | `create_vm` | **yes, billing** — `confirm:true` required | `instance_type`, `image`, `hostname`, `confirm` (required); `location`, `description`, `os_volume_size_gb`, `ssh_key_ids`, `startup_script_id`, `spot`, `storage_size_gb`, `storage_type`, `wait` (default true) |
 | `vm_action` | **action-dependent** | `id`, `action` (required); `confirm`, `wait` |
 
+Hibernate is deprecated and will be removed in a future version. It discontinues compute and retains volumes. Retained volumes continue billing.
+
 ## Confirmation contract
 
-Tools that create billed resources (`create_vm`, `create_volume`) or perform destructive actions (`vm_action` with `shutdown`, `force_shutdown`, `hibernate`, `delete`) require the boolean argument `confirm: true`. This mirrors `--yes` in the CLI's `--agent` mode.
+Tools that create billed resources (`create_vm`, `create_volume`) or perform destructive actions (`vm_action` with `shutdown`, `force_shutdown`, `hibernate` (deprecated), `delete`) require the boolean argument `confirm: true`. This mirrors `--yes` in the CLI's `--agent` mode.
 
 Without it, the tool fails with `isError: true` and a JSON payload following the CLI agent-error envelope (see [docs/agent-errors.md](../../../docs/agent-errors.md)):
 

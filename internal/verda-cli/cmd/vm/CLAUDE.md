@@ -2,7 +2,7 @@
 
 ## Quick Reference
 - Parent: `verda vm` (aliases: `instance`, `instances`)
-- Subcommands: `create`, `list` (alias `ls`), `describe`, `availability`, `action`, plus shortcuts (`start`, `shutdown`, `hibernate`, `delete`)
+- Subcommands: `create`, `list` (alias `ls`), `describe`, `availability`, `action`, plus shortcuts (`start`, `shutdown`, `hibernate` (deprecated), `delete`)
 - Files:
   - `vm.go` -- Parent command, registers subcommands and shortcuts
   - `create.go` -- Create command, flags, `createOptions` struct, request building, validation
@@ -59,7 +59,7 @@
 
 ### Action Availability
 - Start: only from `offline`
-- Shutdown / Force shutdown / Hibernate: only from `running`
+- Shutdown / Force shutdown / Hibernate (deprecated): only from `running`
 - Delete: always available (no ValidFrom filter)
 - Delete sub-flow: fetches attached volumes, lets user multi-select which to delete, warns about continued billing for undeleted volumes
 

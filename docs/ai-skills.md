@@ -86,6 +86,8 @@ Hibernate my Verda Cloud dev box
 Delete the Verda Cloud instance I'm not using anymore
 ```
 
+Hibernate is deprecated and will be removed in a future version. It discontinues compute and retains volumes. Retained volumes continue billing.
+
 ### Cost management
 
 ```

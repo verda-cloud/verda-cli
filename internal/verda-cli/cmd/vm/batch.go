@@ -74,6 +74,8 @@ func runBatchAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOS
 		return runBatchDelete(cmd, f, ioStreams, client, instances, opts)
 	}
 
+	warnDeprecatedAction(ioStreams, action.Label)
+
 	// Interactive confirmation.
 	if !f.AgentMode() {
 		confirmed, err := confirmBatchAction(ctx, f, ioStreams, &action, instances)
@@ -403,6 +405,8 @@ func runBatchWithInstances(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdu
 	if action.Execute == nil {
 		return runBatchDelete(cmd, f, ioStreams, client, instances, opts)
 	}
+
+	warnDeprecatedAction(ioStreams, action.Label)
 
 	// Confirmation.
 	confirmed, confirmErr := confirmBatchAction(ctx, f, ioStreams, &action, instances)

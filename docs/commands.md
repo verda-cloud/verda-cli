@@ -9,8 +9,10 @@ Full reference for all Verda CLI commands and flags.
 | `verda vm create` | Create a VM (interactive wizard or flags) |
 | `verda vm list` | List and inspect VM instances |
 | `verda vm describe` | Show detailed info about a single VM |
-| `verda vm action` | Start, shutdown, hibernate, or delete a VM |
+| `verda vm action` | Start, shutdown, hibernate (deprecated), or delete a VM |
 | `verda vm availability` | Show available instance types with pricing |
+
+Hibernate is deprecated and will be removed in a future version. It discontinues compute and retains volumes. Retained volumes continue billing.
 
 ## SSH
 

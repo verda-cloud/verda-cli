@@ -81,9 +81,9 @@ func (s *Server) registerVMTools() {
 
 	s.mcpServer.AddTool(
 		mcp.NewTool("vm_action",
-			mcp.WithDescription("Perform an action on a VM: start, shutdown, force_shutdown, hibernate, or delete. Destructive actions (shutdown, force_shutdown, hibernate, delete) REQUIRE confirm: true — confirm with the user first; without it the tool fails with CONFIRMATION_REQUIRED. Returns status 'accepted' once the API has accepted the action; pass wait: true to poll until the instance reaches its expected status and report status 'completed' (a failed transition, e.g. the instance entering 'error', is a tool error). delete is not polled and always returns 'accepted'."),
+			mcp.WithDescription("Perform an action on a VM: start, shutdown, force_shutdown, hibernate (deprecated), or delete. Hibernate is deprecated and will be removed in a future version. It discontinues compute and retains volumes. Retained volumes continue billing. Destructive actions (shutdown, force_shutdown, hibernate, delete) REQUIRE confirm: true — confirm with the user first; without it the tool fails with CONFIRMATION_REQUIRED. Returns status 'accepted' once the API has accepted the action; pass wait: true to poll until the instance reaches its expected status and report status 'completed' (a failed transition, e.g. the instance entering 'error', is a tool error). delete is not polled and always returns 'accepted'."),
 			mcp.WithString("id", mcp.Required(), mcp.Description("Instance ID")),
-			mcp.WithString("action", mcp.Required(), mcp.Description("Action: start, shutdown, force_shutdown, hibernate, delete")),
+			mcp.WithString("action", mcp.Required(), mcp.Description("Action: start, shutdown, force_shutdown, hibernate (deprecated), delete")),
 			mcp.WithBoolean("confirm", mcp.Description("Set true to confirm destructive actions (shutdown, force_shutdown, hibernate, delete). Not needed for start.")),
 			mcp.WithBoolean("wait", mcp.Description("Poll until the instance reaches the action's expected status (default false: return 'accepted' immediately)")),
 		),

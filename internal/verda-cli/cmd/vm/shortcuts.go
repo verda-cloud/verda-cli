@@ -45,7 +45,7 @@ var shortcuts = []shortcutDef{
 	},
 	{
 		Use:    "hibernate <instance-id>",
-		Short:  "Hibernate a VM instance",
+		Short:  "Hibernate a VM instance (deprecated, will be removed in a future version)",
 		Action: verda.ActionHibernate,
 	},
 	{

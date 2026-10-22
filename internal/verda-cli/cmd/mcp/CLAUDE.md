@@ -15,7 +15,7 @@
 
 ### Confirm gates (hard requirement, mirrors `--yes`)
 - Billing: `create_vm`, `create_volume` — `confirm: true` always required (schema marks it Required, but mcp-go does not enforce schemas — the handler gate is the enforcement)
-- Destructive `vm_action`: `shutdown`, `force_shutdown`, `hibernate`, `delete` — gated via the `vmActions` table's `destructive` flag
+- Destructive `vm_action`: `shutdown`, `force_shutdown`, `hibernate` (deprecated), `delete` — gated via the `vmActions` table's `destructive` flag
 - The gate runs BEFORE `verdaClient()`/API calls; a refused call must have zero side effects
 - Agent-facing codes: `CONFIRMATION_REQUIRED`, `VALIDATION_ERROR`, `MISSING_REQUIRED_FLAGS` — same names as the CLI `--agent` contract
 
