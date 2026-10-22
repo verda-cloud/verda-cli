@@ -5,6 +5,7 @@
 - [`ebc44f0`] Include ldflags in builds, have a version command where it's normally found from
 - [`10f0725`] Merge pull request #60 from verda-cloud/chore/ldflags-in-builds
 - [`42dfe37`] Fix(object-storage): default to eu-north-3 endpoint and region
+- [`014e79f`] Fix(vm): deprecate hibernate without removing support
 
 ## [v1.8.2] - 2026-08-18
 - [`b77ff90`] Fix(cli): Detect and fix terminal race condition
