@@ -36,7 +36,7 @@ import (
 
 func stepName(target *string) wizard.Step {
 	return wizard.Step{
-		Name:        "name",
+		Name:        flagName,
 		Description: "Deployment name (URL slug, immutable)",
 		Prompt:      wizard.TextInputPrompt,
 		Required:    true,
@@ -55,7 +55,7 @@ func stepName(target *string) wizard.Step {
 
 func stepImage(target *string) wizard.Step {
 	return wizard.Step{
-		Name:        "image",
+		Name:        flagImage,
 		Description: "Container image (e.g. ghcr.io/org/app:v1.2)",
 		Prompt:      wizard.TextInputPrompt,
 		Required:    true,
@@ -78,7 +78,7 @@ func stepImage(target *string) wizard.Step {
 
 func stepCompute(getClient clientFunc, cache *apiCache, target *string) wizard.Step {
 	return wizard.Step{
-		Name:        "compute",
+		Name:        flagCompute,
 		Description: "Compute resource",
 		Prompt:      wizard.SelectPrompt,
 		Required:    true,
@@ -119,7 +119,7 @@ func stepCompute(getClient clientFunc, cache *apiCache, target *string) wizard.S
 
 func stepComputeSize(target *int) wizard.Step {
 	return wizard.Step{
-		Name:        "compute-size",
+		Name:        flagComputeSize,
 		Description: "Compute size (GPUs or vCPUs per replica)",
 		Prompt:      wizard.TextInputPrompt,
 		Required:    true,
@@ -144,7 +144,7 @@ func stepComputeSize(target *int) wizard.Step {
 
 func stepRegistryCreds(getClient clientFunc, cache *apiCache, target *string) wizard.Step {
 	return wizard.Step{
-		Name:        "registry-creds",
+		Name:        flagRegistryCreds,
 		Description: "Registry credentials (for private images)",
 		Prompt:      wizard.SelectPrompt,
 		Required:    false,
@@ -198,7 +198,7 @@ func stepRegistryCreds(getClient clientFunc, cache *apiCache, target *string) wi
 
 func stepPort(target *int) wizard.Step {
 	return wizard.Step{
-		Name:        "port",
+		Name:        flagPort,
 		Description: "Exposed HTTP port",
 		Prompt:      wizard.TextInputPrompt,
 		Required:    true,
@@ -261,7 +261,7 @@ func stepEnvVars(target *[]string) wizard.Step {
 
 func stepMaxReplicas(target *int) wizard.Step {
 	return wizard.Step{
-		Name:        "max-replicas",
+		Name:        flagMaxReplicas,
 		Description: "Max replicas",
 		Prompt:      wizard.TextInputPrompt,
 		Required:    true,
@@ -280,7 +280,7 @@ func stepMaxReplicas(target *int) wizard.Step {
 // --- Request TTL ---
 
 func stepRequestTTL(target *time.Duration) wizard.Step {
-	return durationStep("request-ttl", "Request time-to-live (pending queue)", target, defaultRequestTTL)
+	return durationStep(flagRequestTTL, "Request time-to-live (pending queue)", target, defaultRequestTTL)
 }
 
 // --- Secret mounts (loop) ---

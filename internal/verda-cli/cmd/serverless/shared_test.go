@@ -15,8 +15,11 @@
 package serverless
 
 import (
+	"image/color"
 	"strings"
 	"testing"
+
+	"charm.land/lipgloss/v2"
 )
 
 func TestValidateDeploymentName(t *testing.T) {
@@ -151,4 +154,45 @@ func TestParseSecretMountFlag(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestStatusColor(t *testing.T) {
+	cases := []struct {
+		name     string
+		status   string
+		wantANSI string
+		wantBold bool
+	}{
+		{"running", "running", "2", true},
+		{"active", "active", "2", true},
+		{"healthy", "healthy", "2", true},
+		{"mixed case", "Healthy Running", "2", true},
+		{"error", "error", "1", true},
+		{"failed", "deploy failed", "1", true},
+		{"paused", "paused", "8", false},
+		{"stopped", "stopped", "8", false},
+		{"offline", "offline", "8", false},
+		{"transitional", "initializing", "3", false},
+		{"deploying", "deploying", "3", false},
+		{"empty", "", "3", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			style := statusColor(tc.status)
+			want := lipgloss.Color(tc.wantANSI)
+			got := style.GetForeground()
+			if !colorEqual(got, want) {
+				t.Errorf("foreground: got %v, want ANSI %s", got, tc.wantANSI)
+			}
+			if style.GetBold() != tc.wantBold {
+				t.Errorf("bold: got %v, want %v", style.GetBold(), tc.wantBold)
+			}
+		})
+	}
+}
+
+func colorEqual(a, b color.Color) bool {
+	r1, g1, b1, a1 := a.RGBA()
+	r2, g2, b2, a2 := b.RGBA()
+	return r1 == r2 && g1 == g2 && b1 == b2 && a1 == a2
 }

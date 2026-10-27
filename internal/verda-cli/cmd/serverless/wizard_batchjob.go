@@ -54,7 +54,7 @@ func buildBatchjobCreateFlow(_ context.Context, getClient clientFunc, opts *batc
 // so we enforce it client-side for a friendlier error.
 func stepBatchjobDeadline(target *time.Duration) wizard.Step {
 	return wizard.Step{
-		Name:        "deadline",
+		Name:        flagDeadline,
 		Description: "Per-request deadline (e.g. 5m, 30m, 1h) — required",
 		Prompt:      wizard.TextInputPrompt,
 		Required:    true,

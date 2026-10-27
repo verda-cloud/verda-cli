@@ -278,3 +278,163 @@ func TestContainerCreate_AgentMode_NoCredsReturnsMissingFlags(t *testing.T) {
 		t.Fatalf("auth error leaked through — agent-mode flag check must run before VerdaClient: %v", err)
 	}
 }
+
+func TestContainerRequest_HealthcheckPortOverride(t *testing.T) {
+	opts := validOpts()
+	opts.HealthcheckPort = 9090
+	req, err := opts.request()
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	hc := req.Containers[0].Healthcheck
+	if hc == nil {
+		t.Fatal("healthcheck nil")
+	}
+	if hc.Port != 9090 {
+		t.Errorf("healthcheck port: got %d, want 9090", hc.Port)
+	}
+}
+
+func TestContainerRequest_Entrypoint(t *testing.T) {
+	opts := validOpts()
+	opts.Entrypoint = []string{"/bin/sh", "-c"}
+	opts.Cmd = []string{"serve"}
+	req, err := opts.request()
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	ep := req.Containers[0].EntrypointOverrides
+	if ep == nil || !ep.Enabled {
+		t.Fatal("expected entrypoint overrides enabled")
+	}
+	if len(ep.Entrypoint) != 2 || ep.Entrypoint[0] != "/bin/sh" || ep.Entrypoint[1] != "-c" {
+		t.Errorf("entrypoint: got %v", ep.Entrypoint)
+	}
+	if len(ep.Cmd) != 1 || ep.Cmd[0] != "serve" {
+		t.Errorf("cmd: got %v", ep.Cmd)
+	}
+}
+
+func TestContainerRequest_EntrypointOnly(t *testing.T) {
+	opts := validOpts()
+	opts.Entrypoint = []string{"/app/run"}
+	req, err := opts.request()
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	ep := req.Containers[0].EntrypointOverrides
+	if ep == nil || !ep.Enabled {
+		t.Fatal("expected entrypoint overrides enabled")
+	}
+	if len(ep.Entrypoint) != 1 || ep.Entrypoint[0] != "/app/run" {
+		t.Errorf("entrypoint: got %v", ep.Entrypoint)
+	}
+	if len(ep.Cmd) != 0 {
+		t.Errorf("cmd should be empty, got %v", ep.Cmd)
+	}
+}
+
+func TestContainerRequest_CmdOnly(t *testing.T) {
+	opts := validOpts()
+	opts.Cmd = []string{"python", "main.py"}
+	req, err := opts.request()
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	ep := req.Containers[0].EntrypointOverrides
+	if ep == nil || !ep.Enabled {
+		t.Fatal("expected entrypoint overrides enabled")
+	}
+	if len(ep.Entrypoint) != 0 {
+		t.Errorf("entrypoint should be empty, got %v", ep.Entrypoint)
+	}
+	if len(ep.Cmd) != 2 || ep.Cmd[0] != "python" {
+		t.Errorf("cmd: got %v", ep.Cmd)
+	}
+}
+
+func TestContainerRequest_SecretMounts(t *testing.T) {
+	opts := validOpts()
+	opts.SecretMounts = []string{"api-key:/etc/secret/key"}
+	req, err := opts.request()
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	mounts := req.Containers[0].VolumeMounts
+	if len(mounts) != 2 {
+		t.Fatalf("expected 2 mounts (scratch + secret), got %d: %+v", len(mounts), mounts)
+	}
+	if mounts[0].Type != mountTypeScratch {
+		t.Errorf("mount[0]: expected scratch, got %q", mounts[0].Type)
+	}
+	if mounts[1].Type != mountTypeSecret || mounts[1].SecretName != "api-key" || mounts[1].MountPath != "/etc/secret/key" {
+		t.Errorf("mount[1]: got %+v", mounts[1])
+	}
+}
+
+func TestContainerRequest_SecretMountBadFormat(t *testing.T) {
+	opts := validOpts()
+	opts.SecretMounts = []string{"no-colon"}
+	_, err := opts.request()
+	if err == nil || !strings.Contains(err.Error(), "SECRET:MOUNT_PATH") {
+		t.Fatalf("expected SECRET:MOUNT_PATH error, got %v", err)
+	}
+}
+
+func TestContainerRequest_EnvSecretOnly(t *testing.T) {
+	opts := validOpts()
+	opts.EnvSecret = []string{"TOKEN=my-secret"}
+	req, err := opts.request()
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	env := req.Containers[0].Env
+	if len(env) != 1 {
+		t.Fatalf("env count: got %d, want 1", len(env))
+	}
+	if env[0].Type != envTypeSecret {
+		t.Errorf("env type: got %q, want %q", env[0].Type, envTypeSecret)
+	}
+}
+
+func TestContainerRequest_EnvBadFormat(t *testing.T) {
+	opts := validOpts()
+	opts.Env = []string{"BADFORMAT"}
+	_, err := opts.request()
+	if err == nil || !strings.Contains(err.Error(), "KEY=VALUE") {
+		t.Fatalf("expected KEY=VALUE error, got %v", err)
+	}
+}
+
+func TestContainerRequest_CostSaverVariants(t *testing.T) {
+	for _, alias := range []string{"cost_saver", "costsaver"} {
+		t.Run(alias, func(t *testing.T) {
+			opts := validOpts()
+			opts.QueuePreset = alias
+			req, err := opts.request()
+			if err != nil {
+				t.Fatalf("request: %v", err)
+			}
+			got := req.Scaling.ScalingTriggers.QueueLoad.Threshold
+			if got != queueLoadCostSaver {
+				t.Errorf("threshold: got %v, want %v", got, queueLoadCostSaver)
+			}
+		})
+	}
+}
+
+func TestContainerRequest_ScaleDelays(t *testing.T) {
+	opts := validOpts()
+	opts.ScaleUpDelay = 10 * time.Second
+	opts.ScaleDownDelay = 60 * time.Second
+	req, err := opts.request()
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	if req.Scaling.ScaleUpPolicy == nil || req.Scaling.ScaleUpPolicy.DelaySeconds != 10 {
+		t.Errorf("scale-up delay: got %+v", req.Scaling.ScaleUpPolicy)
+	}
+	if req.Scaling.ScaleDownPolicy == nil || req.Scaling.ScaleDownPolicy.DelaySeconds != 60 {
+		t.Errorf("scale-down delay: got %+v", req.Scaling.ScaleDownPolicy)
+	}
+}

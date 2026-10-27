@@ -132,40 +132,40 @@ func newCmdContainerCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobr
 	}
 
 	flags := cmd.Flags()
-	flags.StringVar(&opts.Name, "name", "", "Deployment name (URL slug; immutable after create)")
-	flags.StringVar(&opts.Image, "image", "", "Container image reference (must not be ':latest')")
+	flags.StringVar(&opts.Name, flagName, "", "Deployment name (URL slug; immutable after create)")
+	flags.StringVar(&opts.Image, flagImage, "", "Container image reference (must not be ':latest')")
 
-	flags.BoolVar(&opts.Spot, "spot", false, "Use spot compute instead of on-demand")
+	flags.BoolVar(&opts.Spot, flagSpot, false, "Use spot compute instead of on-demand")
 
-	flags.StringVar(&opts.Compute, "compute", "", "Compute resource name (e.g. RTX4500Ada, CPUNode)")
-	flags.IntVar(&opts.ComputeSize, "compute-size", 1, "Number of GPUs or vCPU cores per replica")
+	flags.StringVar(&opts.Compute, flagCompute, "", "Compute resource name (e.g. RTX4500Ada, CPUNode)")
+	flags.IntVar(&opts.ComputeSize, flagComputeSize, 1, "Number of GPUs or vCPU cores per replica")
 
-	flags.StringVar(&opts.RegistryCreds, "registry-creds", "", "Registry credentials name (empty = public)")
-	flags.BoolVar(&opts.RegistryPublic, "registry-public", false, "Pull image anonymously (default)")
+	flags.StringVar(&opts.RegistryCreds, flagRegistryCreds, "", "Registry credentials name (empty = public)")
+	flags.BoolVar(&opts.RegistryPublic, flagRegistryPublic, false, "Pull image anonymously (default)")
 
-	flags.IntVar(&opts.Port, "port", opts.Port, "Exposed HTTP port")
-	flags.BoolVar(&opts.HealthcheckOff, "healthcheck-off", false, "Disable healthcheck (default: on at /health)")
-	flags.IntVar(&opts.HealthcheckPort, "healthcheck-port", 0, "Healthcheck HTTP port (defaults to --port)")
-	flags.StringVar(&opts.HealthcheckPath, "healthcheck-path", opts.HealthcheckPath, "Healthcheck HTTP path")
-	flags.StringArrayVar(&opts.Env, "env", nil, "Environment variable KEY=VALUE (KEY uppercase); repeat for multiple")
-	flags.StringArrayVar(&opts.EnvSecret, "env-secret", nil, "Secret-backed env KEY=SECRET_NAME (KEY uppercase); repeat for multiple")
-	flags.StringArrayVar(&opts.Entrypoint, "entrypoint", nil, "Override image ENTRYPOINT; repeat for multiple args")
-	flags.StringArrayVar(&opts.Cmd, "cmd", nil, "Override image CMD; repeat for multiple args")
+	flags.IntVar(&opts.Port, flagPort, opts.Port, "Exposed HTTP port")
+	flags.BoolVar(&opts.HealthcheckOff, flagHealthcheckOff, false, "Disable healthcheck (default: on at /health)")
+	flags.IntVar(&opts.HealthcheckPort, flagHealthcheckPort, 0, "Healthcheck HTTP port (defaults to --port)")
+	flags.StringVar(&opts.HealthcheckPath, flagHealthcheckPath, opts.HealthcheckPath, "Healthcheck HTTP path")
+	flags.StringArrayVar(&opts.Env, flagEnv, nil, "Environment variable KEY=VALUE (KEY uppercase); repeat for multiple")
+	flags.StringArrayVar(&opts.EnvSecret, flagEnvSecret, nil, "Secret-backed env KEY=SECRET_NAME (KEY uppercase); repeat for multiple")
+	flags.StringArrayVar(&opts.Entrypoint, flagEntrypoint, nil, "Override image ENTRYPOINT; repeat for multiple args")
+	flags.StringArrayVar(&opts.Cmd, flagCmd, nil, "Override image CMD; repeat for multiple args")
 
-	flags.IntVar(&opts.MinReplicas, "min-replicas", opts.MinReplicas, "Minimum replica count (0 = scale-to-zero)")
-	flags.IntVar(&opts.MaxReplicas, "max-replicas", opts.MaxReplicas, "Maximum replica count")
-	flags.IntVar(&opts.Concurrency, "concurrency", opts.Concurrency, "Concurrent requests per replica")
-	flags.StringVar(&opts.QueuePreset, "queue-preset", opts.QueuePreset, "Scaling preset: instant | balanced | cost-saver | custom")
-	flags.IntVar(&opts.QueueLoad, "queue-load", 0, "Custom queue-load threshold (1..1000); sets --queue-preset=custom when used")
-	flags.IntVar(&opts.CPUUtil, "cpu-util", 0, "CPU utilization trigger threshold % (1..100); 0 = off")
-	flags.IntVar(&opts.GPUUtil, "gpu-util", 0, "GPU utilization trigger threshold % (1..100); 0 = off")
-	flags.DurationVar(&opts.ScaleUpDelay, "scale-up-delay", opts.ScaleUpDelay, "Delay before scaling up")
-	flags.DurationVar(&opts.ScaleDownDelay, "scale-down-delay", opts.ScaleDownDelay, "Delay before scaling down")
-	flags.DurationVar(&opts.RequestTTL, "request-ttl", opts.RequestTTL, "How long a pending request may live before deletion")
+	flags.IntVar(&opts.MinReplicas, flagMinReplicas, opts.MinReplicas, "Minimum replica count (0 = scale-to-zero)")
+	flags.IntVar(&opts.MaxReplicas, flagMaxReplicas, opts.MaxReplicas, "Maximum replica count")
+	flags.IntVar(&opts.Concurrency, flagConcurrency, opts.Concurrency, "Concurrent requests per replica")
+	flags.StringVar(&opts.QueuePreset, flagQueuePreset, opts.QueuePreset, "Scaling preset: instant | balanced | cost-saver | custom")
+	flags.IntVar(&opts.QueueLoad, flagQueueLoad, 0, "Custom queue-load threshold (1..1000); sets --queue-preset=custom when used")
+	flags.IntVar(&opts.CPUUtil, flagCPUUtil, 0, "CPU utilization trigger threshold % (1..100); 0 = off")
+	flags.IntVar(&opts.GPUUtil, flagGPUUtil, 0, "GPU utilization trigger threshold % (1..100); 0 = off")
+	flags.DurationVar(&opts.ScaleUpDelay, flagScaleUpDelay, opts.ScaleUpDelay, "Delay before scaling up")
+	flags.DurationVar(&opts.ScaleDownDelay, flagScaleDownDelay, opts.ScaleDownDelay, "Delay before scaling down")
+	flags.DurationVar(&opts.RequestTTL, flagRequestTTL, opts.RequestTTL, "How long a pending request may live before deletion")
 
-	flags.StringArrayVar(&opts.SecretMounts, "secret-mount", nil, "Secret mount SECRET:MOUNT_PATH; repeat for multiple")
+	flags.StringArrayVar(&opts.SecretMounts, flagSecretMount, nil, "Secret mount SECRET:MOUNT_PATH; repeat for multiple")
 
-	flags.BoolVarP(&opts.Yes, "yes", "y", false, "Skip confirmation (required in agent mode)")
+	flags.BoolVarP(&opts.Yes, flagYes, "y", false, "Skip confirmation (required in agent mode)")
 
 	return cmd
 }

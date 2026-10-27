@@ -81,25 +81,25 @@ func newCmdBatchjobCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra
 	}
 
 	flags := cmd.Flags()
-	flags.StringVar(&opts.Name, "name", "", "Deployment name (URL slug; immutable after create)")
-	flags.StringVar(&opts.Image, "image", "", "Container image reference (must not be ':latest')")
-	flags.StringVar(&opts.Compute, "compute", "", "Compute resource name (e.g. RTX4500Ada, CPUNode)")
-	flags.IntVar(&opts.ComputeSize, "compute-size", 1, "Number of GPUs or vCPU cores per replica")
-	flags.StringVar(&opts.RegistryCreds, "registry-creds", "", "Registry credentials name (empty = public)")
+	flags.StringVar(&opts.Name, flagName, "", "Deployment name (URL slug; immutable after create)")
+	flags.StringVar(&opts.Image, flagImage, "", "Container image reference (must not be ':latest')")
+	flags.StringVar(&opts.Compute, flagCompute, "", "Compute resource name (e.g. RTX4500Ada, CPUNode)")
+	flags.IntVar(&opts.ComputeSize, flagComputeSize, 1, "Number of GPUs or vCPU cores per replica")
+	flags.StringVar(&opts.RegistryCreds, flagRegistryCreds, "", "Registry credentials name (empty = public)")
 
-	flags.IntVar(&opts.Port, "port", opts.Port, "Exposed HTTP port")
-	flags.StringArrayVar(&opts.Env, "env", nil, "Environment variable KEY=VALUE (KEY uppercase); repeat for multiple")
-	flags.StringArrayVar(&opts.EnvSecret, "env-secret", nil, "Secret-backed env KEY=SECRET_NAME (KEY uppercase); repeat for multiple")
-	flags.StringArrayVar(&opts.Entrypoint, "entrypoint", nil, "Override image ENTRYPOINT; repeat for multiple args")
-	flags.StringArrayVar(&opts.Cmd, "cmd", nil, "Override image CMD; repeat for multiple args")
+	flags.IntVar(&opts.Port, flagPort, opts.Port, "Exposed HTTP port")
+	flags.StringArrayVar(&opts.Env, flagEnv, nil, "Environment variable KEY=VALUE (KEY uppercase); repeat for multiple")
+	flags.StringArrayVar(&opts.EnvSecret, flagEnvSecret, nil, "Secret-backed env KEY=SECRET_NAME (KEY uppercase); repeat for multiple")
+	flags.StringArrayVar(&opts.Entrypoint, flagEntrypoint, nil, "Override image ENTRYPOINT; repeat for multiple args")
+	flags.StringArrayVar(&opts.Cmd, flagCmd, nil, "Override image CMD; repeat for multiple args")
 
-	flags.IntVar(&opts.MaxReplicas, "max-replicas", opts.MaxReplicas, "Maximum worker replica count")
-	flags.DurationVar(&opts.Deadline, "deadline", 0, "Per-request deadline (required; > 0)")
-	flags.DurationVar(&opts.RequestTTL, "request-ttl", opts.RequestTTL, "How long a pending request may live before deletion")
+	flags.IntVar(&opts.MaxReplicas, flagMaxReplicas, opts.MaxReplicas, "Maximum worker replica count")
+	flags.DurationVar(&opts.Deadline, flagDeadline, 0, "Per-request deadline (required; > 0)")
+	flags.DurationVar(&opts.RequestTTL, flagRequestTTL, opts.RequestTTL, "How long a pending request may live before deletion")
 
-	flags.StringArrayVar(&opts.SecretMounts, "secret-mount", nil, "Secret mount SECRET:MOUNT_PATH; repeat for multiple")
+	flags.StringArrayVar(&opts.SecretMounts, flagSecretMount, nil, "Secret mount SECRET:MOUNT_PATH; repeat for multiple")
 
-	flags.BoolVarP(&opts.Yes, "yes", "y", false, "Skip confirmation (required in agent mode)")
+	flags.BoolVarP(&opts.Yes, flagYes, "y", false, "Skip confirmation (required in agent mode)")
 
 	return cmd
 }
