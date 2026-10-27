@@ -40,6 +40,7 @@ func NewCmdContainer(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Comm
 
 	cmd.AddCommand(
 		newCmdContainerCreate(f, ioStreams),
+		newCmdContainerUpdate(f, ioStreams),
 		newCmdContainerList(f, ioStreams),
 		newCmdContainerDescribe(f, ioStreams),
 		newCmdContainerDelete(f, ioStreams),
