@@ -4,11 +4,11 @@
 
 ## ⚠️ Wire-Format Tests Must Stay in Sync (HARD RULE)
 
-**Any change to the create-request payload must come with a matching update to `wire_format_test.go`.** That file is the only test layer that catches bugs the SDK's `ValidateCreate*DeploymentRequest` does not (e.g. the `type:"shared"` → `volume_id` 400 we hit in production). `opts.request()` unit tests check field assembly in Go; the wire-format tests check the JSON the API actually receives.
+**Any change to the create- or update-request payload must come with a matching update to `wire_format_test.go`.** That file is the only test layer that catches bugs the SDK's `ValidateCreate*DeploymentRequest` does not (e.g. the `type:"shared"` → `volume_id` 400 we hit in production). `opts.request()` unit tests check field assembly in Go; the wire-format tests check the JSON the API actually receives.
 
-What "change to the create-request payload" covers:
-- Adding/removing/renaming any field on `containerCreateOptions` or `batchjobCreateOptions` that flows into `request()`.
-- Changing `buildVolumeMounts`, `buildEnvVars`, `buildContainerScaling`, or any helper that contributes to the request body.
+What "change to the create- or update-request payload" covers:
+- Adding/removing/renaming any field on `containerCreateOptions`, `batchjobCreateOptions`, `containerUpdateOptions`, or `batchjobUpdateOptions` that flows into `request()` or `build*UpdateRequest`.
+- Changing `buildVolumeMounts`, `buildEnvVars`, `buildContainerScaling`, `mergeEnvVarsForUpdate`, `mergeVolumeMountsForUpdate`, `mergeEntrypointForUpdate`, or any helper that contributes to the request body.
 - Changing mount-type constants in `shared.go`, the SDK type tags, or the API path.
 - Adding new flags whose values appear in the request.
 
@@ -25,16 +25,19 @@ This rule applies equally to Claude, Codex, Cursor, or a human editing the packa
   - `verda container` → `/container-deployments` (continuous endpoints, supports spot)
   - `verda batchjob` → `/job-deployments` (one-shot jobs, deadline-based, **no spot**)
 - There is **no** `verda serverless` parent command — the two trees were promoted to root for shorter invocations. They still share this Go package because they share wizard step factories, validators, and the API cache.
-- Verbs (both trees): `create`, `list` (alias `ls`), `describe` (aliases `get`, `show`), `delete` (aliases `rm`, `del`), `pause`, `resume`, `purge-queue`. Container also has `restart`.
+- Verbs (both trees): `create`, `update`, `list` (alias `ls`), `describe` (aliases `get`, `show`), `delete` (aliases `rm`, `del`), `pause`, `resume`, `purge-queue`. Container also has `restart`.
 - Files:
   - `container.go`, `batchjob.go` — Top-level command builders. `NewCmdContainer` and `NewCmdBatchjob` are exported and called directly from `cmd/cmd.go`. **Pre-release, two-layer gated like registry:** the Serverless command group is only registered when `VERDA_SERVERLESS_ENABLED=1` (`serverlessEnabled()` in `cmd/cmd.go`), and both parents set `Hidden: true` so they stay out of `verda --help` even when a tester flips the env var on. Drop the env gate + the two `Hidden: true` flags when serverless ships GA.
   - `container_create.go` — `containerCreateOptions`, flags, `request()`, validate(), wizard entry point.
+  - `container_update.go` — `containerUpdateOptions`, fetch-merge-PATCH flow. Fetches current deployment + scaling (separate call), overlays only Changed() flags, sends single PATCH. Splits summary rendering and scaling merge into helpers for gocyclo compliance.
   - `container_list.go` — `GetDeployments` + tabwriter + structured output.
   - `container_describe.go` — `GetDeploymentByName` + `GetDeploymentStatus` (best-effort) + `selectContainerDeployment` picker.
   - `container_delete.go` — `DeleteDeployment(timeoutMs)` + destructive confirm.
   - `container_actions.go` — Data-driven action factory `newContainerActionCmd` (pause/resume/restart/purge-queue).
   - `batchjob_create.go` — `batchjobCreateOptions` (simpler: no spot, deadline required).
+  - `batchjob_update.go` — `batchjobUpdateOptions`, fetch-merge-PATCH flow. Single fetch (JobDeployment includes scaling). No spot, no healthcheck, no scaling triggers — simpler than container update.
   - `batchjob_list.go`, `batchjob_describe.go`, `batchjob_delete.go`, `batchjob_actions.go` — Same shape as container, trimmed.
+  - `update_shared.go` — Flag name constants (28 shared by both update commands), `anyFlagChanged`, `computeFromCurrent`, `mergeEnvVarsForUpdate`, `mergeVolumeMountsForUpdate`, `mergeEntrypointForUpdate`. Env merge: `--env` replaces plain vars and carries secrets; `--env-secret` replaces secrets and carries plain. Volume merge: `--secret-mount` replaces secret mounts, carries scratch.
   - `shared.go` — `validateDeploymentName` (RFC-1123 subset), `rejectLatestTag`, `parseEnvFlag`, `parseSecretMountFlag`, `confirmDestructive`, `statusColor`, `mountType*` + `envType*` constants.
   - `wizard_shared.go` — Step builders shared by both create wizards: `stepName`, `stepImage`, `stepCompute`, `stepComputeSize`, `stepRegistryCreds`, `stepPort`, `stepEnvVars`, `stepMaxReplicas`, `stepRequestTTL`, `stepSecretMounts`. Plus the generic `durationStep` helper and three int validators. Each takes a `*T` pointer to the field it mutates, so the same step definition drives both `containerCreateOptions` and `batchjobCreateOptions`.
   - `wizard.go` — `buildContainerCreateFlow` + container-only steps: spot/compute-type, healthcheck on/off + path (port is NOT prompted; it always defaults to the exposed port in `request()`), min-replicas, concurrency, queue-load preset + custom override, CPU/GPU util triggers, scale-up/down delays. 21 total steps in the container flow.
@@ -128,6 +131,9 @@ Describe cards (`renderContainerDeploymentCard`, `renderJobDeploymentCard`) prin
 - **`ContainerDeployment.Status` is NOT in the `GetDeployments` list response.** The list endpoint returns `ContainerDeployment` without status. We call `GetDeploymentStatus(name)` per-row in `describe`, but NOT in `list` (would N+1). If the web UI grows a bulk status endpoint, wire it in.
 - **Env-var name validation:** `^[A-Z_][A-Z0-9_]*$`. Lowercase or leading-digit names are rejected client-side in both `parseEnvFlag` and `promptEnvVar`. This is stricter than POSIX (which allows lowercase) but matches Verda's conventions.
 - **Secret mount path must be absolute.** `parseSecretMountFlag` and `promptSecretMount` both check `strings.HasPrefix(path, "/")`. No trailing-slash normalization is applied.
+- **Update commands use fetch-then-merge-then-PATCH.** GET current state, overlay only `cmd.Flags().Changed()` flags, send one PATCH. nil/omitted fields in the request mean "don't change". Container update needs two GETs (deployment + scaling) because `ContainerDeployment` doesn't include scaling; job update needs one (scaling is inline).
+- **Env merge on update is type-partitioned.** `--env` replaces ALL plain vars and carries all secret vars unchanged; `--env-secret` replaces ALL secret vars and carries all plain vars unchanged. Both flags set → full replacement. Neither → no env field in PATCH.
+- **Update wire-format tests.** `TestContainerUpdate_WireFormat` (image+spot), `TestContainerUpdate_EnvMergeWireFormat` (env merge semantics), `TestBatchjobUpdate_WireFormat` (scaling-only). Same `recordingServer` pattern as create tests, extended with GET + PATCH handlers.
 - **`DeleteDeployment` timeout semantics:** `--timeout-ms` flag maps directly to the SDK's `timeoutMs` parameter. `-1` (default) uses the API default of 60s; `0` returns immediately; `>0` waits up to that many ms (capped at 300000 server-side).
 
 ## Relationships
@@ -136,8 +142,8 @@ Describe cards (`renderContainerDeploymentCard`, `renderJobDeploymentCard`) prin
 - `pkg/tui/wizard` — `Flow`, `Step`, `Choice`, `Store`, `Engine`, `NewEngine`, `StaticChoices`, `WithOutput`, prompt-type enums.
 - `pkg/tui` — `Prompter`, `Status`, `WithConfirmDefault`.
 - SDK (`verdacloud-sdk-go/pkg/verda`):
-  - `ContainerDeploymentsService` — `GetDeployments`, `CreateDeployment`, `GetDeploymentByName`, `DeleteDeployment`, `GetDeploymentStatus`, `PauseDeployment`, `ResumeDeployment`, `RestartDeployment`, `PurgeDeploymentQueue`, `GetServerlessComputeResources`, `GetRegistryCredentials`, `GetSecrets`, `GetFileSecrets`, `ValidateCreateDeploymentRequest`.
-  - `ServerlessJobsService` — `GetJobDeployments`, `CreateJobDeployment`, `GetJobDeploymentByName`, `DeleteJobDeployment`, `GetJobDeploymentStatus`, `PauseJobDeployment`, `ResumeJobDeployment`, `PurgeJobDeploymentQueue`, `ValidateCreateJobDeploymentRequest`.
-  - Types: `ContainerDeployment`, `JobDeployment`, `JobDeploymentShortInfo`, `CreateDeploymentRequest`, `CreateJobDeploymentRequest`, `ContainerScalingOptions`, `JobScalingOptions`, `ScalingTriggers`, `QueueLoadTrigger`, `UtilizationTrigger`, `ScalingPolicy`, `ContainerCompute`, `ContainerRegistrySettings`, `RegistryCredentialsRef`, `ContainerEnvVar`, `ContainerVolumeMount`, `ContainerHealthcheck`, `ContainerEntrypointOverrides`, `ComputeResource`, `Secret`, `FileSecret`, `RegistryCredentials`.
+  - `ContainerDeploymentsService` — `GetDeployments`, `CreateDeployment`, `UpdateDeployment`, `GetDeploymentByName`, `GetDeploymentScaling`, `DeleteDeployment`, `GetDeploymentStatus`, `PauseDeployment`, `ResumeDeployment`, `RestartDeployment`, `PurgeDeploymentQueue`, `GetServerlessComputeResources`, `GetRegistryCredentials`, `GetSecrets`, `GetFileSecrets`, `ValidateCreateDeploymentRequest`.
+  - `ServerlessJobsService` — `GetJobDeployments`, `CreateJobDeployment`, `UpdateJobDeployment`, `GetJobDeploymentByName`, `DeleteJobDeployment`, `GetJobDeploymentStatus`, `PauseJobDeployment`, `ResumeJobDeployment`, `PurgeJobDeploymentQueue`, `ValidateCreateJobDeploymentRequest`.
+  - Types: `ContainerDeployment`, `JobDeployment`, `JobDeploymentShortInfo`, `CreateDeploymentRequest`, `UpdateDeploymentRequest`, `CreateJobDeploymentRequest`, `UpdateJobDeploymentRequest`, `ContainerScalingOptions`, `JobScalingOptions`, `ScalingTriggers`, `QueueLoadTrigger`, `UtilizationTrigger`, `ScalingPolicy`, `ContainerCompute`, `ContainerRegistrySettings`, `RegistryCredentialsRef`, `ContainerEnvVar`, `ContainerVolumeMount`, `ContainerHealthcheck`, `ContainerEntrypointOverrides`, `ComputeResource`, `Secret`, `FileSecret`, `RegistryCredentials`.
 - `charm.land/lipgloss/v2` — status color styles + describe-card labels.
 - `github.com/spf13/cobra` — command plumbing.
