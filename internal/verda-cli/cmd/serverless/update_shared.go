@@ -19,37 +19,6 @@ import (
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
 )
 
-// Flag name constants shared by both update commands.
-const (
-	flagImage           = "image"
-	flagSpot            = "spot"
-	flagNoSpot          = "no-spot"
-	flagCompute         = "compute"
-	flagComputeSize     = "compute-size"
-	flagRegistryCreds   = "registry-creds"
-	flagRegistryPublic  = "registry-public"
-	flagPort            = "port"
-	flagHealthcheckOff  = "healthcheck-off"
-	flagHealthcheckPort = "healthcheck-port"
-	flagHealthcheckPath = "healthcheck-path"
-	flagEnv             = "env"
-	flagEnvSecret       = "env-secret"
-	flagEntrypoint      = "entrypoint"
-	flagCmd             = "cmd"
-	flagSecretMount     = "secret-mount"
-	flagMinReplicas     = "min-replicas"
-	flagMaxReplicas     = "max-replicas"
-	flagConcurrency     = "concurrency"
-	flagQueuePreset     = "queue-preset"
-	flagQueueLoad       = "queue-load"
-	flagCPUUtil         = "cpu-util"
-	flagGPUUtil         = "gpu-util"
-	flagScaleUpDelay    = "scale-up-delay"
-	flagScaleDownDelay  = "scale-down-delay"
-	flagRequestTTL      = "request-ttl"
-	flagDeadline        = "deadline"
-)
-
 func anyFlagChanged(cmd *cobra.Command, flags ...string) bool {
 	for _, f := range flags {
 		if cmd.Flags().Changed(f) {

@@ -17,7 +17,6 @@ package serverless
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -269,12 +268,12 @@ func stepContainerGPUUtil(target *int) wizard.Step {
 }
 
 // utilThresholdStep builds a step that asks "off | <threshold>" as a text
-// input. An empty value or "off" maps to 0; any integer in minUtilThreshold..maxUtilThreshold enables
+// input. An empty value or "off" maps to 0; any integer in 1..100 enables
 // the trigger at that threshold. Shared by CPU and GPU util steps.
 func utilThresholdStep(name, desc string, target *int) wizard.Step {
 	return wizard.Step{
 		Name:        name,
-		Description: fmt.Sprintf("%s (blank = off; else %d..%d)", desc, minUtilThreshold, maxUtilThreshold),
+		Description: desc + " (blank = off; else 1..100)",
 		Prompt:      wizard.TextInputPrompt,
 		Required:    false,
 		Default: func(_ map[string]any) any {
@@ -289,8 +288,8 @@ func utilThresholdStep(name, desc string, target *int) wizard.Step {
 				return nil
 			}
 			n, err := strconv.Atoi(s)
-			if err != nil || n < minUtilThreshold || n > maxUtilThreshold {
-				return fmt.Errorf("must be blank, 'off', or an integer in %d..%d", minUtilThreshold, maxUtilThreshold)
+			if err != nil || n < 1 || n > 100 {
+				return errors.New("must be blank, 'off', or an integer in 1..100")
 			}
 			return nil
 		},
