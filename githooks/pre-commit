@@ -5,7 +5,7 @@
 #   make hooks.install
 #   # or: git config core.hooksPath githooks
 #
-# Requires bash. Optional: golangci-lint on PATH for extra checks.
+# Requires bash and Go (make lint and make fix.check fetch their pinned tools).
 set -euo pipefail
 
 STAGED_GO=$(git diff --cached --name-only --diff-filter=ACM -- '*.go' || true)
@@ -21,10 +21,12 @@ go build ./...
 printf "  go vet ./...\n"
 go vet ./...
 
-if command -v golangci-lint &>/dev/null; then
-	printf "  golangci-lint (staged files)\n"
-	echo "$STAGED_GO" | xargs golangci-lint run --new-from-rev=HEAD
-fi
+# Same pinned targets as CI: the Makefile pins golangci-lint and the go fix toolchain.
+printf "  make fix.check\n"
+make --no-print-directory fix.check
+
+printf "  make lint\n"
+make --no-print-directory lint
 
 PKGS=$(echo "$STAGED_GO" | xargs -I{} dirname {} | sort -u | sed 's|^|./|')
 if [ -n "$PKGS" ]; then
