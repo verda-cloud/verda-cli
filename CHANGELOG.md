@@ -1,6 +1,9 @@
 # Changelog
 
 
+## [Unreleased]
+- [`2a464bc`] Chore(deps): update verdacloud-sdk-go to v1.7.0 and add go fix check
+
 ## [v1.9.0] - 2026-10-22
 - [`ebc44f0`] Include ldflags in builds, have a version command where it's normally found from
 - [`10f0725`] Merge pull request #60 from verda-cloud/chore/ldflags-in-builds
