@@ -29,8 +29,7 @@ import (
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
 
-// Create-request limits. The SDK rejects values outside them before sending;
-// sdk_limits_test.go checks these ranges against the SDK's Validate().
+// Create-request limits; keep in sync with the SDK, which rejects values outside them before sending.
 const (
 	maxPort                = 65535
 	maxComputeSize         = 128

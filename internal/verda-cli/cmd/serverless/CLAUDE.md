@@ -101,7 +101,7 @@ Mount types in `ContainerVolumeMount.Type` that the CLI currently sends:
 
 ### Create limits mirror the SDK
 
-The SDK validates create requests before sending them, so a wizard step that accepts a wider range than the SDK fails only after the whole wizard. The limits live once in `shared.go` (`maxComputeSize`, `maxReplicas`, `maxConcurrency`, `min/maxUtilThreshold`, `maxScalingDelay`, `maxContainerRequestTTL` 24h, `maxBatchjobRequestTTL` 168h) and back the wizard validators, the `validate()`/`request()` flag checks and the flag help. Container and job request TTL differ — keep `stepContainerRequestTTL` and `stepBatchjobRequestTTL` separate. `sdk_limits_test.go` runs the SDK's `Validate()` at each boundary; when the SDK changes a limit, that test fails first.
+The SDK validates create requests before sending them, so a wizard step that accepts a wider range than the SDK fails only after the whole wizard. The limits live once in `shared.go` (`maxComputeSize`, `maxReplicas`, `maxConcurrency`, `min/maxUtilThreshold`, `maxScalingDelay`, `maxContainerRequestTTL` 24h, `maxBatchjobRequestTTL` 168h) and back the wizard validators, the `validate()`/`request()` flag checks and the flag help. Container and job request TTL differ — keep `stepContainerRequestTTL` and `stepBatchjobRequestTTL` separate. When the SDK changes a limit, update the constant here.
 
 ### Action-command factory pattern
 
