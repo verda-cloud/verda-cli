@@ -78,6 +78,53 @@ func TestBatchjobRequest_RequiresDeadline(t *testing.T) {
 	}
 }
 
+func TestBatchjobRequest_DeadlineRangeMatchesSDK(t *testing.T) {
+	cases := []struct {
+		deadline time.Duration
+		ok       bool
+	}{
+		{5 * time.Minute, false},
+		{10*time.Minute - time.Second, false},
+		{10 * time.Minute, true},
+		{168 * time.Hour, true},
+		{168*time.Hour + time.Second, false},
+	}
+	for _, c := range cases {
+		opts := validJobOpts()
+		opts.Deadline = c.deadline
+		req, err := opts.request()
+		if (err == nil) != c.ok {
+			t.Errorf("deadline %s: request() err = %v, want ok=%v", c.deadline, err, c.ok)
+			continue
+		}
+		if c.ok {
+			if err := req.Validate(); err != nil {
+				t.Errorf("deadline %s: CLI accepts but SDK rejects: %v", c.deadline, err)
+			}
+		}
+	}
+}
+
+func TestBatchjobWizardDefaultDeadline_PassesSDKValidation(t *testing.T) {
+	var d time.Duration
+	step := stepBatchjobDeadline(&d)
+	def := step.Default(nil)
+	if err := step.Validate(def); err != nil {
+		t.Fatalf("wizard rejects its own default %v: %v", def, err)
+	}
+	step.Setter(def)
+
+	opts := validJobOpts()
+	opts.Deadline = d
+	req, err := opts.request()
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	if err := req.Validate(); err != nil {
+		t.Fatalf("SDK rejects the wizard default deadline %s: %v", d, err)
+	}
+}
+
 func TestBatchjobMissingFlags(t *testing.T) {
 	opts := &batchjobCreateOptions{}
 	missing := missingBatchjobCreateFlags(opts)

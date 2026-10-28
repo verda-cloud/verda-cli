@@ -52,6 +52,19 @@ type batchjobCreateOptions struct {
 	Yes bool
 }
 
+// Deadline bounds match the SDK's JobScalingOptions.Validate, which rejects the request before it is sent.
+const (
+	minBatchjobDeadline = 10 * time.Minute
+	maxBatchjobDeadline = 7 * 24 * time.Hour
+)
+
+func validateBatchjobDeadline(d time.Duration) error {
+	if d < minBatchjobDeadline || d > maxBatchjobDeadline {
+		return errors.New("deadline must be between 10m and 168h (7 days)")
+	}
+	return nil
+}
+
 func newCmdBatchjobCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 	opts := &batchjobCreateOptions{
 		Port:        defaultExposedPort,
@@ -94,7 +107,7 @@ func newCmdBatchjobCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra
 	flags.StringArrayVar(&opts.Cmd, "cmd", nil, "Override image CMD; repeat for multiple args")
 
 	flags.IntVar(&opts.MaxReplicas, "max-replicas", opts.MaxReplicas, "Maximum worker replica count")
-	flags.DurationVar(&opts.Deadline, "deadline", 0, "Per-request deadline (required; > 0)")
+	flags.DurationVar(&opts.Deadline, "deadline", 0, "Per-request deadline (required; 10m to 168h)")
 	flags.DurationVar(&opts.RequestTTL, "request-ttl", opts.RequestTTL, "How long a pending request may live before deletion")
 
 	flags.StringArrayVar(&opts.SecretMounts, "secret-mount", nil, "Secret mount SECRET:MOUNT_PATH; repeat for multiple")
@@ -197,8 +210,8 @@ func (o *batchjobCreateOptions) request() (*verda.CreateJobDeploymentRequest, er
 	if o.MaxReplicas < 1 {
 		return nil, errors.New("--max-replicas must be >= 1")
 	}
-	if o.Deadline <= 0 {
-		return nil, errors.New("--deadline must be > 0")
+	if err := validateBatchjobDeadline(o.Deadline); err != nil {
+		return nil, errors.New("--" + err.Error())
 	}
 	if o.Port < 1 || o.Port > 65535 {
 		return nil, errors.New("--port must be in 1..65535")

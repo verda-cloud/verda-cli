@@ -122,7 +122,7 @@ verda batchjob create \
 
 **Batch jobs cannot use spot compute.** There is no `--spot` flag; the underlying API has no `IsSpot` field for jobs. This is intentional.
 
-**Deadline is required** and must be `> 0s`. Each queued request gets up to `--deadline` to complete; missing or zero deadline fails validation client-side and server-side.
+**Deadline is required** and must be between `10m` and `168h` (7 days). Each queued request gets up to `--deadline` to complete. A missing or out-of-range deadline fails validation client-side, before the request is sent. The wizard defaults to `30m`.
 
 ### Other scaling flags
 

@@ -97,7 +97,7 @@ Mount types in `ContainerVolumeMount.Type` that the CLI currently sends:
 
 ### Deadline is required for batchjob
 
-`JobScalingOptions.DeadlineSeconds` must be `> 0` — enforced in `batchjobCreateOptions.request()`, in the SDK via `ValidateCreateJobDeploymentRequest`, and listed in `missingBatchjobCreateFlags`. The batchjob wizard (when implemented — see Gotchas) must include a deadline prompt as a required field.
+`JobScalingOptions.DeadlineSeconds` must be 600..604800 (10m..7 days). The SDK enforces this in `JobScalingOptions.Validate` (run by `CreateJobDeployment`) before the request is sent. The CLI mirrors it in `validateBatchjobDeadline`, used by both `request()` and the wizard's deadline step, so a bad value fails at the prompt, not after the whole wizard. A missing deadline is listed in `missingBatchjobCreateFlags`. The wizard default (`30m`) must stay inside the range — `TestBatchjobWizardDefaultDeadline_PassesSDKValidation` guards it.
 
 ### Action-command factory pattern
 
