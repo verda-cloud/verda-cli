@@ -97,7 +97,7 @@ func newCmdBatchjobCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra
 	flags.StringVar(&opts.Name, "name", "", "Deployment name (URL slug; immutable after create)")
 	flags.StringVar(&opts.Image, "image", "", "Container image reference (must not be ':latest')")
 	flags.StringVar(&opts.Compute, "compute", "", "Compute resource name (e.g. RTX4500Ada, CPUNode)")
-	flags.IntVar(&opts.ComputeSize, "compute-size", 1, "Number of GPUs or vCPU cores per replica")
+	flags.IntVar(&opts.ComputeSize, "compute-size", 1, "Number of GPUs or vCPU cores per replica (1..128)")
 	flags.StringVar(&opts.RegistryCreds, "registry-creds", "", "Registry credentials name (empty = public)")
 
 	flags.IntVar(&opts.Port, "port", opts.Port, "Exposed HTTP port")
@@ -106,9 +106,9 @@ func newCmdBatchjobCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra
 	flags.StringArrayVar(&opts.Entrypoint, "entrypoint", nil, "Override image ENTRYPOINT; repeat for multiple args")
 	flags.StringArrayVar(&opts.Cmd, "cmd", nil, "Override image CMD; repeat for multiple args")
 
-	flags.IntVar(&opts.MaxReplicas, "max-replicas", opts.MaxReplicas, "Maximum worker replica count")
+	flags.IntVar(&opts.MaxReplicas, "max-replicas", opts.MaxReplicas, "Maximum worker replica count (1..1000)")
 	flags.DurationVar(&opts.Deadline, "deadline", 0, "Per-request deadline (required; 10m to 168h)")
-	flags.DurationVar(&opts.RequestTTL, "request-ttl", opts.RequestTTL, "How long a pending request may live before deletion")
+	flags.DurationVar(&opts.RequestTTL, "request-ttl", opts.RequestTTL, "How long a pending request may live before deletion (0s to 168h)")
 
 	flags.StringArrayVar(&opts.SecretMounts, "secret-mount", nil, "Secret mount SECRET:MOUNT_PATH; repeat for multiple")
 
@@ -204,17 +204,18 @@ func (o *batchjobCreateOptions) request() (*verda.CreateJobDeploymentRequest, er
 	if err := rejectLatestTag(o.Image); err != nil {
 		return nil, err
 	}
-	if o.ComputeSize < 1 {
-		return nil, errors.New("--compute-size must be >= 1")
-	}
-	if o.MaxReplicas < 1 {
-		return nil, errors.New("--max-replicas must be >= 1")
-	}
 	if err := validateBatchjobDeadline(o.Deadline); err != nil {
 		return nil, errors.New("--" + err.Error())
 	}
-	if o.Port < 1 || o.Port > 65535 {
-		return nil, errors.New("--port must be in 1..65535")
+	for _, err := range []error{
+		checkIntRange("--compute-size", o.ComputeSize, 1, maxComputeSize),
+		checkIntRange("--max-replicas", o.MaxReplicas, 1, maxReplicas),
+		checkIntRange("--port", o.Port, 1, maxPort),
+		checkDurationRange("--request-ttl", o.RequestTTL, maxBatchjobRequestTTL),
+	} {
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	env, err := buildEnvVars(o.Env, o.EnvSecret)

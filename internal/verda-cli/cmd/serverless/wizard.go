@@ -17,6 +17,7 @@ package serverless
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -70,7 +71,7 @@ func buildContainerCreateFlow(_ context.Context, getClient clientFunc, opts *con
 			stepContainerGPUUtil(&opts.GPUUtil),
 			stepContainerScaleUpDelay(&opts.ScaleUpDelay),
 			stepContainerScaleDownDelay(&opts.ScaleDownDelay),
-			stepRequestTTL(&opts.RequestTTL),
+			stepContainerRequestTTL(&opts.RequestTTL),
 			stepSecretMounts(getClient, cache, &opts.SecretMounts),
 		},
 	}
@@ -171,7 +172,7 @@ func stepContainerMinReplicas(target *int) wizard.Step {
 		Prompt:      wizard.TextInputPrompt,
 		Required:    false,
 		Default:     func(_ map[string]any) any { return strconv.Itoa(*target) },
-		Validate:    parseNonNegativeIntValidator("min replicas"),
+		Validate:    parseIntRangeValidator("min replicas", 0, maxReplicas),
 		Setter: func(v any) {
 			n, _ := strconv.Atoi(strings.TrimSpace(v.(string)))
 			*target = n
@@ -191,7 +192,7 @@ func stepContainerConcurrency(target *int) wizard.Step {
 		Prompt:      wizard.TextInputPrompt,
 		Required:    true,
 		Default:     func(_ map[string]any) any { return strconv.Itoa(*target) },
-		Validate:    parsePositiveIntValidator("concurrency"),
+		Validate:    parseIntRangeValidator("concurrency", 1, maxConcurrency),
 		Setter: func(v any) {
 			n, _ := strconv.Atoi(strings.TrimSpace(v.(string)))
 			*target = n
@@ -268,12 +269,12 @@ func stepContainerGPUUtil(target *int) wizard.Step {
 }
 
 // utilThresholdStep builds a step that asks "off | <threshold>" as a text
-// input. An empty value or "off" maps to 0; any integer in 1..100 enables
+// input. An empty value or "off" maps to 0; any integer in 5..100 enables
 // the trigger at that threshold. Shared by CPU and GPU util steps.
 func utilThresholdStep(name, desc string, target *int) wizard.Step {
 	return wizard.Step{
 		Name:        name,
-		Description: desc + " (blank = off; else 1..100)",
+		Description: fmt.Sprintf("%s (blank = off; else %d..%d)", desc, minUtilThreshold, maxUtilThreshold),
 		Prompt:      wizard.TextInputPrompt,
 		Required:    false,
 		Default: func(_ map[string]any) any {
@@ -288,8 +289,8 @@ func utilThresholdStep(name, desc string, target *int) wizard.Step {
 				return nil
 			}
 			n, err := strconv.Atoi(s)
-			if err != nil || n < 1 || n > 100 {
-				return errors.New("must be blank, 'off', or an integer in 1..100")
+			if err != nil || n < minUtilThreshold || n > maxUtilThreshold {
+				return fmt.Errorf("must be blank, 'off', or an integer in %d..%d", minUtilThreshold, maxUtilThreshold)
 			}
 			return nil
 		},
@@ -316,9 +317,9 @@ func utilThresholdStep(name, desc string, target *int) wizard.Step {
 // --- Scale-up / scale-down delays ---
 
 func stepContainerScaleUpDelay(target *time.Duration) wizard.Step {
-	return durationStep("scale-up-delay", "Scale-up delay", target, 0)
+	return durationStep("scale-up-delay", "Scale-up delay", target, 0, maxScalingDelay)
 }
 
 func stepContainerScaleDownDelay(target *time.Duration) wizard.Step {
-	return durationStep("scale-down-delay", "Scale-down delay", target, defaultScaleDownDelay)
+	return durationStep("scale-down-delay", "Scale-down delay", target, defaultScaleDownDelay, maxScalingDelay)
 }

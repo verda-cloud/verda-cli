@@ -129,7 +129,7 @@ func stepComputeSize(target *int) wizard.Step {
 			}
 			return "1"
 		},
-		Validate: parsePositiveIntValidator("compute size"),
+		Validate: parseIntRangeValidator("compute size", 1, maxComputeSize),
 		Setter: func(v any) {
 			n, _ := strconv.Atoi(strings.TrimSpace(v.(string)))
 			*target = n
@@ -203,7 +203,7 @@ func stepPort(target *int) wizard.Step {
 		Prompt:      wizard.TextInputPrompt,
 		Required:    true,
 		Default:     func(_ map[string]any) any { return strconv.Itoa(*target) },
-		Validate:    parsePortValidator("port"),
+		Validate:    parseIntRangeValidator("port", 1, maxPort),
 		Setter: func(v any) {
 			n, _ := strconv.Atoi(strings.TrimSpace(v.(string)))
 			*target = n
@@ -266,7 +266,7 @@ func stepMaxReplicas(target *int) wizard.Step {
 		Prompt:      wizard.TextInputPrompt,
 		Required:    true,
 		Default:     func(_ map[string]any) any { return strconv.Itoa(*target) },
-		Validate:    parsePositiveIntValidator("max replicas"),
+		Validate:    parseIntRangeValidator("max replicas", 1, maxReplicas),
 		Setter: func(v any) {
 			n, _ := strconv.Atoi(strings.TrimSpace(v.(string)))
 			*target = n
@@ -279,8 +279,13 @@ func stepMaxReplicas(target *int) wizard.Step {
 
 // --- Request TTL ---
 
-func stepRequestTTL(target *time.Duration) wizard.Step {
-	return durationStep("request-ttl", "Request time-to-live (pending queue)", target, defaultRequestTTL)
+// Container and job queues have different TTL ceilings.
+func stepContainerRequestTTL(target *time.Duration) wizard.Step {
+	return durationStep("request-ttl", "Request time-to-live (pending queue)", target, defaultRequestTTL, maxContainerRequestTTL)
+}
+
+func stepBatchjobRequestTTL(target *time.Duration) wizard.Step {
+	return durationStep("request-ttl", "Request time-to-live (pending queue)", target, defaultRequestTTL, maxBatchjobRequestTTL)
 }
 
 // --- Secret mounts (loop) ---
@@ -334,10 +339,10 @@ func stepSecretMounts(getClient clientFunc, cache *apiCache, target *[]string) w
 
 // durationStep builds a TextInput step that parses a Go duration (0s, 300s,
 // 5m, ...). Empty input resets to def.
-func durationStep(name, desc string, target *time.Duration, def time.Duration) wizard.Step {
+func durationStep(name, desc string, target *time.Duration, def, maxDur time.Duration) wizard.Step {
 	return wizard.Step{
 		Name:        name,
-		Description: desc + " (e.g. 0s, 300s, 5m)",
+		Description: desc + " (0s to " + shortDuration(maxDur) + ", e.g. 0s, 300s, 5m)",
 		Prompt:      wizard.TextInputPrompt,
 		Required:    false,
 		Default: func(_ map[string]any) any {
@@ -352,10 +357,10 @@ func durationStep(name, desc string, target *time.Duration, def time.Duration) w
 				return nil
 			}
 			d, err := time.ParseDuration(s)
-			if err != nil || d < 0 {
-				return errors.New("must be a non-negative duration (e.g. 0s, 300s, 5m)")
+			if err != nil {
+				return errors.New("must be a duration (e.g. 0s, 300s, 5m)")
 			}
-			return nil
+			return checkDurationRange(name, d, maxDur)
 		},
 		Setter: func(v any) {
 			s := strings.TrimSpace(v.(string))
@@ -374,31 +379,11 @@ func durationStep(name, desc string, target *time.Duration, def time.Duration) w
 
 // --- Validators (shared) ---
 
-func parsePositiveIntValidator(field string) func(any) error {
+func parseIntRangeValidator(field string, lo, hi int) func(any) error {
 	return func(v any) error {
 		n, err := strconv.Atoi(strings.TrimSpace(v.(string)))
-		if err != nil || n < 1 {
-			return fmt.Errorf("%s must be a positive integer", field)
-		}
-		return nil
-	}
-}
-
-func parseNonNegativeIntValidator(field string) func(any) error {
-	return func(v any) error {
-		n, err := strconv.Atoi(strings.TrimSpace(v.(string)))
-		if err != nil || n < 0 {
-			return fmt.Errorf("%s must be an integer >= 0", field)
-		}
-		return nil
-	}
-}
-
-func parsePortValidator(field string) func(any) error {
-	return func(v any) error {
-		n, err := strconv.Atoi(strings.TrimSpace(v.(string)))
-		if err != nil || n < 1 || n > 65535 {
-			return fmt.Errorf("%s must be an integer in 1..65535", field)
+		if err != nil || n < lo || n > hi {
+			return fmt.Errorf("%s must be an integer in %d..%d", field, lo, hi)
 		}
 		return nil
 	}

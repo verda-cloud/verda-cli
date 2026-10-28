@@ -63,11 +63,11 @@ verda container create \
 
 ### Other scaling flags
 
-- `--min-replicas` (default `0`, scale-to-zero) / `--max-replicas` (default `3`)
-- `--concurrency` (default `1` — set higher for LLMs, 1 for image generation)
-- `--cpu-util <pct>`, `--gpu-util <pct>` — enable the corresponding trigger (blank = off)
-- `--scale-up-delay`, `--scale-down-delay` (default `5m`) — hysteresis before scaling
-- `--request-ttl` (default `5m`) — how long a pending request may live before the queue drops it
+- `--min-replicas` (`0..1000`, default `0`, scale-to-zero) / `--max-replicas` (`1..1000`, default `3`)
+- `--concurrency` (`1..5000`, default `1` — set higher for LLMs, 1 for image generation)
+- `--cpu-util <pct>`, `--gpu-util <pct>` — enable the corresponding trigger at `5..100` (`0` or blank = off)
+- `--scale-up-delay`, `--scale-down-delay` (`0s` to `1h`, scale-down default `5m`) — hysteresis before scaling
+- `--request-ttl` (`0s` to `24h`, default `5m`) — how long a pending request may live before the queue drops it
 
 ### Healthcheck
 
@@ -126,8 +126,8 @@ verda batchjob create \
 
 ### Other scaling flags
 
-- `--max-replicas` (default `3`) — worker pool cap
-- `--request-ttl` (default `5m`) — how long a pending request may live in the queue before the server drops it
+- `--max-replicas` (`1..1000`, default `3`) — worker pool cap
+- `--request-ttl` (`0s` to `168h`, default `5m`) — how long a pending request may live in the queue before the server drops it
 
 ### Lifecycle
 

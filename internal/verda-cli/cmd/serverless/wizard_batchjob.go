@@ -43,7 +43,7 @@ func buildBatchjobCreateFlow(_ context.Context, getClient clientFunc, opts *batc
 			stepEnvVars(&opts.Env),
 			stepMaxReplicas(&opts.MaxReplicas),
 			stepBatchjobDeadline(&opts.Deadline),
-			stepRequestTTL(&opts.RequestTTL),
+			stepBatchjobRequestTTL(&opts.RequestTTL),
 			stepSecretMounts(getClient, cache, &opts.SecretMounts),
 		},
 	}

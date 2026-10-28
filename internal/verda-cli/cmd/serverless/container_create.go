@@ -138,30 +138,30 @@ func newCmdContainerCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobr
 	flags.BoolVar(&opts.Spot, "spot", false, "Use spot compute instead of on-demand")
 
 	flags.StringVar(&opts.Compute, "compute", "", "Compute resource name (e.g. RTX4500Ada, CPUNode)")
-	flags.IntVar(&opts.ComputeSize, "compute-size", 1, "Number of GPUs or vCPU cores per replica")
+	flags.IntVar(&opts.ComputeSize, "compute-size", 1, "Number of GPUs or vCPU cores per replica (1..128)")
 
 	flags.StringVar(&opts.RegistryCreds, "registry-creds", "", "Registry credentials name (empty = public)")
 	flags.BoolVar(&opts.RegistryPublic, "registry-public", false, "Pull image anonymously (default)")
 
 	flags.IntVar(&opts.Port, "port", opts.Port, "Exposed HTTP port")
 	flags.BoolVar(&opts.HealthcheckOff, "healthcheck-off", false, "Disable healthcheck (default: on at /health)")
-	flags.IntVar(&opts.HealthcheckPort, "healthcheck-port", 0, "Healthcheck HTTP port (defaults to --port)")
+	flags.IntVar(&opts.HealthcheckPort, "healthcheck-port", 0, "Healthcheck HTTP port (1..65535; defaults to --port)")
 	flags.StringVar(&opts.HealthcheckPath, "healthcheck-path", opts.HealthcheckPath, "Healthcheck HTTP path")
 	flags.StringArrayVar(&opts.Env, "env", nil, "Environment variable KEY=VALUE (KEY uppercase); repeat for multiple")
 	flags.StringArrayVar(&opts.EnvSecret, "env-secret", nil, "Secret-backed env KEY=SECRET_NAME (KEY uppercase); repeat for multiple")
 	flags.StringArrayVar(&opts.Entrypoint, "entrypoint", nil, "Override image ENTRYPOINT; repeat for multiple args")
 	flags.StringArrayVar(&opts.Cmd, "cmd", nil, "Override image CMD; repeat for multiple args")
 
-	flags.IntVar(&opts.MinReplicas, "min-replicas", opts.MinReplicas, "Minimum replica count (0 = scale-to-zero)")
-	flags.IntVar(&opts.MaxReplicas, "max-replicas", opts.MaxReplicas, "Maximum replica count")
-	flags.IntVar(&opts.Concurrency, "concurrency", opts.Concurrency, "Concurrent requests per replica")
+	flags.IntVar(&opts.MinReplicas, "min-replicas", opts.MinReplicas, "Minimum replica count (0..1000; 0 = scale-to-zero)")
+	flags.IntVar(&opts.MaxReplicas, "max-replicas", opts.MaxReplicas, "Maximum replica count (1..1000)")
+	flags.IntVar(&opts.Concurrency, "concurrency", opts.Concurrency, "Concurrent requests per replica (1..5000)")
 	flags.StringVar(&opts.QueuePreset, "queue-preset", opts.QueuePreset, "Scaling preset: instant | balanced | cost-saver | custom")
 	flags.IntVar(&opts.QueueLoad, "queue-load", 0, "Custom queue-load threshold (1..1000); sets --queue-preset=custom when used")
-	flags.IntVar(&opts.CPUUtil, "cpu-util", 0, "CPU utilization trigger threshold % (1..100); 0 = off")
-	flags.IntVar(&opts.GPUUtil, "gpu-util", 0, "GPU utilization trigger threshold % (1..100); 0 = off")
-	flags.DurationVar(&opts.ScaleUpDelay, "scale-up-delay", opts.ScaleUpDelay, "Delay before scaling up")
-	flags.DurationVar(&opts.ScaleDownDelay, "scale-down-delay", opts.ScaleDownDelay, "Delay before scaling down")
-	flags.DurationVar(&opts.RequestTTL, "request-ttl", opts.RequestTTL, "How long a pending request may live before deletion")
+	flags.IntVar(&opts.CPUUtil, "cpu-util", 0, "CPU utilization trigger threshold % (5..100); 0 = off")
+	flags.IntVar(&opts.GPUUtil, "gpu-util", 0, "GPU utilization trigger threshold % (5..100); 0 = off")
+	flags.DurationVar(&opts.ScaleUpDelay, "scale-up-delay", opts.ScaleUpDelay, "Delay before scaling up (0s to 1h)")
+	flags.DurationVar(&opts.ScaleDownDelay, "scale-down-delay", opts.ScaleDownDelay, "Delay before scaling down (0s to 1h)")
+	flags.DurationVar(&opts.RequestTTL, "request-ttl", opts.RequestTTL, "How long a pending request may live before deletion (0s to 24h)")
 
 	flags.StringArrayVar(&opts.SecretMounts, "secret-mount", nil, "Secret mount SECRET:MOUNT_PATH; repeat for multiple")
 
@@ -256,26 +256,25 @@ func (o *containerCreateOptions) validate() error {
 	if err := rejectLatestTag(o.Image); err != nil {
 		return err
 	}
-	if o.ComputeSize < 1 {
-		return errors.New("--compute-size must be >= 1")
+	if o.MaxReplicas < o.MinReplicas {
+		return errors.New("--max-replicas must be >= --min-replicas")
 	}
-	if o.MinReplicas < 0 {
-		return errors.New("--min-replicas must be >= 0")
-	}
-	if o.MaxReplicas < 1 || o.MaxReplicas < o.MinReplicas {
-		return errors.New("--max-replicas must be >= max(1, --min-replicas)")
-	}
-	if o.Concurrency < 1 {
-		return errors.New("--concurrency must be >= 1")
-	}
-	if o.Port < 1 || o.Port > 65535 {
-		return errors.New("--port must be in 1..65535")
-	}
-	if o.CPUUtil < 0 || o.CPUUtil > 100 {
-		return errors.New("--cpu-util must be in 0..100")
-	}
-	if o.GPUUtil < 0 || o.GPUUtil > 100 {
-		return errors.New("--gpu-util must be in 0..100")
+	for _, err := range []error{
+		checkIntRange("--compute-size", o.ComputeSize, 1, maxComputeSize),
+		checkIntRange("--min-replicas", o.MinReplicas, 0, maxReplicas),
+		checkIntRange("--max-replicas", o.MaxReplicas, 1, maxReplicas),
+		checkIntRange("--concurrency", o.Concurrency, 1, maxConcurrency),
+		checkIntRange("--port", o.Port, 1, maxPort),
+		checkIntRange("--healthcheck-port", o.HealthcheckPort, 0, maxPort),
+		checkUtilThreshold("--cpu-util", o.CPUUtil),
+		checkUtilThreshold("--gpu-util", o.GPUUtil),
+		checkDurationRange("--scale-up-delay", o.ScaleUpDelay, maxScalingDelay),
+		checkDurationRange("--scale-down-delay", o.ScaleDownDelay, maxScalingDelay),
+		checkDurationRange("--request-ttl", o.RequestTTL, maxContainerRequestTTL),
+	} {
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }
