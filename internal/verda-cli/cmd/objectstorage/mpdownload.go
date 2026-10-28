@@ -305,6 +305,10 @@ func downloadMissingChunks(ctx context.Context, client API, opts *resumableDownl
 				case <-ctx.Done():
 					return
 				}
+				// A failed worker stops: cancel() runs only after the consumer reads the error, too late to stop the next pull.
+				if err != nil {
+					return
+				}
 			}
 		})
 	}
