@@ -16,6 +16,7 @@ package vm
 
 import (
 	"context"
+	"slices"
 
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
 
@@ -31,7 +32,7 @@ func fetchInstances(ctx context.Context, f cmdutil.Factory, client *verda.Client
 	}
 
 	instances, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading instances...", func(ctx context.Context) ([]verda.Instance, error) {
-		return client.Instances.Get(ctx, apiStatus)
+		return client.Instances.List(ctx, &verda.ListInstancesOptions{Status: apiStatus})
 	})
 	if err != nil {
 		return nil, err
@@ -48,11 +49,8 @@ func fetchInstances(ctx context.Context, f cmdutil.Factory, client *verda.Client
 func filterByStatus(instances []verda.Instance, statuses []string) []verda.Instance {
 	filtered := make([]verda.Instance, 0, len(instances))
 	for i := range instances {
-		for _, s := range statuses {
-			if instances[i].Status == s { //nolint:gosec // i is bounded by range
-				filtered = append(filtered, instances[i]) //nolint:gosec // i is bounded by range
-				break
-			}
+		if slices.Contains(statuses, instances[i].Status) { //nolint:gosec // i is bounded by range
+			filtered = append(filtered, instances[i])
 		}
 	}
 	return filtered

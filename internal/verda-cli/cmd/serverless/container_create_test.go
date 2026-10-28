@@ -46,6 +46,17 @@ func validOpts() *containerCreateOptions {
 	}
 }
 
+// validOpts mirrors the create defaults; the SDK validates requests before sending.
+func TestContainerRequest_DefaultsPassSDKValidation(t *testing.T) {
+	req, err := validOpts().request()
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	if err := req.Validate(); err != nil {
+		t.Fatalf("SDK rejects default container request: %v", err)
+	}
+}
+
 func TestContainerRequest_HappyPath(t *testing.T) {
 	opts := validOpts()
 	req, err := opts.request()

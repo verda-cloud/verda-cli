@@ -462,7 +462,7 @@ func TestActionNameToAPI(t *testing.T) {
 	}{
 		{"start", verda.ActionStart},
 		{"shutdown", verda.ActionShutdown},
-		{"hibernate", verda.ActionHibernate},
+		{"hibernate", verda.ActionHibernate}, //nolint:staticcheck // SA1019: hibernate is deprecated but still supported
 		{"delete", verda.ActionDelete},
 		{"force_shutdown", verda.ActionForceShutdown},
 		{"force-shutdown", verda.ActionForceShutdown},

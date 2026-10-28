@@ -226,7 +226,7 @@ func TestMeter_SampleCapEnforced(t *testing.T) {
 		times[i] = base.Add(time.Duration(i) * time.Millisecond)
 	}
 	m := Meter{now: fakeClock(times...)}
-	for i := 0; i < 200; i++ {
+	for i := range 200 {
 		m.Update(int64(i*100), 1_000_000)
 	}
 	if got := len(m.samples); got > progressSampleCap {

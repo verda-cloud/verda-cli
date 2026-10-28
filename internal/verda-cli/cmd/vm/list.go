@@ -71,7 +71,7 @@ func runList(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams,
 	defer cancel()
 
 	instances, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading instances...", func(ctx context.Context) ([]verda.Instance, error) {
-		return client.Instances.Get(ctx, opts.Status)
+		return client.Instances.List(ctx, &verda.ListInstancesOptions{Status: opts.Status})
 	})
 	if err != nil {
 		return err

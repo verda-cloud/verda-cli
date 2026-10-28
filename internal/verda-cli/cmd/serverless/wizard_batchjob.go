@@ -43,15 +43,14 @@ func buildBatchjobCreateFlow(_ context.Context, getClient clientFunc, opts *batc
 			stepEnvVars(&opts.Env),
 			stepMaxReplicas(&opts.MaxReplicas),
 			stepBatchjobDeadline(&opts.Deadline),
-			stepRequestTTL(&opts.RequestTTL),
+			stepRequestTTL(&opts.RequestTTL, maxBatchjobRequestTTL),
 			stepSecretMounts(getClient, cache, &opts.SecretMounts),
 		},
 	}
 }
 
-// stepBatchjobDeadline asks for the per-request deadline. Required (> 0);
-// `JobScalingOptions.DeadlineSeconds` is rejected server-side when missing,
-// so we enforce it client-side for a friendlier error.
+// stepBatchjobDeadline asks for the per-request deadline. Required and checked
+// by validateBatchjobDeadline here; the SDK would reject it only after the whole wizard.
 func stepBatchjobDeadline(target *time.Duration) wizard.Step {
 	return wizard.Step{
 		Name:        "deadline",
@@ -62,7 +61,7 @@ func stepBatchjobDeadline(target *time.Duration) wizard.Step {
 			if *target > 0 {
 				return target.String()
 			}
-			return "5m"
+			return shortDuration(defaultBatchjobDeadline)
 		},
 		Validate: func(v any) error {
 			s := strings.TrimSpace(v.(string))
@@ -70,7 +69,7 @@ func stepBatchjobDeadline(target *time.Duration) wizard.Step {
 			if err != nil || d <= 0 {
 				return errors.New("deadline must be a positive duration (e.g. 5m, 30m, 1h)")
 			}
-			return nil
+			return validateBatchjobDeadline("deadline", d)
 		},
 		Setter: func(v any) {
 			d, _ := time.ParseDuration(strings.TrimSpace(v.(string)))

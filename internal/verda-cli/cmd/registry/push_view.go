@@ -343,13 +343,10 @@ func renderProgressBar(fraction float64, width int) string {
 	if fraction > 1 {
 		fraction = 1
 	}
-	filled := int(float64(width)*fraction + 0.0001) // tiny epsilon so 1.0 -> width
-	if filled > width {
-		filled = width
-	}
+	filled := min(int(float64(width)*fraction+0.0001), width) // tiny epsilon so 1.0 -> width
 	var b strings.Builder
 	b.Grow(width * len(pushBarFilled)) // approximate
-	for i := 0; i < filled; i++ {
+	for range filled {
 		b.WriteString(pushBarFilled)
 	}
 	for i := filled; i < width; i++ {

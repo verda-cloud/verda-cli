@@ -246,8 +246,8 @@ func (b *serverBehavior) handleRepositories(w http.ResponseWriter, r *http.Reque
 	}
 	q := r.URL.Query().Get("q")
 	wantPID := -1
-	if strings.HasPrefix(q, "project_id=") {
-		if n, err := strconv.Atoi(strings.TrimPrefix(q, "project_id=")); err == nil {
+	if after, ok := strings.CutPrefix(q, "project_id="); ok {
+		if n, err := strconv.Atoi(after); err == nil {
 			wantPID = n
 		}
 	}
@@ -392,8 +392,8 @@ func TestHarbor_ListRepositories_SiblingLeakDefended(t *testing.T) {
 // Page size is harborListerPageSize (100); we seed 101 rows so the loop
 // issues at least two GETs and terminates on the short page.
 func TestHarbor_ListRepositories_Paging(t *testing.T) {
-	var seeded []harborRepository
-	for i := 0; i < harborListerPageSize+1; i++ {
+	seeded := make([]harborRepository, 0, harborListerPageSize+1)
+	for i := range harborListerPageSize + 1 {
 		seeded = append(seeded, harborRepository{
 			Name:          fmt.Sprintf("abc/repo-%03d", i),
 			ProjectID:     42,
@@ -618,8 +618,8 @@ func TestHarbor_ListArtifacts_URLEscapesRepoSlash(t *testing.T) {
 // TestHarbor_ListArtifacts_Paging: seed > page-size and assert the
 // client issues multiple GETs and terminates on the short page.
 func TestHarbor_ListArtifacts_Paging(t *testing.T) {
-	var seeded []harborArtifact
-	for i := 0; i < harborListerPageSize+1; i++ {
+	seeded := make([]harborArtifact, 0, harborListerPageSize+1)
+	for i := range harborListerPageSize + 1 {
 		seeded = append(seeded, harborArtifact{
 			Digest: fmt.Sprintf("sha256:%064d", i),
 			Size:   int64(i),

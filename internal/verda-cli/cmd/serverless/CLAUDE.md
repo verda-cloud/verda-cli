@@ -97,7 +97,7 @@ Mount types in `ContainerVolumeMount.Type` that the CLI currently sends:
 
 ### Deadline is required for batchjob
 
-`JobScalingOptions.DeadlineSeconds` must be `> 0` — enforced in `batchjobCreateOptions.request()`, in the SDK via `ValidateCreateJobDeploymentRequest`, and listed in `missingBatchjobCreateFlags`. The batchjob wizard (when implemented — see Gotchas) must include a deadline prompt as a required field.
+`JobScalingOptions.DeadlineSeconds` has a range that the SDK enforces in `JobScalingOptions.Validate` (run by `CreateJobDeployment`) before the request is sent. The CLI mirrors it with `minBatchjobDeadline` / `maxBatchjobDeadline` in `validateBatchjobDeadline`, used by both `request()` and the wizard's deadline step, so a bad value fails at the prompt, not after the whole wizard. A missing deadline is listed in `missingBatchjobCreateFlags`. `defaultBatchjobDeadline` must stay inside the range — `TestBatchjobWizardDefaultDeadline_PassesSDKValidation` guards it.
 
 ### Action-command factory pattern
 
@@ -118,7 +118,7 @@ Describe cards (`renderContainerDeploymentCard`, `renderJobDeploymentCard`) prin
 - **Wizard omits the healthcheck-path step when healthcheck is Off.** The `healthcheck-path` step has `ShouldSkip: c["healthcheck"] == "off"`; the engine wires the skip gate via `DependsOn`. There is intentionally no `healthcheck-port` wizard step — `request()` always defaults the probe port to the exposed port (`hcPort = o.Port` when `HealthcheckPort == 0`). The `--healthcheck-port` flag still works for the rare case where the probe must hit a different port than the public listener.
 - **`registryPublicValue = "__public__"` sentinel.** The registry-creds step's loader prepends a "Public (no credentials)" choice with this sentinel as its Value. The Setter maps the sentinel back to `opts.RegistryCreds = ""`. If you rename the sentinel, grep both sides — the Setter reads the string literal.
 - **`compute-size` is a separate step from `compute`.** VM's wizard combines resource + count in a single step via in-Loader prompting; serverless keeps them separate so users can go back and change the size without re-picking the resource. Lower engineering cost, same UX.
-- **Util triggers off by default, but wizard asks anyway.** The CPU/GPU util steps accept empty ("off"), "off", or `1..100`. Setter maps empty/"off" to 0 (trigger disabled). Users should be able to Enter-through both without setting them.
+- **Util triggers off by default, but wizard asks anyway.** The CPU/GPU util steps accept empty ("off"), "off", or `minUtilThreshold..maxUtilThreshold`. Setter maps empty/"off" to 0 (trigger disabled). Users should be able to Enter-through both without setting them.
 - **Custom queue-load is a separate step.** `queue-load-custom` has `ShouldSkip: c["queue-preset"] != "custom"`. If the user goes back and changes preset to a named one, the engine's reset logic clears the custom value via `Resetter`.
 - **No `+ Create new` for registry creds in the wizard.** v1 intentionally omits the inline create-new sub-flow for registry credentials — users pick existing or Public. Adding new creds requires `verda registry configure` out-of-band, or a future top-level `verda registry-creds` command. The design doc notes this as future work.
 - **Confirm is NOT a wizard step.** `runContainerCreate` prints the summary + runs `prompter.Confirm` after `engine.Run` returns. Keeps the review card at full terminal width and lets us pipe through `--yes` cleanly. If you move it into the wizard, you lose layout control.

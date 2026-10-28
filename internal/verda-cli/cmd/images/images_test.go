@@ -94,7 +94,7 @@ func TestOutputShowsImageTypeNotID(t *testing.T) {
 	mockServer := testutil.NewMockServer()
 	defer mockServer.Close()
 
-	client := verda.NewTestClient(mockServer)
+	client := verda.NewTestClient(t, mockServer)
 
 	var buf bytes.Buffer
 	ioStreams := cmdutil.IOStreams{Out: &buf, ErrOut: &buf}

@@ -1,6 +1,6 @@
 module github.com/verda-cloud/verda-cli
 
-go 1.26.9
+go 1.26.10
 
 require (
 	charm.land/lipgloss/v2 v2.0.2
@@ -8,7 +8,7 @@ require (
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
 	github.com/spf13/viper v1.21.0
-	github.com/verda-cloud/verdacloud-sdk-go v1.4.2
+	github.com/verda-cloud/verdacloud-sdk-go v1.7.0
 	go.yaml.in/yaml/v3 v3.0.4
 )
 
@@ -65,7 +65,7 @@ require (
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
-	github.com/go-ozzo/ozzo-validation/v4 v4.3.0 // indirect
+	github.com/go-ozzo/ozzo-validation/v4 v4.4.1 // indirect
 	github.com/go-viper/mapstructure/v2 v2.4.0 // indirect
 	github.com/google/jsonschema-go v0.4.2 // indirect
 	github.com/google/uuid v1.6.0 // indirect

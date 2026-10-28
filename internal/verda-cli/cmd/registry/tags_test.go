@@ -301,7 +301,7 @@ func TestTags_LimitCapsMetadata(t *testing.T) {
 	}
 
 	// First 2 rows: HEAD was called → Digest set, Size > 0.
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		if payload.Tags[i].Digest == "" {
 			t.Errorf("row %d (%s): Digest empty, want populated (should be looked up)",
 				i, payload.Tags[i].Tag)

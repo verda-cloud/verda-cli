@@ -157,8 +157,8 @@ func newCmdContainerCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobr
 	flags.IntVar(&opts.Concurrency, "concurrency", opts.Concurrency, "Concurrent requests per replica")
 	flags.StringVar(&opts.QueuePreset, "queue-preset", opts.QueuePreset, "Scaling preset: instant | balanced | cost-saver | custom")
 	flags.IntVar(&opts.QueueLoad, "queue-load", 0, "Custom queue-load threshold (1..1000); sets --queue-preset=custom when used")
-	flags.IntVar(&opts.CPUUtil, "cpu-util", 0, "CPU utilization trigger threshold % (1..100); 0 = off")
-	flags.IntVar(&opts.GPUUtil, "gpu-util", 0, "GPU utilization trigger threshold % (1..100); 0 = off")
+	flags.IntVar(&opts.CPUUtil, "cpu-util", 0, fmt.Sprintf("CPU utilization trigger threshold %% (%d..%d); 0 = off", minUtilThreshold, maxUtilThreshold))
+	flags.IntVar(&opts.GPUUtil, "gpu-util", 0, fmt.Sprintf("GPU utilization trigger threshold %% (%d..%d); 0 = off", minUtilThreshold, maxUtilThreshold))
 	flags.DurationVar(&opts.ScaleUpDelay, "scale-up-delay", opts.ScaleUpDelay, "Delay before scaling up")
 	flags.DurationVar(&opts.ScaleDownDelay, "scale-down-delay", opts.ScaleDownDelay, "Delay before scaling down")
 	flags.DurationVar(&opts.RequestTTL, "request-ttl", opts.RequestTTL, "How long a pending request may live before deletion")
@@ -271,11 +271,20 @@ func (o *containerCreateOptions) validate() error {
 	if o.Port < 1 || o.Port > 65535 {
 		return errors.New("--port must be in 1..65535")
 	}
-	if o.CPUUtil < 0 || o.CPUUtil > 100 {
-		return errors.New("--cpu-util must be in 0..100")
-	}
-	if o.GPUUtil < 0 || o.GPUUtil > 100 {
-		return errors.New("--gpu-util must be in 0..100")
+	for _, err := range []error{
+		checkMax("--compute-size", o.ComputeSize, maxComputeSize),
+		checkMax("--min-replicas", o.MinReplicas, maxReplicas),
+		checkMax("--max-replicas", o.MaxReplicas, maxReplicas),
+		checkMax("--concurrency", o.Concurrency, maxConcurrency),
+		checkUtilThreshold("--cpu-util", o.CPUUtil),
+		checkUtilThreshold("--gpu-util", o.GPUUtil),
+		checkDurationRange("--scale-up-delay", o.ScaleUpDelay, maxScalingDelay),
+		checkDurationRange("--scale-down-delay", o.ScaleDownDelay, maxScalingDelay),
+		checkDurationRange("--request-ttl", o.RequestTTL, maxContainerRequestTTL),
+	} {
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }

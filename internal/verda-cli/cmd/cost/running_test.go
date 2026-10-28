@@ -23,13 +23,11 @@ import (
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
 
-func strPtr(s string) *string { return &s }
-
 func TestUniqueVolumeIDs(t *testing.T) {
 	t.Parallel()
 
 	inst := &verda.Instance{
-		OSVolumeID: strPtr("vol-os"),
+		OSVolumeID: new("vol-os"),
 		VolumeIDs:  []string{"vol-os", "vol-data", "vol-data"},
 	}
 

@@ -95,7 +95,7 @@ func runRunning(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStrea
 		sp, _ = status.Spinner(ctx, "Loading instances and volumes...")
 	}
 
-	instances, err := client.Instances.Get(ctx, "")
+	instances, err := client.Instances.List(ctx, nil)
 	if err != nil {
 		if sp != nil {
 			sp.Stop("")

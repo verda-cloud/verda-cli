@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -185,12 +186,7 @@ func applyTemplate(tmpl *template.Template, opts *createOptions, changed func(st
 // anyFlagChanged reports whether any of the named flags was explicitly set
 // (aliases are separate names on the same flag set).
 func anyFlagChanged(changed func(string) bool, names ...string) bool {
-	for _, n := range names {
-		if changed(n) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(names, changed)
 }
 
 // applyTemplateStorage applies the template's storage fields. Any explicit

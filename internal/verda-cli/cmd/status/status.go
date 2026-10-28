@@ -120,7 +120,7 @@ func runStatus(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 	go func() {
 		var r result
 		// Instances
-		r.instances, r.err = client.Instances.Get(ctx, "")
+		r.instances, r.err = client.Instances.List(ctx, nil)
 		if r.err != nil {
 			ch <- r
 			return

@@ -8,8 +8,11 @@ Go CLI for Verda Cloud. Cobra commands + Bubble Tea TUI + lipgloss styling.
 make build        # Build binary to ./bin/verda
 make test         # Run all tests (go test -race)
 make lint         # Lint only (golangci-lint); also run by pre-commit hooks
+make fix          # Apply go fix modernizers; CI runs `make fix.check`
 make pre-commit   # Full pre-commit suite
 ```
+
+The `go` directive in `go.mod` is the single source of the Go version: CI reads it via `go-version-file`, and the Makefile pins `GOTOOLCHAIN` to it for golangci-lint (version pinned in the Makefile) and `go fix`. After bumping `go` in `go.mod`, run `make fix` — new Go releases add fixers, and `fix.check` will fail until they're applied.
 
 Never use raw `go test ./...` — always `make test` (go test -race). Lint is separate: `make lint`; the pre-commit hooks run both.
 
@@ -140,7 +143,7 @@ The repo lints with `golangci-lint` via `make lint` (also enforced by the pre-co
 3. Read `.ai/skills/new-command.md` for the full checklist when adding/modifying commands
 4. If touching pricing, auth, or agent-mode: plan first, don't code immediately
 
-Per-command docs are auto-maintained by `/update-command-knowledge` skill.
+Per-command docs are maintained by the `/update-command-knowledge` skill. The `githooks/pre-commit` hook runs it only when `VERDA_DOC_UPDATE=1` is set.
 Manual update: `claude -p "/update-command-knowledge --all" --model sonnet --dangerously-skip-permissions`
 
 ## Thinking Depth
@@ -163,6 +166,7 @@ Before considering any change complete:
 make build                    # Must compile
 make test                     # Must pass (go test -race)
 make lint                     # Must pass (golangci-lint; also run by pre-commit hooks)
+make fix.check                # Must pass (go fix modernizers; `make fix` applies them)
 ```
 
 **Never** report work as complete with lint failures outstanding. Fix them before the "done" message; don't defer to the pre-commit hook. See the "Go House Style" section above for the patterns that prevent the common hits.

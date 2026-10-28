@@ -1,6 +1,13 @@
 OUTPUT_DIR ?= bin
 
-.PHONY: all build clean run.sandbox lint lint.fix security test test.integration test-s3-integration fmt changelog changelog.unreleased hooks.install pre-commit help
+# Single source of truth for the Go version: the go directive in go.mod (CI reads it via go-version-file).
+GO_VERSION := $(shell sed -n 's/^go //p' go.mod)
+GOLANGCI_LINT_VERSION := v2.5.0
+GOLANGCI_LINT := GOTOOLCHAIN=go$(GO_VERSION) go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
+# Toolchain pinned because each Go release adds or removes fixers; the integration tag brings tests/integration into scope.
+GOFIX := GOTOOLCHAIN=go$(GO_VERSION) go fix -tags=integration
+
+.PHONY: all build clean run.sandbox lint lint.fix security fix fix.check test test.integration test-s3-integration fmt changelog changelog.unreleased hooks.install pre-commit help
 
 ## Build -------------------------------------------------------------------
 
@@ -23,13 +30,22 @@ run.sandbox: build ## Run the binary against a throwaway config dir, e.g. make r
 ## Quality -----------------------------------------------------------------
 
 lint: ## Run golangci-lint on all packages
-	@golangci-lint run ./...
+	@$(GOLANGCI_LINT) run ./...
 
 lint.fix: ## Run golangci-lint with auto-fix
-	@golangci-lint run --fix ./...
+	@$(GOLANGCI_LINT) run --fix ./...
 
-security: ## Run gosec-only scan mirroring CI (ignores .golangci.yaml, so test files are scanned too)
-	@golangci-lint run --no-config -E gosec ./...
+# --default=none keeps golangci-lint's "standard" set out, so only gosec findings are reported.
+security: ## Run gosec-only scan, as CI does (ignores .golangci.yaml, so test files are scanned too)
+	@$(GOLANGCI_LINT) run --no-config --default=none -E gosec ./...
+
+# Two passes: applying one modernization can enable another (https://go.dev/blog/gofix).
+fix: ## Apply go fix modernizers
+	@$(GOFIX) ./...
+	@$(GOFIX) ./...
+
+fix.check: ## Fail if go fix has pending modernizations (CI)
+	@$(GOFIX) -diff ./... || { echo "Pending go fix changes. Run 'make fix'"; exit 1; }
 
 test: ## Run all tests (with race detector)
 	@go test -race -count=1 ./...

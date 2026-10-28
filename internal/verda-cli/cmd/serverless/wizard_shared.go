@@ -129,7 +129,7 @@ func stepComputeSize(target *int) wizard.Step {
 			}
 			return "1"
 		},
-		Validate: parsePositiveIntValidator("compute size"),
+		Validate: parsePositiveIntValidator("compute size", maxComputeSize),
 		Setter: func(v any) {
 			n, _ := strconv.Atoi(strings.TrimSpace(v.(string)))
 			*target = n
@@ -266,7 +266,7 @@ func stepMaxReplicas(target *int) wizard.Step {
 		Prompt:      wizard.TextInputPrompt,
 		Required:    true,
 		Default:     func(_ map[string]any) any { return strconv.Itoa(*target) },
-		Validate:    parsePositiveIntValidator("max replicas"),
+		Validate:    parsePositiveIntValidator("max replicas", maxReplicas),
 		Setter: func(v any) {
 			n, _ := strconv.Atoi(strings.TrimSpace(v.(string)))
 			*target = n
@@ -279,8 +279,8 @@ func stepMaxReplicas(target *int) wizard.Step {
 
 // --- Request TTL ---
 
-func stepRequestTTL(target *time.Duration) wizard.Step {
-	return durationStep("request-ttl", "Request time-to-live (pending queue)", target, defaultRequestTTL)
+func stepRequestTTL(target *time.Duration, maxTTL time.Duration) wizard.Step {
+	return durationStep("request-ttl", "Request time-to-live (pending queue)", target, defaultRequestTTL, maxTTL)
 }
 
 // --- Secret mounts (loop) ---
@@ -334,7 +334,7 @@ func stepSecretMounts(getClient clientFunc, cache *apiCache, target *[]string) w
 
 // durationStep builds a TextInput step that parses a Go duration (0s, 300s,
 // 5m, ...). Empty input resets to def.
-func durationStep(name, desc string, target *time.Duration, def time.Duration) wizard.Step {
+func durationStep(name, desc string, target *time.Duration, def, maxDur time.Duration) wizard.Step {
 	return wizard.Step{
 		Name:        name,
 		Description: desc + " (e.g. 0s, 300s, 5m)",
@@ -355,7 +355,7 @@ func durationStep(name, desc string, target *time.Duration, def time.Duration) w
 			if err != nil || d < 0 {
 				return errors.New("must be a non-negative duration (e.g. 0s, 300s, 5m)")
 			}
-			return nil
+			return checkDurationRange(name, d, maxDur)
 		},
 		Setter: func(v any) {
 			s := strings.TrimSpace(v.(string))
@@ -374,23 +374,23 @@ func durationStep(name, desc string, target *time.Duration, def time.Duration) w
 
 // --- Validators (shared) ---
 
-func parsePositiveIntValidator(field string) func(any) error {
+func parsePositiveIntValidator(field string, maxN int) func(any) error {
 	return func(v any) error {
 		n, err := strconv.Atoi(strings.TrimSpace(v.(string)))
 		if err != nil || n < 1 {
 			return fmt.Errorf("%s must be a positive integer", field)
 		}
-		return nil
+		return checkMax(field, n, maxN)
 	}
 }
 
-func parseNonNegativeIntValidator(field string) func(any) error {
+func parseNonNegativeIntValidator(field string, maxN int) func(any) error {
 	return func(v any) error {
 		n, err := strconv.Atoi(strings.TrimSpace(v.(string)))
 		if err != nil || n < 0 {
 			return fmt.Errorf("%s must be an integer >= 0", field)
 		}
-		return nil
+		return checkMax(field, n, maxN)
 	}
 }
 

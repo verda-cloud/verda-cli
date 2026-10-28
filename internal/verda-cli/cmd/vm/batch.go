@@ -280,7 +280,7 @@ func actionNameToAPI(action string) string {
 	case "force_shutdown", "force-shutdown":
 		return verda.ActionForceShutdown
 	case "hibernate":
-		return verda.ActionHibernate
+		return verda.ActionHibernate //nolint:staticcheck // SA1019: hibernate is deprecated but still supported
 	case actionNameDelete:
 		return verda.ActionDelete
 	default:

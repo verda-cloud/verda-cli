@@ -170,7 +170,7 @@ func (s *Server) resolveInstance(ctx context.Context, idOrHostname string) (*ver
 	}
 
 	// Fall back to searching by hostname.
-	instances, err := client.Instances.Get(ctx, "")
+	instances, err := client.Instances.List(ctx, nil)
 	if err != nil {
 		return nil, err
 	}

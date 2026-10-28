@@ -143,11 +143,10 @@ func hasProjectNamespace(host string) bool {
 // We only inspect the first segment; trailing tag/digest colons never appear
 // before the first "/" in a valid reference, so no pre-stripping is needed.
 func isShortRef(raw string) bool {
-	slash := strings.IndexByte(raw, '/')
-	if slash < 0 {
+	first, _, ok := strings.Cut(raw, "/")
+	if !ok {
 		return true
 	}
-	first := raw[:slash]
 	if first == localhostHost {
 		return false
 	}

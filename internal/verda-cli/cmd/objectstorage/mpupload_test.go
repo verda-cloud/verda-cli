@@ -19,6 +19,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"sync"
@@ -299,7 +300,7 @@ func TestResumableUpload_Resume_OnlyMissingParts(t *testing.T) {
 	if fake.uploadCalls != 2 {
 		t.Errorf("resume UploadPart calls = %d, want 2 (only missing 3,4)", fake.uploadCalls)
 	}
-	sort.Slice(fake.uploadOrder, func(i, j int) bool { return fake.uploadOrder[i] < fake.uploadOrder[j] })
+	slices.Sort(fake.uploadOrder)
 	if len(fake.uploadOrder) != 2 || fake.uploadOrder[0] != 3 || fake.uploadOrder[1] != 4 {
 		t.Errorf("resumed parts = %v, want [3 4]", fake.uploadOrder)
 	}

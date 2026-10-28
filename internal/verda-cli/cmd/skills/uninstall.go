@@ -258,14 +258,14 @@ func uninstallAppend(agent *Agent) error {
 	}
 
 	content := string(data)
-	startIdx := strings.Index(content, markerStart)
-	endIdx := strings.Index(content, markerEnd)
-	if startIdx < 0 || endIdx < 0 {
+	before, _, okStart := strings.Cut(content, markerStart)
+	_, after, okEnd := strings.Cut(content, markerEnd)
+	if !okStart || !okEnd {
 		return nil
 	}
 
-	before := strings.TrimRight(content[:startIdx], "\n")
-	after := strings.TrimLeft(content[endIdx+len(markerEnd):], "\n")
+	before = strings.TrimRight(before, "\n")
+	after = strings.TrimLeft(after, "\n")
 
 	var result string
 	switch {

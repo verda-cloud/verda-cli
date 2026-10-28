@@ -297,9 +297,7 @@ func downloadMissingChunks(ctx context.Context, client API, opts *resumableDownl
 	results := make(chan downloadChunkResult)
 	var wg sync.WaitGroup
 	for range concurrency {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for n := range jobs {
 				err := downloadOneChunk(ctx, client, opts.Bucket, opts.Key, etag, file, n, total, partSize)
 				select {
@@ -307,8 +305,12 @@ func downloadMissingChunks(ctx context.Context, client API, opts *resumableDownl
 				case <-ctx.Done():
 					return
 				}
+				// A failed worker stops: cancel() runs only after the consumer reads the error, too late to stop the next pull.
+				if err != nil {
+					return
+				}
 			}
-		}()
+		})
 	}
 	go func() {
 		defer close(jobs)

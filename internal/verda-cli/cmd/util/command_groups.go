@@ -16,6 +16,7 @@ package util
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -44,10 +45,8 @@ func (g CommandGroups) Add(c *cobra.Command) {
 // Has returns true if c belongs to any group.
 func (g CommandGroups) Has(c *cobra.Command) bool {
 	for _, group := range g {
-		for _, cmd := range group.Commands {
-			if cmd == c {
-				return true
-			}
+		if slices.Contains(group.Commands, c) {
+			return true
 		}
 	}
 	return false

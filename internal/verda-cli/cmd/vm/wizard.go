@@ -588,7 +588,8 @@ func stepStorage(getClient clientFunc, cache *apiCache, opts *createOptions) wiz
 				default: // "done"
 					// Write the collected volumes to opts.
 					specs := make([]string, len(volumes))
-					for i, v := range volumes {
+					for i := range volumes {
+						v := &volumes[i]
 						specs[i] = fmt.Sprintf("%s:%d:%s", v.Name, v.Size, v.Type)
 					}
 					opts.VolumeSpecs = specs

@@ -52,6 +52,20 @@ type batchjobCreateOptions struct {
 	Yes bool
 }
 
+// Deadline bounds match the SDK's JobScalingOptions.Validate, which rejects the request before it is sent.
+const (
+	minBatchjobDeadline     = 10 * time.Minute
+	maxBatchjobDeadline     = 7 * 24 * time.Hour
+	defaultBatchjobDeadline = 30 * time.Minute
+)
+
+func validateBatchjobDeadline(name string, d time.Duration) error {
+	if d < minBatchjobDeadline || d > maxBatchjobDeadline {
+		return fmt.Errorf("%s must be between %s and %s", name, shortDuration(minBatchjobDeadline), shortDuration(maxBatchjobDeadline))
+	}
+	return nil
+}
+
 func newCmdBatchjobCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 	opts := &batchjobCreateOptions{
 		Port:        defaultExposedPort,
@@ -200,8 +214,20 @@ func (o *batchjobCreateOptions) request() (*verda.CreateJobDeploymentRequest, er
 	if o.Deadline <= 0 {
 		return nil, errors.New("--deadline must be > 0")
 	}
+	if err := validateBatchjobDeadline("--deadline", o.Deadline); err != nil {
+		return nil, err
+	}
 	if o.Port < 1 || o.Port > 65535 {
 		return nil, errors.New("--port must be in 1..65535")
+	}
+	for _, err := range []error{
+		checkMax("--compute-size", o.ComputeSize, maxComputeSize),
+		checkMax("--max-replicas", o.MaxReplicas, maxReplicas),
+		checkDurationRange("--request-ttl", o.RequestTTL, maxBatchjobRequestTTL),
+	} {
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	env, err := buildEnvVars(o.Env, o.EnvSecret)

@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"time"
 
 	"github.com/spf13/pflag"
@@ -262,10 +263,8 @@ func resolveDefaultProfile(credentialsFile string) string {
 	}
 
 	// If "default" profile exists, use it.
-	for _, p := range profiles {
-		if p == defaultCredentialsProfile {
-			return defaultCredentialsProfile
-		}
+	if slices.Contains(profiles, defaultCredentialsProfile) {
+		return defaultCredentialsProfile
 	}
 
 	// If there's exactly one profile, use it automatically.

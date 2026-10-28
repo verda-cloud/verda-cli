@@ -342,10 +342,10 @@ func (o *createOptions) request() (verda.CreateInstanceRequest, error) {
 	}
 
 	if o.StartupScriptID != "" {
-		req.StartupScriptID = stringPtr(o.StartupScriptID)
+		req.StartupScriptID = new(o.StartupScriptID)
 	}
 	if o.Coupon != "" {
-		req.Coupon = stringPtr(o.Coupon)
+		req.Coupon = new(o.Coupon)
 	}
 	if o.OSVolumeName != "" || o.OSVolumeSize > 0 || o.OSVolumeOnSpotDiscontinue != "" {
 		if o.OSVolumeSize <= 0 {
@@ -500,8 +500,4 @@ func appendStorageVolume(volumes []verda.VolumeCreateRequest, o *createOptions) 
 	}
 
 	return append(volumes, volume), nil
-}
-
-func stringPtr(v string) *string {
-	return &v
 }

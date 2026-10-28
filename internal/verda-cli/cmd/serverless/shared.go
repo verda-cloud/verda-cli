@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"charm.land/lipgloss/v2"
 	"github.com/verda-cloud/verda-cli/pkg/tui"
@@ -27,6 +28,53 @@ import (
 
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
+
+// Create-request limits; keep in sync with the SDK, which rejects values outside them before sending.
+const (
+	maxComputeSize         = 128
+	maxReplicas            = 1000
+	maxConcurrency         = 5000
+	minUtilThreshold       = 5
+	maxUtilThreshold       = 100
+	maxScalingDelay        = time.Hour
+	maxContainerRequestTTL = 24 * time.Hour
+	maxBatchjobRequestTTL  = 7 * 24 * time.Hour
+)
+
+func checkMax(name string, n, maxN int) error {
+	if n > maxN {
+		return fmt.Errorf("%s must be <= %d", name, maxN)
+	}
+	return nil
+}
+
+// checkUtilThreshold: 0 disables the trigger.
+func checkUtilThreshold(name string, n int) error {
+	if n != 0 && (n < minUtilThreshold || n > maxUtilThreshold) {
+		return fmt.Errorf("%s must be 0 (off) or in %d..%d", name, minUtilThreshold, maxUtilThreshold)
+	}
+	return nil
+}
+
+// checkDurationRange compares whole seconds, which is what the request carries.
+func checkDurationRange(name string, d, maxD time.Duration) error {
+	if d < 0 || int(d.Seconds()) > int(maxD.Seconds()) {
+		return fmt.Errorf("%s must be between 0s and %s", name, shortDuration(maxD))
+	}
+	return nil
+}
+
+// shortDuration drops zero tails: 1h0m0s -> 1h, 10m0s -> 10m.
+func shortDuration(d time.Duration) string {
+	s := d.String()
+	if strings.HasSuffix(s, "m0s") {
+		s = s[:len(s)-2]
+	}
+	if strings.HasSuffix(s, "h0m") {
+		s = s[:len(s)-2]
+	}
+	return s
+}
 
 // deploymentNameRE: lowercase DNS-label subset (max 63) enforced by the API for URL slugs.
 var deploymentNameRE = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)

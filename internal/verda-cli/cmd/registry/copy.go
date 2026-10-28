@@ -931,14 +931,8 @@ type copyJobResult struct {
 //     capped at 4. The cap keeps a 32-core laptop from DoSing a small
 //     registry while still giving slow links a useful speedup.
 func resolveImageJobs(userValue, tagCount, hwConcurrency int) int {
-	hw := hwConcurrency
-	if hw < 1 {
-		hw = 1
-	}
-	maxAllowed := hw
-	if maxAllowed > 8 {
-		maxAllowed = 8
-	}
+	hw := max(hwConcurrency, 1)
+	maxAllowed := min(hw, 8)
 	if userValue > 0 {
 		if userValue > maxAllowed {
 			return maxAllowed
@@ -948,10 +942,7 @@ func resolveImageJobs(userValue, tagCount, hwConcurrency int) int {
 	if tagCount < 4 {
 		return 1
 	}
-	half := hw / 2
-	if half < 1 {
-		half = 1
-	}
+	half := max(hw/2, 1)
 	if half > 4 {
 		return 4
 	}
@@ -1289,15 +1280,13 @@ func runCopyAllTagsPool(
 	resultsCh := make(chan copyJobResult, len(tags))
 
 	var wg sync.WaitGroup
-	for w := 0; w < imageJobs; w++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range imageJobs {
+		wg.Go(func() {
 			for j := range jobs {
 				r := copyOneTag(ctx, program, srcReg, dstReg, srcBase, dstBase, j, opts, creds)
 				resultsCh <- r
 			}
-		}()
+		})
 	}
 
 	// Producer: fans tags into jobs, closes the channel once exhausted.

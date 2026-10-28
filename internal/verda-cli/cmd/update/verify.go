@@ -111,7 +111,7 @@ func findMatchingChecksum(body, goos, goarch string) (string, error) {
 	// Match "verda_<os>_<arch>" followed by "/" or "_" (variant suffix).
 	prefix := fmt.Sprintf("verda_%s_%s", goos, goarch)
 
-	for _, line := range strings.Split(body, "\n") {
+	for line := range strings.SplitSeq(body, "\n") {
 		hexStr, key, ok := parseChecksumLine(line)
 		if !ok {
 			continue
@@ -133,7 +133,7 @@ func findMatchingChecksum(body, goos, goarch string) (string, error) {
 // file (verda_<VER>_SHA256SUMS). Unlike findMatchingChecksum (dist-dir keys
 // with variant suffixes), archive keys match exactly.
 func findArchiveChecksum(body, artifactName string) (string, error) {
-	for _, line := range strings.Split(body, "\n") {
+	for line := range strings.SplitSeq(body, "\n") {
 		hexStr, key, ok := parseChecksumLine(line)
 		if !ok {
 			continue

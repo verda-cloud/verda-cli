@@ -17,6 +17,7 @@ package registry
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -408,10 +409,8 @@ func lookupArtifact(ctx context.Context, lister RepositoryLister, projectName, r
 		if isDigest && strings.HasPrefix(arts[i].Digest, reference) {
 			return &arts[i]
 		}
-		for _, t := range arts[i].Tags {
-			if t == reference {
-				return &arts[i]
-			}
+		if slices.Contains(arts[i].Tags, reference) {
+			return &arts[i]
 		}
 	}
 	return nil
