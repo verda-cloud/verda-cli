@@ -100,59 +100,67 @@ func NewStartupScriptViews(scripts []verda.StartupScript) []StartupScriptView {
 // verda.Instance field; TestInstanceViewCoversSDKFields guards against drift.
 // Nested types are reused from the SDK — none carries a zero-time field.
 type InstanceView struct {
-	ID              string                `json:"id"                   yaml:"id"`
-	IP              *string               `json:"ip"                   yaml:"ip"`
-	Status          string                `json:"status"               yaml:"status"`
-	CreatedAt       *time.Time            `json:"created_at,omitempty" yaml:"created_at,omitempty"`
-	CPU             verda.InstanceCPU     `json:"cpu"                  yaml:"cpu"`
-	GPU             verda.InstanceGPU     `json:"gpu"                  yaml:"gpu"`
-	GPUMemory       verda.InstanceMemory  `json:"gpu_memory"           yaml:"gpu_memory"`
-	Memory          verda.InstanceMemory  `json:"memory"               yaml:"memory"`
-	Storage         verda.InstanceStorage `json:"storage"              yaml:"storage"`
-	Hostname        string                `json:"hostname"             yaml:"hostname"`
-	Description     string                `json:"description"          yaml:"description"`
-	Location        string                `json:"location"             yaml:"location"`
-	PricePerHour    verda.FlexibleFloat   `json:"price_per_hour"       yaml:"price_per_hour"`
-	IsSpot          bool                  `json:"is_spot"              yaml:"is_spot"`
-	InstanceType    string                `json:"instance_type"        yaml:"instance_type"`
-	Image           string                `json:"image"                yaml:"image"`
-	OSName          string                `json:"os_name"              yaml:"os_name"`
-	StartupScriptID *string               `json:"startup_script_id"    yaml:"startup_script_id"`
-	SSHKeyIDs       []string              `json:"ssh_key_ids"          yaml:"ssh_key_ids"`
-	OSVolumeID      *string               `json:"os_volume_id"         yaml:"os_volume_id"`
-	JupyterToken    string                `json:"jupyter_token"        yaml:"jupyter_token"`
-	Contract        string                `json:"contract"             yaml:"contract"`
-	Pricing         string                `json:"pricing"              yaml:"pricing"`
-	VolumeIDs       []string              `json:"volume_ids"           yaml:"volume_ids"`
+	ID               string                `json:"id"                   yaml:"id"`
+	IP               *string               `json:"ip"                   yaml:"ip"`
+	PrivateIP        *string               `json:"private_ip" yaml:"private_ip"`
+	PrivateNetworkID *string               `json:"private_network_id" yaml:"private_network_id"`
+	SubnetID         *string               `json:"subnet_id" yaml:"subnet_id"`
+	Status           string                `json:"status"               yaml:"status"`
+	CreatedAt        *time.Time            `json:"created_at,omitempty" yaml:"created_at,omitempty"`
+	CPU              verda.InstanceCPU     `json:"cpu"                  yaml:"cpu"`
+	GPU              verda.InstanceGPU     `json:"gpu"                  yaml:"gpu"`
+	GPUMemory        verda.InstanceMemory  `json:"gpu_memory"           yaml:"gpu_memory"`
+	Memory           verda.InstanceMemory  `json:"memory"               yaml:"memory"`
+	Storage          verda.InstanceStorage `json:"storage"              yaml:"storage"`
+	Hostname         string                `json:"hostname"             yaml:"hostname"`
+	Description      string                `json:"description"          yaml:"description"`
+	Location         string                `json:"location"             yaml:"location"`
+	PricePerHour     verda.FlexibleFloat   `json:"price_per_hour"       yaml:"price_per_hour"`
+	IsSpot           bool                  `json:"is_spot"              yaml:"is_spot"`
+	InstanceType     string                `json:"instance_type"        yaml:"instance_type"`
+	Image            string                `json:"image"                yaml:"image"`
+	OSName           string                `json:"os_name"              yaml:"os_name"`
+	StartupScriptID  *string               `json:"startup_script_id"    yaml:"startup_script_id"`
+	SSHKeyIDs        []string              `json:"ssh_key_ids"          yaml:"ssh_key_ids"`
+	OSVolumeID       *string               `json:"os_volume_id"         yaml:"os_volume_id"`
+	JupyterToken     string                `json:"jupyter_token"        yaml:"jupyter_token"`
+	Contract         string                `json:"contract"             yaml:"contract"`
+	Pricing          string                `json:"pricing"              yaml:"pricing"`
+	VolumeIDs        []string              `json:"volume_ids"           yaml:"volume_ids"`
+	Tags             []verda.Tag           `json:"tags" yaml:"tags"`
 }
 
 // NewInstanceView converts one SDK instance to its output shape.
 func NewInstanceView(i *verda.Instance) InstanceView {
 	return InstanceView{
-		ID:              i.ID,
-		IP:              i.IP,
-		Status:          i.Status,
-		CreatedAt:       nilIfZero(i.CreatedAt),
-		CPU:             i.CPU,
-		GPU:             i.GPU,
-		GPUMemory:       i.GPUMemory,
-		Memory:          i.Memory,
-		Storage:         i.Storage,
-		Hostname:        i.Hostname,
-		Description:     i.Description,
-		Location:        i.Location,
-		PricePerHour:    i.PricePerHour,
-		IsSpot:          i.IsSpot,
-		InstanceType:    i.InstanceType,
-		Image:           i.Image,
-		OSName:          i.OSName,
-		StartupScriptID: i.StartupScriptID,
-		SSHKeyIDs:       i.SSHKeyIDs,
-		OSVolumeID:      i.OSVolumeID,
-		JupyterToken:    i.JupyterToken,
-		Contract:        i.Contract,
-		Pricing:         i.Pricing,
-		VolumeIDs:       i.VolumeIDs,
+		ID:               i.ID,
+		IP:               i.IP,
+		PrivateIP:        i.PrivateIP,
+		PrivateNetworkID: i.PrivateNetworkID,
+		SubnetID:         i.SubnetID,
+		Status:           i.Status,
+		CreatedAt:        nilIfZero(i.CreatedAt),
+		CPU:              i.CPU,
+		GPU:              i.GPU,
+		GPUMemory:        i.GPUMemory,
+		Memory:           i.Memory,
+		Storage:          i.Storage,
+		Hostname:         i.Hostname,
+		Description:      i.Description,
+		Location:         i.Location,
+		PricePerHour:     i.PricePerHour,
+		IsSpot:           i.IsSpot,
+		InstanceType:     i.InstanceType,
+		Image:            i.Image,
+		OSName:           i.OSName,
+		StartupScriptID:  i.StartupScriptID,
+		SSHKeyIDs:        i.SSHKeyIDs,
+		OSVolumeID:       i.OSVolumeID,
+		JupyterToken:     i.JupyterToken,
+		Contract:         i.Contract,
+		Pricing:          i.Pricing,
+		VolumeIDs:        i.VolumeIDs,
+		Tags:             i.Tags,
 	}
 }
 
@@ -189,6 +197,7 @@ type VolumeView struct {
 	MonthlyPrice             float64                        `json:"monthly_price"               yaml:"monthly_price"`
 	Currency                 string                         `json:"currency"                    yaml:"currency"`
 	LongTerm                 *verda.VolumeLongTerm          `json:"long_term"                   yaml:"long_term"`
+	Tags                     []verda.Tag                    `json:"tags" yaml:"tags"`
 }
 
 // NewVolumeView converts one SDK volume to its output shape.
@@ -215,6 +224,7 @@ func NewVolumeView(v *verda.Volume) VolumeView {
 		MonthlyPrice:             v.MonthlyPrice,
 		Currency:                 v.Currency,
 		LongTerm:                 v.LongTerm,
+		Tags:                     v.Tags,
 	}
 }
 
@@ -249,6 +259,7 @@ type VolumeInTrashView struct {
 	MonthlyPrice         float64                        `json:"monthly_price"          yaml:"monthly_price"`
 	Currency             string                         `json:"currency"               yaml:"currency"`
 	IsPermanentlyDeleted bool                           `json:"is_permanently_deleted" yaml:"is_permanently_deleted"`
+	Tags                 []verda.Tag                    `json:"tags" yaml:"tags"`
 }
 
 // NewVolumeInTrashView converts one SDK trashed volume to its output shape.
@@ -272,6 +283,7 @@ func NewVolumeInTrashView(v *verda.VolumeInTrash) VolumeInTrashView {
 		MonthlyPrice:         v.MonthlyPrice,
 		Currency:             v.Currency,
 		IsPermanentlyDeleted: v.IsPermanentlyDeleted,
+		Tags:                 v.Tags,
 	}
 }
 

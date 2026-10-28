@@ -46,7 +46,7 @@ var shortcuts = []shortcutDef{
 	{
 		Use:    "hibernate <instance-id>",
 		Short:  "Hibernate a VM instance (deprecated, will be removed in a future version)",
-		Action: verda.ActionHibernate,
+		Action: verda.ActionHibernate, //nolint:staticcheck // SA1019: hibernate is deprecated but still supported
 	},
 	{
 		Use:     "delete <instance-id>",

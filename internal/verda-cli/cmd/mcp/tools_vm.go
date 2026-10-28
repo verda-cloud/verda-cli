@@ -215,7 +215,7 @@ func (s *Server) handleListVMs(ctx context.Context, req mcp.CallToolRequest) (*m
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	instances, err := client.Instances.Get(ctx, status)
+	instances, err := client.Instances.List(ctx, &verda.ListInstancesOptions{Status: status})
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -434,10 +434,10 @@ var vmActions = map[string]vmAction{
 		destructive:  true,
 		exec:         func(ctx context.Context, c *verda.Client, id string) error { return c.Instances.ForceShutdown(ctx, id) },
 	},
-	verda.ActionHibernate: {
+	verda.ActionHibernate: { //nolint:staticcheck // SA1019: hibernate is deprecated but still supported
 		expectStatus: verda.StatusOffline,
 		destructive:  true,
-		exec:         func(ctx context.Context, c *verda.Client, id string) error { return c.Instances.Hibernate(ctx, id) },
+		exec:         func(ctx context.Context, c *verda.Client, id string) error { return c.Instances.Hibernate(ctx, id) }, //nolint:staticcheck // SA1019: hibernate is deprecated but still supported
 	},
 	verda.ActionDelete: {
 		destructive: true,

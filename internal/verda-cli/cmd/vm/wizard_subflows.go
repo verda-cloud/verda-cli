@@ -305,7 +305,8 @@ func buildStorageChoices(volumes []verda.VolumeCreateRequest, existingIDs []stri
 
 	// Show already-added volumes.
 	if hasVolumes {
-		for _, v := range volumes {
+		for i := range volumes {
+			v := &volumes[i]
 			choices = append(choices, wizard.Choice{
 				Label: fmt.Sprintf("  New: %s (%dGB %s)", v.Name, v.Size, v.Type),
 				Value: "__info__",

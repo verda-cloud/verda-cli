@@ -114,7 +114,7 @@ func runSSH(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, 
 	if status := f.Status(); status != nil {
 		sp, _ = status.Spinner(ctx, "Resolving instance...")
 	}
-	instances, err := client.Instances.Get(ctx, "")
+	instances, err := client.Instances.List(ctx, nil)
 	if sp != nil {
 		sp.Stop("")
 	}

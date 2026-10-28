@@ -33,7 +33,7 @@ var actionNameMap = map[string]string{
 	verda.ActionShutdown:      "Shutdown",
 	verda.ActionForceShutdown: "Force shutdown",
 	"force-shutdown":          "Force shutdown", // CLI alias (hyphenated)
-	verda.ActionHibernate:     "Hibernate",
+	verda.ActionHibernate:     "Hibernate",      //nolint:staticcheck // SA1019: hibernate is deprecated but still supported
 	verda.ActionDelete:        "Delete instance",
 }
 
@@ -83,7 +83,7 @@ var allActions = []instanceAction{
 		ConfirmMsg:   "Hibernate does not save runtime state or support resuming the instance.",
 		ExpectStatus: verda.StatusOffline,
 		Execute: func(ctx context.Context, c *verda.Client, inst *verda.Instance) error {
-			return c.Instances.Hibernate(ctx, inst.ID)
+			return c.Instances.Hibernate(ctx, inst.ID) //nolint:staticcheck // SA1019: hibernate is deprecated but still supported
 		},
 	},
 	{
@@ -454,7 +454,7 @@ func selectAction(ctx context.Context, ioStreams cmdutil.IOStreams, prompter tui
 	actionLabels := make([]string, 0, len(validActions)+1)
 	for _, a := range validActions {
 		label := a.Label
-		if label == actionNameMap[verda.ActionHibernate] {
+		if label == actionNameMap[verda.ActionHibernate] { //nolint:staticcheck // SA1019: hibernate is deprecated but still supported
 			label += " (deprecated)"
 		}
 		actionLabels = append(actionLabels, label)
@@ -606,7 +606,7 @@ func confirmDestructive(ctx context.Context, ioStreams cmdutil.IOStreams, prompt
 }
 
 func warnDeprecatedAction(ioStreams cmdutil.IOStreams, label string) {
-	if label == actionNameMap[verda.ActionHibernate] {
+	if label == actionNameMap[verda.ActionHibernate] { //nolint:staticcheck // SA1019: hibernate is deprecated but still supported
 		_, _ = fmt.Fprintln(ioStreams.ErrOut, "Warning: hibernate is deprecated and will be removed in a future version. It discontinues compute and retains volumes. Retained volumes continue billing.")
 	}
 }

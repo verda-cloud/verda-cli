@@ -188,7 +188,7 @@ func (s *Server) handleGetRunningCosts(ctx context.Context, _ mcp.CallToolReques
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
-	instances, err := client.Instances.Get(ctx, "running")
+	instances, err := client.Instances.List(ctx, &verda.ListInstancesOptions{Status: "running"})
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
