@@ -167,8 +167,8 @@ func parseOlderThan(s string) (time.Duration, error) {
 	if s == "" {
 		return 0, nil
 	}
-	if strings.HasSuffix(s, "d") {
-		days, err := strconv.ParseFloat(strings.TrimSuffix(s, "d"), 64)
+	if before, ok := strings.CutSuffix(s, "d"); ok {
+		days, err := strconv.ParseFloat(before, 64)
 		if err != nil || days < 0 {
 			return 0, fmt.Errorf("invalid duration %q", s)
 		}

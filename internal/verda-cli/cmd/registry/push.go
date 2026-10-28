@@ -837,8 +837,8 @@ func defaultRepoFromPath(p string) string {
 		return ""
 	}
 	for _, ext := range []string{".tar.gz", ".tgz", ".tar", ".oci"} {
-		if strings.HasSuffix(base, ext) {
-			return strings.TrimSuffix(base, ext)
+		if before, ok := strings.CutSuffix(base, ext); ok {
+			return before
 		}
 	}
 	return base

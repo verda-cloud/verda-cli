@@ -51,10 +51,8 @@ func TestLazyClientInitConcurrent(t *testing.T) {
 	const workers = 16
 	var wg sync.WaitGroup
 	errs := make(chan error, workers)
-	for i := 0; i < workers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range workers {
+		wg.Go(func() {
 			c, err := s.verdaClient()
 			if err != nil {
 				errs <- err
@@ -63,7 +61,7 @@ func TestLazyClientInitConcurrent(t *testing.T) {
 			if c != client {
 				errs <- errors.New("verdaClient returned the wrong client instance")
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	close(errs)

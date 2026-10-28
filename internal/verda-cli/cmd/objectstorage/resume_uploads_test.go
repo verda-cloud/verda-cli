@@ -19,7 +19,7 @@ package objectstorage
 import (
 	"bytes"
 	"context"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -132,7 +132,7 @@ func TestResumeServerUpload(t *testing.T) {
 	if fake.createCalls != 0 {
 		t.Errorf("CreateMultipartUpload called %d times, want 0 (must adopt the existing UploadId)", fake.createCalls)
 	}
-	sort.Slice(fake.uploaded, func(i, j int) bool { return fake.uploaded[i] < fake.uploaded[j] })
+	slices.Sort(fake.uploaded)
 	if len(fake.uploaded) != 2 || fake.uploaded[0] != 3 || fake.uploaded[1] != 4 {
 		t.Errorf("uploaded parts = %v, want [3 4] (only the missing ones)", fake.uploaded)
 	}

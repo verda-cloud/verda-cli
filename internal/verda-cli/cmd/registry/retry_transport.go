@@ -227,14 +227,8 @@ func (t *retryTransport) classify(resp *http.Response, err error) (bool, time.Du
 func (t *retryTransport) backoff(attempt int) time.Duration {
 	// exp = BaseDelay * 2^(attempt-1). Cap at MaxInterval before
 	// adding jitter so the pre-jitter component is predictable.
-	shift := attempt - 1
-	if shift < 0 {
-		shift = 0
-	}
-	// Guard against overflow on absurd MaxAttempts values.
-	if shift > 20 {
-		shift = 20
-	}
+	// Cap at 20 to guard against overflow on absurd MaxAttempts values.
+	shift := min(max(attempt-1, 0), 20)
 	exp := t.cfg.BaseDelay << shift
 	if exp <= 0 || exp > t.cfg.MaxInterval {
 		exp = t.cfg.MaxInterval

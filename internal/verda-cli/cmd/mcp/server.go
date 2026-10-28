@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 
@@ -288,10 +289,8 @@ func optionalEnum(a map[string]any, name string, allowed ...string) (string, err
 	if err != nil || s == "" {
 		return "", err
 	}
-	for _, allow := range allowed {
-		if s == allow {
-			return s, nil
-		}
+	if slices.Contains(allowed, s) {
+		return s, nil
 	}
 	return "", invalidArgError(name, fmt.Sprintf("invalid value %q (valid: %s)", s, strings.Join(allowed, ", ")))
 }

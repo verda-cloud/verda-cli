@@ -352,7 +352,7 @@ func advanceLocked(inst *verda.Instance) {
 	if inst.Status == statusProvisioning {
 		inst.Status = statusRunning
 		if inst.IP == nil {
-			inst.IP = ptrOf("203.0.113.10")
+			inst.IP = new("203.0.113.10")
 		}
 	}
 }
@@ -506,7 +506,7 @@ func (s *Server) newInstanceLocked(req *verda.CreateInstanceRequest) verda.Insta
 		Image:        req.Image,
 		OSName:       req.Image,
 		SSHKeyIDs:    append([]string{}, req.SSHKeyIDs...),
-		OSVolumeID:   ptrOf(osVol.ID),
+		OSVolumeID:   new(osVol.ID),
 		VolumeIDs:    volumeIDs,
 		Contract:     contract,
 	}
@@ -699,8 +699,6 @@ func (s *Server) newIDLocked() string {
 	s.idSeq++
 	return fmt.Sprintf("00000000-0000-4000-8000-%012d", s.idSeq)
 }
-
-func ptrOf(v string) *string { return &v }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")

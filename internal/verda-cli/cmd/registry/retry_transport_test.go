@@ -485,7 +485,7 @@ func TestRetryingTransport_BodyRewoundOnRetry(t *testing.T) {
 		t.Fatalf("request count = %d, want 2", got)
 	}
 	// Both captured bodies must match the payload exactly.
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		body := cs.bodyAt(i)
 		if !bytes.Equal(body, payload) {
 			t.Fatalf("body[%d] = %q, want %q", i, string(body), string(payload))

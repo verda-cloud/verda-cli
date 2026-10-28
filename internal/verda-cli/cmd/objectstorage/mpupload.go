@@ -60,10 +60,7 @@ type resumableOptions struct {
 // splits into at most maxParts parts. A requested size below the floor or that
 // would exceed maxParts is bumped to the smallest valid value.
 func computePartSize(fileSize, requested int64) int64 {
-	size := requested
-	if size < minPartSize {
-		size = minPartSize
-	}
+	size := max(requested, minPartSize)
 	// Double until the file splits into at most maxParts parts. Ceil division:
 	// a file that is an exact multiple of size*maxParts needs exactly maxParts
 	// parts (allowed) and must NOT be bumped — the old `fileSize/size+1` form
@@ -96,10 +93,7 @@ func numParts(fileSize, partSize int64) int32 {
 // (1-indexed) of a fileSize-byte file at partSize. The last part is short.
 func partRange(n int32, fileSize, partSize int64) (start, end int64) {
 	start = int64(n-1) * partSize
-	end = start + partSize
-	if end > fileSize {
-		end = fileSize
-	}
+	end = min(start+partSize, fileSize)
 	return start, end
 }
 
@@ -315,9 +309,7 @@ func uploadMissingParts(ctx context.Context, client API, opts *resumableOptions,
 	results := make(chan uploadPartResult)
 	var wg sync.WaitGroup
 	for range concurrency {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for n := range jobs {
 				etag, err := uploadOnePart(ctx, client, opts, cp.UploadID, n, partSize)
 				select {
@@ -326,7 +318,7 @@ func uploadMissingParts(ctx context.Context, client API, opts *resumableOptions,
 					return
 				}
 			}
-		}()
+		})
 	}
 
 	go func() {

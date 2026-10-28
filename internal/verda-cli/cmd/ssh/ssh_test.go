@@ -26,8 +26,6 @@ import (
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
 
-func strPtr(s string) *string { return &s }
-
 func TestIsTerminalReturnsFalseForPipe(t *testing.T) {
 	t.Parallel()
 
@@ -47,8 +45,8 @@ func TestResolveInstanceByID(t *testing.T) {
 	t.Parallel()
 
 	instances := []verda.Instance{
-		{ID: "abc-123", Hostname: "gpu-runner", Status: verda.StatusRunning, IP: strPtr("1.2.3.4")},
-		{ID: "def-456", Hostname: "cpu-worker", Status: verda.StatusOffline, IP: strPtr("5.6.7.8")},
+		{ID: "abc-123", Hostname: "gpu-runner", Status: verda.StatusRunning, IP: new("1.2.3.4")},
+		{ID: "def-456", Hostname: "cpu-worker", Status: verda.StatusOffline, IP: new("5.6.7.8")},
 	}
 
 	inst := resolveInstance(instances, "def-456")
@@ -64,7 +62,7 @@ func TestResolveInstanceByHostname(t *testing.T) {
 	t.Parallel()
 
 	instances := []verda.Instance{
-		{ID: "abc-123", Hostname: "gpu-runner", Status: verda.StatusRunning, IP: strPtr("1.2.3.4")},
+		{ID: "abc-123", Hostname: "gpu-runner", Status: verda.StatusRunning, IP: new("1.2.3.4")},
 	}
 
 	inst := resolveInstance(instances, "gpu-runner")
@@ -80,7 +78,7 @@ func TestResolveInstanceByHostnameCaseInsensitive(t *testing.T) {
 	t.Parallel()
 
 	instances := []verda.Instance{
-		{ID: "abc-123", Hostname: "GPU-Runner", Status: verda.StatusRunning, IP: strPtr("1.2.3.4")},
+		{ID: "abc-123", Hostname: "GPU-Runner", Status: verda.StatusRunning, IP: new("1.2.3.4")},
 	}
 
 	inst := resolveInstance(instances, "gpu-runner")
@@ -93,8 +91,8 @@ func TestResolveInstanceIDTakesPrecedence(t *testing.T) {
 	t.Parallel()
 
 	instances := []verda.Instance{
-		{ID: "match-me", Hostname: "first", Status: verda.StatusRunning, IP: strPtr("1.1.1.1")},
-		{ID: "other", Hostname: "match-me", Status: verda.StatusRunning, IP: strPtr("2.2.2.2")},
+		{ID: "match-me", Hostname: "first", Status: verda.StatusRunning, IP: new("1.1.1.1")},
+		{ID: "other", Hostname: "match-me", Status: verda.StatusRunning, IP: new("2.2.2.2")},
 	}
 
 	inst := resolveInstance(instances, "match-me")
@@ -132,9 +130,9 @@ func TestFilterRunningInstances(t *testing.T) {
 	t.Parallel()
 
 	instances := []verda.Instance{
-		{ID: "1", Hostname: "running-vm", Status: verda.StatusRunning, IP: strPtr("1.1.1.1")},
-		{ID: "2", Hostname: "offline-vm", Status: verda.StatusOffline, IP: strPtr("2.2.2.2")},
-		{ID: "3", Hostname: "another-running", Status: verda.StatusRunning, IP: strPtr("3.3.3.3")},
+		{ID: "1", Hostname: "running-vm", Status: verda.StatusRunning, IP: new("1.1.1.1")},
+		{ID: "2", Hostname: "offline-vm", Status: verda.StatusOffline, IP: new("2.2.2.2")},
+		{ID: "3", Hostname: "another-running", Status: verda.StatusRunning, IP: new("3.3.3.3")},
 		{ID: "4", Hostname: "provisioning-vm", Status: verda.StatusProvisioning},
 	}
 

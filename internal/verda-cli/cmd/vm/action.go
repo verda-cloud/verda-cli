@@ -17,6 +17,7 @@ package vm
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -100,11 +101,8 @@ func availableActions(status string) []instanceAction {
 			result = append(result, a)
 			continue
 		}
-		for _, s := range a.ValidFrom {
-			if s == status {
-				result = append(result, a)
-				break
-			}
+		if slices.Contains(a.ValidFrom, status) {
+			result = append(result, a)
 		}
 	}
 	return result

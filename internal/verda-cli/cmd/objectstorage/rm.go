@@ -398,10 +398,7 @@ func deleteSingle(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOSt
 // abort the command with the original error wrapped via translateError.
 func deleteBatched(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client API, bucket string, keys []string, payload *rmPayload) error {
 	for start := 0; start < len(keys); start += maxDeleteBatch {
-		end := start + maxDeleteBatch
-		if end > len(keys) {
-			end = len(keys)
-		}
+		end := min(start+maxDeleteBatch, len(keys))
 		chunk := keys[start:end]
 
 		objs := make([]s3types.ObjectIdentifier, 0, len(chunk))

@@ -24,8 +24,6 @@ import (
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
 
-func strPtr(s string) *string { return &s }
-
 func TestRenderVolumeSummary(t *testing.T) {
 	t.Parallel()
 
@@ -58,7 +56,7 @@ func TestRenderVolumeSummaryWithInstance(t *testing.T) {
 		Status:     "attached",
 		Location:   "FIN-01",
 		IsOSVolume: true,
-		InstanceID: strPtr("inst-123"),
+		InstanceID: new("inst-123"),
 	}
 
 	var buf bytes.Buffer

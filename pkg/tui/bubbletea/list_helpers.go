@@ -26,10 +26,7 @@ func visibleWindow(total, cursor, pageSize int) (int, int) {
 		return 0, total
 	}
 	half := pageSize / 2
-	start := cursor - half
-	if start < 0 {
-		start = 0
-	}
+	start := max(cursor-half, 0)
 	end := start + pageSize
 	if end > total {
 		end = total

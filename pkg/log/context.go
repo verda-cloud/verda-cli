@@ -16,6 +16,7 @@ package log
 
 import (
 	"context"
+	"maps"
 
 	"go.uber.org/zap"
 )
@@ -30,9 +31,7 @@ type ContextExtractors map[string]func(context.Context) string
 // earlier ones.
 func WithContextExtractor(extractors ContextExtractors) Option {
 	return func(l *zapLogger) {
-		for k, v := range extractors {
-			l.contextExtractors[k] = v
-		}
+		maps.Copy(l.contextExtractors, extractors)
 	}
 }
 

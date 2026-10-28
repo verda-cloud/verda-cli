@@ -512,16 +512,10 @@ func formatAgo(t time.Time, now func() time.Time) string {
 	}
 	// Use 30-day months for rough-but-stable output. A year is 365 days.
 	if d < 365*24*time.Hour {
-		n := int(d / (30 * 24 * time.Hour))
-		if n < 1 {
-			n = 1
-		}
+		n := max(int(d/(30*24*time.Hour)), 1)
 		return pluralAgo(n, "month")
 	}
-	n := int(d / (365 * 24 * time.Hour))
-	if n < 1 {
-		n = 1
-	}
+	n := max(int(d/(365*24*time.Hour)), 1)
 	return pluralAgo(n, "year")
 }
 

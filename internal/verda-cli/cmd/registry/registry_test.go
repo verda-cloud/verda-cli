@@ -16,6 +16,7 @@ package registry
 
 import (
 	"bytes"
+	"slices"
 	"testing"
 
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
@@ -45,10 +46,5 @@ func TestNewCmdRegistry_BasicWiring(t *testing.T) {
 }
 
 func sliceContains(s []string, v string) bool {
-	for _, x := range s {
-		if x == v {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(s, v)
 }

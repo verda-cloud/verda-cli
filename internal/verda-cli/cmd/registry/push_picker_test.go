@@ -15,6 +15,7 @@
 package registry
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -77,13 +78,7 @@ func TestPicker_Expansion(t *testing.T) {
 		refs[i] = it.Ref
 	}
 	for _, want := range []string{"my-app:v1", "my-app:latest", "nginx:latest"} {
-		found := false
-		for _, got := range refs {
-			if got == want {
-				found = true
-				break
-			}
-		}
+		found := slices.Contains(refs, want)
 		if !found {
 			t.Errorf("missing ref %q in picker rows: %v", want, refs)
 		}

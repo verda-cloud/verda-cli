@@ -188,8 +188,8 @@ func jsonKeys(t *testing.T, v any) map[string]bool {
 
 	rt := reflect.TypeOf(v)
 	keys := make(map[string]bool, rt.NumField())
-	for i := range rt.NumField() {
-		tag := rt.Field(i).Tag.Get("json")
+	for field := range rt.Fields() {
+		tag := field.Tag.Get("json")
 		if tag == "" || tag == "-" {
 			continue
 		}
@@ -337,8 +337,8 @@ func fillNonZero(t *testing.T, v reflect.Value, n *int) {
 			v.Set(reflect.ValueOf(time.Date(2026, 8, 11, 18, 51, 12, 0, time.UTC)))
 			return
 		}
-		for i := range v.NumField() {
-			if f := v.Field(i); f.CanSet() {
+		for _, f := range v.Fields() {
+			if f.CanSet() {
 				fillNonZero(t, f, n)
 			}
 		}

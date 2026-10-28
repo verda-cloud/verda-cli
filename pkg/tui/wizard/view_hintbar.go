@@ -74,7 +74,7 @@ func (v *HintBarView) Update(msg any) (string, []any) {
 
 // Subscribe limits this view to StepChangedMsg only.
 func (v *HintBarView) Subscribe() []reflect.Type {
-	return []reflect.Type{reflect.TypeOf(StepChangedMsg{})}
+	return []reflect.Type{reflect.TypeFor[StepChangedMsg]()}
 }
 
 func (v *HintBarView) render() string {

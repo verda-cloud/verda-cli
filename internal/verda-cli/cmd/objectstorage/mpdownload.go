@@ -297,9 +297,7 @@ func downloadMissingChunks(ctx context.Context, client API, opts *resumableDownl
 	results := make(chan downloadChunkResult)
 	var wg sync.WaitGroup
 	for range concurrency {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for n := range jobs {
 				err := downloadOneChunk(ctx, client, opts.Bucket, opts.Key, etag, file, n, total, partSize)
 				select {
@@ -308,7 +306,7 @@ func downloadMissingChunks(ctx context.Context, client API, opts *resumableDownl
 					return
 				}
 			}
-		}()
+		})
 	}
 	go func() {
 		defer close(jobs)
