@@ -71,7 +71,7 @@ func buildContainerCreateFlow(_ context.Context, getClient clientFunc, opts *con
 			stepContainerGPUUtil(&opts.GPUUtil),
 			stepContainerScaleUpDelay(&opts.ScaleUpDelay),
 			stepContainerScaleDownDelay(&opts.ScaleDownDelay),
-			stepContainerRequestTTL(&opts.RequestTTL),
+			stepRequestTTL(&opts.RequestTTL, maxContainerRequestTTL),
 			stepSecretMounts(getClient, cache, &opts.SecretMounts),
 		},
 	}
@@ -172,7 +172,7 @@ func stepContainerMinReplicas(target *int) wizard.Step {
 		Prompt:      wizard.TextInputPrompt,
 		Required:    false,
 		Default:     func(_ map[string]any) any { return strconv.Itoa(*target) },
-		Validate:    parseIntRangeValidator("min replicas", 0, maxReplicas),
+		Validate:    parseNonNegativeIntValidator("min replicas", maxReplicas),
 		Setter: func(v any) {
 			n, _ := strconv.Atoi(strings.TrimSpace(v.(string)))
 			*target = n
@@ -192,7 +192,7 @@ func stepContainerConcurrency(target *int) wizard.Step {
 		Prompt:      wizard.TextInputPrompt,
 		Required:    true,
 		Default:     func(_ map[string]any) any { return strconv.Itoa(*target) },
-		Validate:    parseIntRangeValidator("concurrency", 1, maxConcurrency),
+		Validate:    parsePositiveIntValidator("concurrency", maxConcurrency),
 		Setter: func(v any) {
 			n, _ := strconv.Atoi(strings.TrimSpace(v.(string)))
 			*target = n
@@ -269,7 +269,7 @@ func stepContainerGPUUtil(target *int) wizard.Step {
 }
 
 // utilThresholdStep builds a step that asks "off | <threshold>" as a text
-// input. An empty value or "off" maps to 0; any integer in 5..100 enables
+// input. An empty value or "off" maps to 0; any integer in minUtilThreshold..maxUtilThreshold enables
 // the trigger at that threshold. Shared by CPU and GPU util steps.
 func utilThresholdStep(name, desc string, target *int) wizard.Step {
 	return wizard.Step{

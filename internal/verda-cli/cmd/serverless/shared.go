@@ -31,7 +31,6 @@ import (
 
 // Create-request limits; keep in sync with the SDK, which rejects values outside them before sending.
 const (
-	maxPort                = 65535
 	maxComputeSize         = 128
 	maxReplicas            = 1000
 	maxConcurrency         = 5000
@@ -42,9 +41,9 @@ const (
 	maxBatchjobRequestTTL  = 7 * 24 * time.Hour
 )
 
-func checkIntRange(name string, n, lo, hi int) error {
-	if n < lo || n > hi {
-		return fmt.Errorf("%s must be in %d..%d", name, lo, hi)
+func checkMax(name string, n, maxN int) error {
+	if n > maxN {
+		return fmt.Errorf("%s must be <= %d", name, maxN)
 	}
 	return nil
 }
@@ -58,9 +57,9 @@ func checkUtilThreshold(name string, n int) error {
 }
 
 // checkDurationRange compares whole seconds, which is what the request carries.
-func checkDurationRange(name string, d, hi time.Duration) error {
-	if d < 0 || int(d.Seconds()) > int(hi.Seconds()) {
-		return fmt.Errorf("%s must be between 0s and %s", name, shortDuration(hi))
+func checkDurationRange(name string, d, maxD time.Duration) error {
+	if d < 0 || int(d.Seconds()) > int(maxD.Seconds()) {
+		return fmt.Errorf("%s must be between 0s and %s", name, shortDuration(maxD))
 	}
 	return nil
 }
