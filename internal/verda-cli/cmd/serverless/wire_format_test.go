@@ -34,12 +34,13 @@ import (
 
 // recordingServer stores POST/PATCH bodies from create/update endpoints.
 type recordingServer struct {
-	mu               sync.Mutex
-	containerOK      []byte
-	containerPatchOK []byte
-	jobOK            []byte
-	jobPatchOK       []byte
-	srv              *httptest.Server
+	mu                      sync.Mutex
+	containerOK             []byte
+	containerPatchOK        []byte
+	containerScalingPatchOK []byte
+	jobOK                   []byte
+	jobPatchOK              []byte
+	srv                     *httptest.Server
 }
 
 func newRecordingServer(t *testing.T) *recordingServer {
@@ -117,6 +118,21 @@ func newRecordingServer(t *testing.T) *recordingServer {
 		})
 	})
 
+	mux.HandleFunc("PATCH /container-deployments/{name}/scaling", func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		rec.mu.Lock()
+		rec.containerScalingPatchOK = body
+		rec.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(verda.ContainerScalingOptions{
+			MinReplicaCount: 0, MaxReplicaCount: 10,
+		})
+	})
+
 	mux.HandleFunc("PATCH /container-deployments/{name}", func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
@@ -185,6 +201,12 @@ func (r *recordingServer) containerPatchBody() []byte {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.containerPatchOK
+}
+
+func (r *recordingServer) containerScalingPatchBody() []byte {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.containerScalingPatchOK
 }
 
 func (r *recordingServer) jobPatchBody() []byte {
@@ -567,6 +589,112 @@ func TestContainerUpdate_EnvMergeWireFormat(t *testing.T) {
 		if e.Name == "FOO" {
 			t.Errorf("FOO should be replaced by --env flag, but found in env; body: %s", body)
 		}
+	}
+}
+
+// TestContainerUpdate_ScalingWireFormat asserts that updating scaling flags sends
+// a PATCH to /container-deployments/{name}/scaling (not the main deployment PATCH),
+// and the deployment PATCH is NOT sent when only scaling flags are set.
+func TestContainerUpdate_ScalingWireFormat(t *testing.T) {
+	t.Parallel()
+	rec := newRecordingServer(t)
+	f := newTestFactory(t, rec.srv.URL)
+
+	var stdout, stderr bytes.Buffer
+	cmd := NewCmdContainer(f, cmdutil.IOStreams{Out: &stdout, ErrOut: &stderr})
+	cmd.SetArgs([]string{
+		"update", "cli-test",
+		"--min-replicas", "0",
+		"--max-replicas", "10",
+		"--yes",
+	})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("container update failed: %v\nstderr:\n%s", err, stderr.String())
+	}
+
+	// Scaling PATCH must have been sent.
+	scalingBody := rec.containerScalingPatchBody()
+	if scalingBody == nil {
+		t.Fatalf("server did not receive PATCH /container-deployments/cli-test/scaling\nstderr:\n%s", stderr.String())
+	}
+
+	var got struct {
+		MinReplicaCount *int `json:"min_replica_count"`
+		MaxReplicaCount *int `json:"max_replica_count"`
+	}
+	if err := json.Unmarshal(scalingBody, &got); err != nil {
+		t.Fatalf("unmarshal scaling body: %v\nbody: %s", err, scalingBody)
+	}
+	if got.MinReplicaCount == nil || *got.MinReplicaCount != 0 {
+		t.Errorf("min_replica_count: want 0, got %v", got.MinReplicaCount)
+	}
+	if got.MaxReplicaCount == nil || *got.MaxReplicaCount != 10 {
+		t.Errorf("max_replica_count: want 10, got %v", got.MaxReplicaCount)
+	}
+
+	// Deployment PATCH must NOT have been sent (only scaling changed).
+	if rec.containerPatchBody() != nil {
+		t.Errorf("deployment PATCH should not be sent when only scaling flags are set; body: %s", rec.containerPatchBody())
+	}
+}
+
+// TestContainerUpdate_CombinedWireFormat asserts that updating both deployment
+// and scaling flags sends two PATCHes: one to /container-deployments/{name} and
+// one to /container-deployments/{name}/scaling.
+func TestContainerUpdate_CombinedWireFormat(t *testing.T) {
+	t.Parallel()
+	rec := newRecordingServer(t)
+	f := newTestFactory(t, rec.srv.URL)
+
+	var stdout, stderr bytes.Buffer
+	cmd := NewCmdContainer(f, cmdutil.IOStreams{Out: &stdout, ErrOut: &stderr})
+	cmd.SetArgs([]string{
+		"update", "cli-test",
+		"--image", "ghcr.io/org/app:v3.0",
+		"--max-replicas", "10",
+		"--yes",
+	})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("container update failed: %v\nstderr:\n%s", err, stderr.String())
+	}
+
+	deployBody := rec.containerPatchBody()
+	if deployBody == nil {
+		t.Fatalf("server did not receive PATCH /container-deployments/cli-test")
+	}
+	scalingBody := rec.containerScalingPatchBody()
+	if scalingBody == nil {
+		t.Fatalf("server did not receive PATCH /container-deployments/cli-test/scaling")
+	}
+
+	var deployGot struct {
+		Containers []struct {
+			Image string `json:"image"`
+		} `json:"containers"`
+	}
+	if err := json.Unmarshal(deployBody, &deployGot); err != nil {
+		t.Fatalf("unmarshal deploy body: %v\nbody: %s", err, deployBody)
+	}
+	if len(deployGot.Containers) != 1 || deployGot.Containers[0].Image != "ghcr.io/org/app:v3.0" {
+		t.Errorf("deployment PATCH image: got %+v", deployGot.Containers)
+	}
+
+	var rawDeploy map[string]any
+	if err := json.Unmarshal(deployBody, &rawDeploy); err != nil {
+		t.Fatalf("unmarshal raw deploy: %v", err)
+	}
+	if _, present := rawDeploy["scaling"]; present {
+		t.Errorf("deployment PATCH must not contain scaling; body: %s", deployBody)
+	}
+
+	var scalingGot struct {
+		MaxReplicaCount *int `json:"max_replica_count"`
+	}
+	if err := json.Unmarshal(scalingBody, &scalingGot); err != nil {
+		t.Fatalf("unmarshal scaling body: %v\nbody: %s", err, scalingBody)
+	}
+	if scalingGot.MaxReplicaCount == nil || *scalingGot.MaxReplicaCount != 10 {
+		t.Errorf("scaling PATCH max_replica_count: want 10, got %v", scalingGot.MaxReplicaCount)
 	}
 }
 

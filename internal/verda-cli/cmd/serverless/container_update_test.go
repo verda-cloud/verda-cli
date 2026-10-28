@@ -97,7 +97,7 @@ func TestBuildContainerUpdateRequest_SpotOn(t *testing.T) {
 	_ = cmd.Flags().Set(flagSpot, "true")
 	opts := &containerUpdateOptions{Spot: true}
 
-	req, err := buildContainerUpdateRequest(cmd, opts, baseContainerDeployment(), nil)
+	req, err := buildContainerUpdateRequest(cmd, opts, baseContainerDeployment())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -117,7 +117,7 @@ func TestBuildContainerUpdateRequest_NoSpot(t *testing.T) {
 	_ = cmd.Flags().Set(flagNoSpot, "true")
 	opts := &containerUpdateOptions{NoSpot: true}
 
-	req, err := buildContainerUpdateRequest(cmd, opts, baseContainerDeployment(), nil)
+	req, err := buildContainerUpdateRequest(cmd, opts, baseContainerDeployment())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -131,7 +131,7 @@ func TestBuildContainerUpdateRequest_ComputeSizeOnly(t *testing.T) {
 	_ = cmd.Flags().Set(flagComputeSize, "2")
 	opts := &containerUpdateOptions{ComputeSize: 2}
 
-	req, err := buildContainerUpdateRequest(cmd, opts, baseContainerDeployment(), nil)
+	req, err := buildContainerUpdateRequest(cmd, opts, baseContainerDeployment())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -151,7 +151,7 @@ func TestBuildContainerUpdateRequest_ComputeNameOnly(t *testing.T) {
 	_ = cmd.Flags().Set(flagCompute, "RTX6000Ada")
 	opts := &containerUpdateOptions{Compute: "RTX6000Ada"}
 
-	req, err := buildContainerUpdateRequest(cmd, opts, baseContainerDeployment(), nil)
+	req, err := buildContainerUpdateRequest(cmd, opts, baseContainerDeployment())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -171,7 +171,7 @@ func TestBuildContainerUpdateRequest_ComputeSizeInvalid(t *testing.T) {
 	_ = cmd.Flags().Set(flagComputeSize, "0")
 	opts := &containerUpdateOptions{ComputeSize: 0}
 
-	_, err := buildContainerUpdateRequest(cmd, opts, baseContainerDeployment(), nil)
+	_, err := buildContainerUpdateRequest(cmd, opts, baseContainerDeployment())
 	if err == nil || !strings.Contains(err.Error(), "--compute-size must be >= 1") {
 		t.Fatalf("expected compute-size error, got %v", err)
 	}
@@ -184,7 +184,7 @@ func TestBuildContainerUpdateRequest_NilCurrentCompute(t *testing.T) {
 	dep := baseContainerDeployment()
 	dep.Compute = nil
 
-	req, err := buildContainerUpdateRequest(cmd, opts, dep, nil)
+	req, err := buildContainerUpdateRequest(cmd, opts, dep)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -201,7 +201,7 @@ func TestBuildContainerUpdateRequest_RegistryCreds(t *testing.T) {
 	_ = cmd.Flags().Set(flagRegistryCreds, "my-ghcr")
 	opts := &containerUpdateOptions{RegistryCreds: "my-ghcr"}
 
-	req, err := buildContainerUpdateRequest(cmd, opts, baseContainerDeployment(), nil)
+	req, err := buildContainerUpdateRequest(cmd, opts, baseContainerDeployment())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -218,7 +218,7 @@ func TestBuildContainerUpdateRequest_RegistryPublic(t *testing.T) {
 	_ = cmd.Flags().Set(flagRegistryPublic, "true")
 	opts := &containerUpdateOptions{RegistryPublic: true}
 
-	req, err := buildContainerUpdateRequest(cmd, opts, baseContainerDeployment(), nil)
+	req, err := buildContainerUpdateRequest(cmd, opts, baseContainerDeployment())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -232,7 +232,7 @@ func TestBuildContainerUpdateRequest_ImageChange(t *testing.T) {
 	_ = cmd.Flags().Set(flagImage, "ghcr.io/org/app:v2.0")
 	opts := &containerUpdateOptions{Image: "ghcr.io/org/app:v2.0"}
 
-	req, err := buildContainerUpdateRequest(cmd, opts, baseContainerDeployment(), nil)
+	req, err := buildContainerUpdateRequest(cmd, opts, baseContainerDeployment())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -252,7 +252,7 @@ func TestBuildContainerUpdateRequest_LatestTagRejected(t *testing.T) {
 	_ = cmd.Flags().Set(flagImage, "ghcr.io/org/app:latest")
 	opts := &containerUpdateOptions{Image: "ghcr.io/org/app:latest"}
 
-	_, err := buildContainerUpdateRequest(cmd, opts, baseContainerDeployment(), nil)
+	_, err := buildContainerUpdateRequest(cmd, opts, baseContainerDeployment())
 	if err == nil || !strings.Contains(err.Error(), "latest") {
 		t.Fatalf("expected :latest rejection, got %v", err)
 	}
@@ -263,7 +263,7 @@ func TestBuildContainerUpdateRequest_PortOutOfRange(t *testing.T) {
 	_ = cmd.Flags().Set(flagPort, "99999")
 	opts := &containerUpdateOptions{Port: 99999}
 
-	_, err := buildContainerUpdateRequest(cmd, opts, baseContainerDeployment(), nil)
+	_, err := buildContainerUpdateRequest(cmd, opts, baseContainerDeployment())
 	if err == nil || !strings.Contains(err.Error(), "--port must be in 1..65535") {
 		t.Fatalf("expected port error, got %v", err)
 	}
@@ -276,32 +276,26 @@ func TestBuildContainerUpdateRequest_EmptyContainers(t *testing.T) {
 	dep := baseContainerDeployment()
 	dep.Containers = nil
 
-	_, err := buildContainerUpdateRequest(cmd, opts, dep, nil)
+	_, err := buildContainerUpdateRequest(cmd, opts, dep)
 	if err == nil || !strings.Contains(err.Error(), "no containers") {
 		t.Fatalf("expected empty-containers error, got %v", err)
 	}
 }
 
-func TestBuildContainerUpdateRequest_ScalingOnly(t *testing.T) {
+func TestBuildContainerScalingUpdateRequest_MaxReplicas(t *testing.T) {
 	cmd := testContainerUpdateCmd()
 	_ = cmd.Flags().Set(flagMaxReplicas, "10")
 	opts := &containerUpdateOptions{MaxReplicas: 10}
 
-	req, err := buildContainerUpdateRequest(cmd, opts, baseContainerDeployment(), baseContainerScaling())
+	req, err := buildContainerScalingUpdateRequest(cmd, opts, baseContainerScaling())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if req.Containers != nil {
-		t.Errorf("Containers should be nil (unchanged)")
+	if req.MaxReplicaCount == nil || *req.MaxReplicaCount != 10 {
+		t.Errorf("MaxReplicaCount: want 10, got %v", req.MaxReplicaCount)
 	}
-	if req.Scaling == nil {
-		t.Fatal("Scaling should be set")
-	}
-	if req.Scaling.MaxReplicaCount != 10 {
-		t.Errorf("MaxReplicaCount: want 10, got %d", req.Scaling.MaxReplicaCount)
-	}
-	if req.Scaling.MinReplicaCount != 1 {
-		t.Errorf("MinReplicaCount: want 1 (carried), got %d", req.Scaling.MinReplicaCount)
+	if req.MinReplicaCount != nil {
+		t.Errorf("MinReplicaCount: should be nil (unchanged)")
 	}
 }
 
@@ -412,71 +406,71 @@ func TestMergeHealthcheckUpdate_PortZero_FallbackToExposedPort(t *testing.T) {
 	}
 }
 
-// -- mergeContainerScalingUpdate --
+// -- buildContainerScalingUpdateRequest --
 
-func TestMergeContainerScalingUpdate_MinReplicas(t *testing.T) {
+func TestBuildContainerScalingUpdateRequest_MinReplicas(t *testing.T) {
 	cmd := testContainerUpdateCmd()
 	_ = cmd.Flags().Set(flagMinReplicas, "2")
 	opts := &containerUpdateOptions{MinReplicas: 2}
 
-	got, err := mergeContainerScalingUpdate(cmd, opts, baseContainerScaling())
+	got, err := buildContainerScalingUpdateRequest(cmd, opts, baseContainerScaling())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got.MinReplicaCount != 2 {
-		t.Errorf("MinReplicaCount: want 2, got %d", got.MinReplicaCount)
+	if got.MinReplicaCount == nil || *got.MinReplicaCount != 2 {
+		t.Errorf("MinReplicaCount: want 2, got %v", got.MinReplicaCount)
 	}
-	if got.MaxReplicaCount != 3 {
-		t.Errorf("MaxReplicaCount: want 3 (carried), got %d", got.MaxReplicaCount)
+	if got.MaxReplicaCount != nil {
+		t.Errorf("MaxReplicaCount: should be nil (unchanged)")
 	}
-	if got.QueueMessageTTLSeconds != 300 {
-		t.Errorf("QueueMessageTTLSeconds: want 300 (carried), got %d", got.QueueMessageTTLSeconds)
+	if got.QueueMessageTTLSeconds != nil {
+		t.Errorf("QueueMessageTTLSeconds: should be nil (unchanged)")
 	}
 }
 
-func TestMergeContainerScalingUpdate_MaxLessThanMin(t *testing.T) {
+func TestBuildContainerScalingUpdateRequest_MaxLessThanMin(t *testing.T) {
 	cmd := testContainerUpdateCmd()
 	_ = cmd.Flags().Set(flagMaxReplicas, "1")
 	opts := &containerUpdateOptions{MaxReplicas: 1}
 	current := &verda.ContainerScalingOptions{MinReplicaCount: 2, MaxReplicaCount: 5}
 
-	_, err := mergeContainerScalingUpdate(cmd, opts, current)
+	_, err := buildContainerScalingUpdateRequest(cmd, opts, current)
 	if err == nil || !strings.Contains(err.Error(), "--max-replicas must be >= --min-replicas") {
 		t.Fatalf("expected max<min error, got %v", err)
 	}
 }
 
-func TestMergeContainerScalingUpdate_Concurrency(t *testing.T) {
+func TestBuildContainerScalingUpdateRequest_Concurrency(t *testing.T) {
 	cmd := testContainerUpdateCmd()
 	_ = cmd.Flags().Set(flagConcurrency, "4")
 	opts := &containerUpdateOptions{Concurrency: 4}
 
-	got, err := mergeContainerScalingUpdate(cmd, opts, baseContainerScaling())
+	got, err := buildContainerScalingUpdateRequest(cmd, opts, baseContainerScaling())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got.ConcurrentRequestsPerReplica != 4 {
-		t.Errorf("Concurrency: want 4, got %d", got.ConcurrentRequestsPerReplica)
+	if got.ConcurrentRequestsPerReplica == nil || *got.ConcurrentRequestsPerReplica != 4 {
+		t.Errorf("Concurrency: want 4, got %v", got.ConcurrentRequestsPerReplica)
 	}
 }
 
-func TestMergeContainerScalingUpdate_ConcurrencyInvalid(t *testing.T) {
+func TestBuildContainerScalingUpdateRequest_ConcurrencyInvalid(t *testing.T) {
 	cmd := testContainerUpdateCmd()
 	_ = cmd.Flags().Set(flagConcurrency, "0")
 	opts := &containerUpdateOptions{Concurrency: 0}
 
-	_, err := mergeContainerScalingUpdate(cmd, opts, baseContainerScaling())
+	_, err := buildContainerScalingUpdateRequest(cmd, opts, baseContainerScaling())
 	if err == nil || !strings.Contains(err.Error(), "--concurrency must be >= 1") {
 		t.Fatalf("expected concurrency error, got %v", err)
 	}
 }
 
-func TestMergeContainerScalingUpdate_QueuePreset(t *testing.T) {
+func TestBuildContainerScalingUpdateRequest_QueuePreset(t *testing.T) {
 	cmd := testContainerUpdateCmd()
 	_ = cmd.Flags().Set(flagQueuePreset, presetInstant)
 	opts := &containerUpdateOptions{QueuePreset: presetInstant}
 
-	got, err := mergeContainerScalingUpdate(cmd, opts, baseContainerScaling())
+	got, err := buildContainerScalingUpdateRequest(cmd, opts, baseContainerScaling())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -488,7 +482,7 @@ func TestMergeContainerScalingUpdate_QueuePreset(t *testing.T) {
 	}
 }
 
-func TestMergeContainerScalingUpdate_ScaleDelays(t *testing.T) {
+func TestBuildContainerScalingUpdateRequest_ScaleDelays(t *testing.T) {
 	cmd := testContainerUpdateCmd()
 	_ = cmd.Flags().Set(flagScaleUpDelay, "30s")
 	_ = cmd.Flags().Set(flagScaleDownDelay, "60s")
@@ -497,7 +491,7 @@ func TestMergeContainerScalingUpdate_ScaleDelays(t *testing.T) {
 		ScaleDownDelay: 60 * time.Second,
 	}
 
-	got, err := mergeContainerScalingUpdate(cmd, opts, baseContainerScaling())
+	got, err := buildContainerScalingUpdateRequest(cmd, opts, baseContainerScaling())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -509,54 +503,54 @@ func TestMergeContainerScalingUpdate_ScaleDelays(t *testing.T) {
 	}
 }
 
-func TestMergeContainerScalingUpdate_RequestTTL(t *testing.T) {
+func TestBuildContainerScalingUpdateRequest_RequestTTL(t *testing.T) {
 	cmd := testContainerUpdateCmd()
 	_ = cmd.Flags().Set(flagRequestTTL, "10m")
 	opts := &containerUpdateOptions{RequestTTL: 10 * time.Minute}
 
-	got, err := mergeContainerScalingUpdate(cmd, opts, baseContainerScaling())
+	got, err := buildContainerScalingUpdateRequest(cmd, opts, baseContainerScaling())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got.QueueMessageTTLSeconds != 600 {
-		t.Errorf("QueueMessageTTLSeconds: want 600, got %d", got.QueueMessageTTLSeconds)
+	if got.QueueMessageTTLSeconds == nil || *got.QueueMessageTTLSeconds != 600 {
+		t.Errorf("QueueMessageTTLSeconds: want 600, got %v", got.QueueMessageTTLSeconds)
 	}
 }
 
-func TestMergeContainerScalingUpdate_NilCurrent(t *testing.T) {
+func TestBuildContainerScalingUpdateRequest_NilCurrent(t *testing.T) {
 	cmd := testContainerUpdateCmd()
 	_ = cmd.Flags().Set(flagMaxReplicas, "5")
 	opts := &containerUpdateOptions{MaxReplicas: 5}
 
-	got, err := mergeContainerScalingUpdate(cmd, opts, nil)
+	got, err := buildContainerScalingUpdateRequest(cmd, opts, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got.MaxReplicaCount != 5 {
-		t.Errorf("MaxReplicaCount: want 5, got %d", got.MaxReplicaCount)
+	if got.MaxReplicaCount == nil || *got.MaxReplicaCount != 5 {
+		t.Errorf("MaxReplicaCount: want 5, got %v", got.MaxReplicaCount)
 	}
-	if got.MinReplicaCount != 0 {
-		t.Errorf("MinReplicaCount: want 0 (zero-value), got %d", got.MinReplicaCount)
+	if got.MinReplicaCount != nil {
+		t.Errorf("MinReplicaCount: should be nil (unchanged)")
 	}
 }
 
-func TestMergeContainerScalingUpdate_MinReplicasNegative(t *testing.T) {
+func TestBuildContainerScalingUpdateRequest_MinReplicasNegative(t *testing.T) {
 	cmd := testContainerUpdateCmd()
 	_ = cmd.Flags().Set(flagMinReplicas, "-1")
 	opts := &containerUpdateOptions{MinReplicas: -1}
 
-	_, err := mergeContainerScalingUpdate(cmd, opts, baseContainerScaling())
+	_, err := buildContainerScalingUpdateRequest(cmd, opts, baseContainerScaling())
 	if err == nil || !strings.Contains(err.Error(), "--min-replicas must be >= 0") {
 		t.Fatalf("expected min-replicas error, got %v", err)
 	}
 }
 
-func TestMergeContainerScalingUpdate_MaxReplicasInvalid(t *testing.T) {
+func TestBuildContainerScalingUpdateRequest_MaxReplicasInvalid(t *testing.T) {
 	cmd := testContainerUpdateCmd()
 	_ = cmd.Flags().Set(flagMaxReplicas, "0")
 	opts := &containerUpdateOptions{MaxReplicas: 0}
 
-	_, err := mergeContainerScalingUpdate(cmd, opts, nil)
+	_, err := buildContainerScalingUpdateRequest(cmd, opts, nil)
 	if err == nil || !strings.Contains(err.Error(), "--max-replicas must be >= 1") {
 		t.Fatalf("expected max-replicas error, got %v", err)
 	}
