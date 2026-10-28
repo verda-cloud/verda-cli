@@ -143,7 +143,7 @@ The repo lints with `golangci-lint` via `make lint` (also enforced by the pre-co
 3. Read `.ai/skills/new-command.md` for the full checklist when adding/modifying commands
 4. If touching pricing, auth, or agent-mode: plan first, don't code immediately
 
-Per-command docs are auto-maintained by `/update-command-knowledge` skill.
+Per-command docs are maintained by the `/update-command-knowledge` skill. The `githooks/pre-commit` hook runs it only when `VERDA_DOC_UPDATE=1` is set.
 Manual update: `claude -p "/update-command-knowledge --all" --model sonnet --dangerously-skip-permissions`
 
 ## Thinking Depth

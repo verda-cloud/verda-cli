@@ -6,6 +6,7 @@
 #   # or: git config core.hooksPath githooks
 #
 # Requires bash and Go (make lint and make fix.check fetch their pinned tools).
+# VERDA_DOC_UPDATE=1 also regenerates command docs with claude (off by default).
 set -euo pipefail
 
 STAGED_GO=$(git diff --cached --name-only --diff-filter=ACM -- '*.go' || true)
@@ -35,9 +36,8 @@ if [ -n "$PKGS" ]; then
 fi
 
 # --- Auto-update per-subcommand knowledge docs ----------------------------
-if [ "${SKIP_DOC_UPDATE:-}" = "1" ]; then
-	printf "  ⏭️  skipping command knowledge doc update (SKIP_DOC_UPDATE=1)\n"
-else
+# Opt-in: runs headless claude with skipped permissions and stages its doc edits.
+if [ "${VERDA_DOC_UPDATE:-}" = "1" ]; then
 	CHANGED_CMD_DIRS=$(git diff --cached --name-only -- 'internal/verda-cli/cmd/' \
 		| grep -v 'cmd/util/' | grep -v 'cmd/cmd\.go' | grep -v 'cmd/helper\.go' \
 		| sed 's|internal/verda-cli/cmd/\([^/]*\)/.*|\1|' | sort -u || true)
