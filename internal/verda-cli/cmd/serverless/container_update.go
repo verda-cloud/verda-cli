@@ -74,8 +74,9 @@ func newCmdContainerUpdate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobr
 		Short: "Update a serverless container deployment",
 		Long: cmdutil.LongDesc(`
 			Update an existing container deployment. Only the specified flags
-			are changed; everything else is preserved. The current deployment
-			is fetched, changes are merged, and a single PATCH is sent.
+			are changed; everything else is preserved. The current state is
+			fetched, changes are merged, and one or two PATCHes are sent:
+			deployment config and scaling config use separate API endpoints.
 
 			When --env or --env-secret is set, it replaces that type of
 			environment variable. The other type is preserved unless also set.
@@ -147,8 +148,16 @@ var containerUpdateAllFlags = []string{
 	flagScaleUpDelay, flagScaleDownDelay, flagRequestTTL,
 }
 
-var containerContainerFlags = []string{
+var containerWorkloadFlags = []string{
 	flagImage, flagPort, flagHealthcheckOff, flagHealthcheckPort, flagHealthcheckPath,
+	flagEnv, flagEnvSecret, flagEntrypoint, flagCmd, flagSecretMount,
+}
+
+var containerDeploymentUpdateFlags = []string{
+	flagImage, flagSpot, flagNoSpot,
+	flagCompute, flagComputeSize,
+	flagRegistryCreds, flagRegistryPublic,
+	flagPort, flagHealthcheckOff, flagHealthcheckPort, flagHealthcheckPath,
 	flagEnv, flagEnvSecret, flagEntrypoint, flagCmd, flagSecretMount,
 }
 
@@ -199,12 +208,17 @@ func runContainerUpdate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil
 		return fmt.Errorf("fetching deployment: %w", err)
 	}
 
-	req, err := buildContainerUpdateRequest(cmd, opts, current, currentScaling)
+	deployReq, scalingReq, err := prepareContainerUpdateRequests(cmd, opts, current, currentScaling)
 	if err != nil {
 		return cmdutil.UsageErrorf(cmd, "%v", err)
 	}
 
-	cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), "Update request:", req)
+	if deployReq != nil {
+		cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), "Update request:", deployReq)
+	}
+	if scalingReq != nil {
+		cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), "Scaling update request:", scalingReq)
+	}
 
 	if !f.AgentMode() && !opts.Yes {
 		renderContainerUpdateSummary(ioStreams.ErrOut, name, cmd, opts, current)
@@ -218,12 +232,7 @@ func runContainerUpdate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil
 		}
 	}
 
-	updateCtx, updateCancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
-	defer updateCancel()
-
-	deployment, err := cmdutil.WithSpinner(updateCtx, f.Status(), "Updating deployment...", func(ctx context.Context) (*verda.ContainerDeployment, error) {
-		return client.ContainerDeployments.UpdateDeployment(ctx, name, req)
-	})
+	deployment, err := sendContainerUpdates(cmd.Context(), f, client, name, deployReq, scalingReq, current)
 	if err != nil {
 		return err
 	}
@@ -236,9 +245,60 @@ func runContainerUpdate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil
 	return nil
 }
 
+// -- Request preparation --
+
+func prepareContainerUpdateRequests(cmd *cobra.Command, opts *containerUpdateOptions, current *verda.ContainerDeployment, currentScaling *verda.ContainerScalingOptions) (*verda.UpdateDeploymentRequest, *verda.UpdateScalingOptionsRequest, error) {
+	var deployReq *verda.UpdateDeploymentRequest
+	if anyFlagChanged(cmd, containerDeploymentUpdateFlags...) {
+		var err error
+		deployReq, err = buildContainerUpdateRequest(cmd, opts, current)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+
+	var scalingReq *verda.UpdateScalingOptionsRequest
+	if anyFlagChanged(cmd, containerScalingUpdateFlags...) {
+		var err error
+		scalingReq, err = buildContainerScalingUpdateRequest(cmd, opts, currentScaling)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+
+	return deployReq, scalingReq, nil
+}
+
+func sendContainerUpdates(ctx context.Context, f cmdutil.Factory, client *verda.Client, name string, deployReq *verda.UpdateDeploymentRequest, scalingReq *verda.UpdateScalingOptionsRequest, current *verda.ContainerDeployment) (*verda.ContainerDeployment, error) {
+	updateCtx, updateCancel := context.WithTimeout(ctx, f.Options().Timeout)
+	defer updateCancel()
+
+	deployment := current
+	if deployReq != nil {
+		var err error
+		deployment, err = cmdutil.WithSpinner(updateCtx, f.Status(), "Updating deployment...", func(ctx context.Context) (*verda.ContainerDeployment, error) {
+			return client.ContainerDeployments.UpdateDeployment(ctx, name, deployReq)
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if scalingReq != nil {
+		_, err := cmdutil.WithSpinner(updateCtx, f.Status(), "Updating scaling...", func(ctx context.Context) (*verda.ContainerScalingOptions, error) {
+			return client.ContainerDeployments.UpdateDeploymentScaling(ctx, name, scalingReq)
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return deployment, nil
+}
+
 // -- Request builder --
 
-func buildContainerUpdateRequest(cmd *cobra.Command, opts *containerUpdateOptions, current *verda.ContainerDeployment, currentScaling *verda.ContainerScalingOptions) (*verda.UpdateDeploymentRequest, error) {
+func buildContainerUpdateRequest(cmd *cobra.Command, opts *containerUpdateOptions, current *verda.ContainerDeployment) (*verda.UpdateDeploymentRequest, error) {
 	req := &verda.UpdateDeploymentRequest{}
 
 	if cmd.Flags().Changed(flagSpot) || cmd.Flags().Changed(flagNoSpot) {
@@ -271,7 +331,7 @@ func buildContainerUpdateRequest(cmd *cobra.Command, opts *containerUpdateOption
 		}
 	}
 
-	if anyFlagChanged(cmd, containerContainerFlags...) {
+	if anyFlagChanged(cmd, containerWorkloadFlags...) {
 		if len(current.Containers) == 0 {
 			return nil, errors.New("deployment has no containers to update")
 		}
@@ -280,14 +340,6 @@ func buildContainerUpdateRequest(cmd *cobra.Command, opts *containerUpdateOption
 			return nil, err
 		}
 		req.Containers = []verda.CreateDeploymentContainer{c}
-	}
-
-	if anyFlagChanged(cmd, containerScalingUpdateFlags...) {
-		scaling, err := mergeContainerScalingUpdate(cmd, opts, currentScaling)
-		if err != nil {
-			return nil, err
-		}
-		req.Scaling = scaling
 	}
 
 	return req, nil
@@ -375,51 +427,63 @@ func mergeHealthcheckUpdate(cmd *cobra.Command, opts *containerUpdateOptions, cu
 
 // -- Scaling merge --
 
-func mergeContainerScalingUpdate(cmd *cobra.Command, opts *containerUpdateOptions, current *verda.ContainerScalingOptions) (*verda.ContainerScalingOptions, error) {
-	s := &verda.ContainerScalingOptions{}
+func buildContainerScalingUpdateRequest(cmd *cobra.Command, opts *containerUpdateOptions, current *verda.ContainerScalingOptions) (*verda.UpdateScalingOptionsRequest, error) {
+	req := &verda.UpdateScalingOptionsRequest{}
+
+	minReplicas, maxReplicas := 0, 1
 	if current != nil {
-		*s = *current
+		minReplicas = current.MinReplicaCount
+		maxReplicas = current.MaxReplicaCount
 	}
 
 	if cmd.Flags().Changed(flagMinReplicas) {
 		if opts.MinReplicas < 0 {
 			return nil, errors.New("--min-replicas must be >= 0")
 		}
-		s.MinReplicaCount = opts.MinReplicas
+		req.MinReplicaCount = &opts.MinReplicas
+		minReplicas = opts.MinReplicas
 	}
 	if cmd.Flags().Changed(flagMaxReplicas) {
 		if opts.MaxReplicas < 1 {
 			return nil, errors.New("--max-replicas must be >= 1")
 		}
-		s.MaxReplicaCount = opts.MaxReplicas
+		req.MaxReplicaCount = &opts.MaxReplicas
+		maxReplicas = opts.MaxReplicas
 	}
-	if s.MaxReplicaCount < s.MinReplicaCount {
+	if maxReplicas < minReplicas {
 		return nil, errors.New("--max-replicas must be >= --min-replicas")
 	}
 	if cmd.Flags().Changed(flagConcurrency) {
 		if opts.Concurrency < 1 {
 			return nil, errors.New("--concurrency must be >= 1")
 		}
-		s.ConcurrentRequestsPerReplica = opts.Concurrency
+		req.ConcurrentRequestsPerReplica = &opts.Concurrency
 	}
 	if anyFlagChanged(cmd, flagQueuePreset, flagQueueLoad, flagCPUUtil, flagGPUUtil) {
-		triggers, err := mergeScalingTriggers(cmd, opts, s.ScalingTriggers)
+		var currentTriggers *verda.ScalingTriggers
+		if current != nil {
+			currentTriggers = current.ScalingTriggers
+		}
+		triggers, err := mergeScalingTriggers(cmd, opts, currentTriggers)
 		if err != nil {
 			return nil, err
 		}
-		s.ScalingTriggers = triggers
+		req.ScalingTriggers = triggers
 	}
 	if cmd.Flags().Changed(flagScaleUpDelay) {
-		s.ScaleUpPolicy = &verda.ScalingPolicy{DelaySeconds: int(opts.ScaleUpDelay.Seconds())}
+		delay := int(opts.ScaleUpDelay.Seconds())
+		req.ScaleUpPolicy = &verda.ScalingPolicy{DelaySeconds: delay}
 	}
 	if cmd.Flags().Changed(flagScaleDownDelay) {
-		s.ScaleDownPolicy = &verda.ScalingPolicy{DelaySeconds: int(opts.ScaleDownDelay.Seconds())}
+		delay := int(opts.ScaleDownDelay.Seconds())
+		req.ScaleDownPolicy = &verda.ScalingPolicy{DelaySeconds: delay}
 	}
 	if cmd.Flags().Changed(flagRequestTTL) {
-		s.QueueMessageTTLSeconds = int(opts.RequestTTL.Seconds())
+		ttl := int(opts.RequestTTL.Seconds())
+		req.QueueMessageTTLSeconds = &ttl
 	}
 
-	return s, nil
+	return req, nil
 }
 
 func mergeScalingTriggers(cmd *cobra.Command, opts *containerUpdateOptions, current *verda.ScalingTriggers) (*verda.ScalingTriggers, error) {
