@@ -157,7 +157,7 @@ Destructive actions (Shutdown, Force shutdown, Delete) show confirmation prompts
 ### API Endpoints / SDK Methods
 
 - `client.Instances.Create` -- Create instance
-- `client.Instances.Get` -- List instances (with optional status filter)
+- `client.Instances.List` -- List instances (with optional status filter via `ListInstancesOptions`)
 - `client.Instances.GetByID` -- Get instance details
 - `client.Instances.Start` / `Shutdown` / `ForceShutdown` / `Hibernate` -- Instance lifecycle
 - `client.Instances.Delete` -- Delete instance with optional volume IDs
