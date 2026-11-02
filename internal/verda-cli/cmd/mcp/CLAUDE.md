@@ -44,7 +44,7 @@
 - Container tools ignore `VERDA_SERVERLESS_ENABLED` (it gates only the pre-GA CLI); never return raw `verda.ContainerDeployment` — its `Env` carries values that may be secrets, use `newContainerDeploymentView`
 - Scaling args that may legitimately be 0 (`min_replica_count`) need `optionalIntPtr`: `optionalInt` collapses absent and 0
 - `update_container_scaling` leaves untouched triggers out of the PATCH (the API keeps an omitted trigger); if that regresses, fill them from the pre-read in `scalingArgs.request`
-- Scaling reads lag writes by 10–20 s, the pre-read (`previous`, min ≤ max check, threshold reuse) included. The PATCH answers with the stored options plus the change: report it as `expected`, never as current
+- Scaling reads lag writes by 10–20 s, the pre-read (`previous`, min ≤ max check, threshold reuse) included. The PATCH answers with the stored options plus the change: report it as `expected`, never as current; `wait: true` polls until reads show the requested fields (`scalingApplied` compares only those)
 - Because reads lag, never skip a write because a read says it is a no-op: a trigger disable is always sent
 - The spec requires `max_replica_count >= 1`; scale-to-zero is `min_replica_count: 0` or `container_action pause`
 - No MCP tools exist for registry/startup-script mutations; if added, they need the same gate treatment

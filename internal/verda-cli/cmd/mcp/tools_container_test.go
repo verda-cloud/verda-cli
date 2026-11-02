@@ -17,6 +17,7 @@ package mcp
 import (
 	"encoding/json"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -287,4 +288,25 @@ func TestContainerActionInvalid(t *testing.T) {
 	s, _ := newMockBackedServer(t)
 
 	assertToolErrorCode(t, actionCall(t, s, map[string]any{"action": "delete", "confirm": true}), "VALIDATION_ERROR")
+}
+
+func TestUpdateContainerScalingWait(t *testing.T) {
+	t.Parallel()
+	s, mock := newMockBackedServer(t)
+	mock.SeedContainerDeployment(testDeployment)
+	mock.SetScalingReadLag(1)
+
+	out := parseSuccess(t, scalingCall(t, s, map[string]any{
+		"max_replica_count": float64(5), "gpu_utilization_enabled": false, "confirm": true, "wait": true,
+	}))
+	if out["status"] != statusApplied {
+		t.Fatalf("status = %v, want applied (wait_error: %v)", out["status"], out["wait_error"])
+	}
+	cur, _ := out["current"].(map[string]any)
+	if !reflect.DeepEqual(cur, out["expected"]) {
+		t.Errorf("current = %v, want expected %v", cur, out["expected"])
+	}
+	if cur["max_replica_count"] != float64(5) {
+		t.Errorf("current max = %v, want 5", cur["max_replica_count"])
+	}
 }

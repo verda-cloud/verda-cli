@@ -17,6 +17,7 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
@@ -30,13 +31,22 @@ const (
 	minUtilThreshold = 5
 )
 
+// Scaling changes take 10-20 s to show in reads.
+const (
+	scalingWaitTimeout  = 60 * time.Second
+	scalingWaitInterval = 2 * time.Second
+)
+
+// statusApplied: wait: true observed the change in reads.
+const statusApplied = "applied"
+
 // scaleToZeroHint: the spec requires max >= 1; zero replicas come from min 0 or pause.
 const scaleToZeroHint = "; to run no replicas while idle set min_replica_count: 0, or pause the deployment with container_action"
 
 const updateScalingDescription = "Change the scaling options of a serverless container deployment. Only the fields you pass change; everything else, including scaling triggers you leave out, keeps its current value. " +
 	"Raising min_replica_count keeps that many replicas running and billed even with no traffic; max_replica_count caps billed replicas under load. " +
 	"REQUIRES confirm: true. Pass it after the user approved this exact change, or when the user has given standing instructions for this automation (for example: scale to 0 at night). Without it the tool fails with CONFIRMATION_REQUIRED and changes nothing. " +
-	"Returns status 'accepted' with the previous options (may lag an earlier update) and the expected options (the API's answer). Reads show a change after 10-20 seconds. " +
+	"Returns status 'accepted' with the previous options (may lag an earlier update) and the expected options (the API's answer). Reads show a change after 10-20 seconds; pass wait: true to poll until they do and get status 'applied' with the current options. " +
 	"Replicas then start or stop asynchronously; call list_container_replicas to see them."
 
 func (s *Server) registerContainerScalingTool() {
@@ -56,6 +66,7 @@ func (s *Server) registerContainerScalingTool() {
 			mcp.WithNumber("cpu_utilization_threshold", mcp.Description("CPU utilization percent that triggers a scale-up, 5-100. Setting it turns the trigger on unless cpu_utilization_enabled is false.")),
 			mcp.WithBoolean("gpu_utilization_enabled", mcp.Description("Turn the GPU utilization trigger on or off.")),
 			mcp.WithNumber("gpu_utilization_threshold", mcp.Description("GPU utilization percent that triggers a scale-up, 5-100. Setting it turns the trigger on unless gpu_utilization_enabled is false. Not supported on CPU compute: the API rejects the update.")),
+			mcp.WithBoolean("wait", mcp.Description("Poll until the change is visible in reads, up to 60 seconds (default false: return 'accepted' immediately)")),
 		),
 		s.handleUpdateContainerScaling,
 	)
@@ -214,6 +225,80 @@ func (u utilArgs) trigger(prefix string, cur *verda.UtilizationTrigger) (*verda.
 	return &verda.UtilizationTrigger{Enabled: true, Threshold: threshold}, nil
 }
 
+// scalingApplied reports whether got shows every field req sets. Fields req
+// leaves out are not compared: the pre-read they would come from may itself
+// lag an earlier update.
+func scalingApplied(got *verda.ContainerScalingOptions, req *verda.UpdateScalingOptionsRequest) bool {
+	ints := []struct {
+		want *int
+		got  int
+	}{
+		{req.MinReplicaCount, got.MinReplicaCount},
+		{req.MaxReplicaCount, got.MaxReplicaCount},
+		{req.QueueMessageTTLSeconds, got.QueueMessageTTLSeconds},
+		{req.ConcurrentRequestsPerReplica, got.ConcurrentRequestsPerReplica},
+	}
+	for _, f := range ints {
+		if f.want != nil && *f.want != f.got {
+			return false
+		}
+	}
+	if !policyApplied(req.ScaleUpPolicy, got.ScaleUpPolicy) || !policyApplied(req.ScaleDownPolicy, got.ScaleDownPolicy) {
+		return false
+	}
+	t := req.ScalingTriggers
+	if t == nil {
+		return true
+	}
+	var gt verda.ScalingTriggers
+	if got.ScalingTriggers != nil {
+		gt = *got.ScalingTriggers
+	}
+	if t.QueueLoad != nil && (gt.QueueLoad == nil || *gt.QueueLoad != *t.QueueLoad) {
+		return false
+	}
+	return utilApplied(t.CPUUtilization, gt.CPUUtilization) && utilApplied(t.GPUUtilization, gt.GPUUtilization)
+}
+
+func policyApplied(want, got *verda.ScalingPolicy) bool {
+	return want == nil || (got != nil && *got == *want)
+}
+
+// utilApplied: a disabled trigger reads back with threshold 0, so only enabled is compared.
+func utilApplied(want, got *verda.UtilizationTrigger) bool {
+	switch {
+	case want == nil:
+		return true
+	case !want.Enabled:
+		return got == nil || !got.Enabled
+	default:
+		return got != nil && *got == *want
+	}
+}
+
+// waitScalingApplied polls reads until they show every field req sets; another
+// writer changing those fields meanwhile also ends in a timeout.
+func waitScalingApplied(ctx context.Context, client *verda.Client, name string, req *verda.UpdateScalingOptionsRequest) (*verda.ContainerScalingOptions, error) {
+	ctx, cancel := context.WithTimeout(ctx, scalingWaitTimeout)
+	defer cancel()
+	var lastErr error
+	for {
+		got, err := client.ContainerDeployments.GetDeploymentScaling(ctx, name)
+		if err == nil && scalingApplied(got, req) {
+			return got, nil
+		}
+		lastErr = err
+		select {
+		case <-ctx.Done():
+			if lastErr != nil {
+				return nil, fmt.Errorf("change not visible after %s: %w", scalingWaitTimeout, lastErr)
+			}
+			return nil, fmt.Errorf("change not visible after %s", scalingWaitTimeout)
+		case <-time.After(scalingWaitInterval):
+		}
+	}
+}
+
 //nolint:gocritic // hugeParam: handler signature defined by mcp-go.
 func (s *Server) handleUpdateContainerScaling(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	a := args(req)
@@ -222,6 +307,10 @@ func (s *Server) handleUpdateContainerScaling(ctx context.Context, req mcp.CallT
 		return toolErrorResult(err), nil
 	}
 	sa, err := parseScalingArgs(a)
+	if err != nil {
+		return toolErrorResult(err), nil
+	}
+	wait, err := optionalBool(a, "wait")
 	if err != nil {
 		return toolErrorResult(err), nil
 	}
@@ -255,10 +344,19 @@ func (s *Server) handleUpdateContainerScaling(ctx context.Context, req mcp.CallT
 		return toolErrorResult(err), nil
 	}
 
-	return jsonResult(map[string]any{
+	result := map[string]any{
 		"name":     name,
 		"status":   "accepted",
 		"previous": cur,
 		"expected": expected,
-	})
+	}
+	if wait {
+		if got, err := waitScalingApplied(ctx, client, name, upd); err != nil {
+			result["wait_error"] = err.Error()
+		} else {
+			result["status"] = statusApplied
+			result["current"] = got
+		}
+	}
+	return jsonResult(result)
 }

@@ -34,6 +34,9 @@ type containerFixture struct {
 	status     string
 	scaling    verda.ContainerScalingOptions
 	replicas   []verda.ReplicaInfo
+	// staleReads GETs of scaling still return staleScaling after a PATCH.
+	staleReads   int
+	staleScaling verda.ContainerScalingOptions
 }
 
 func (s *Server) registerContainerRoutes(mux *http.ServeMux) {
@@ -99,6 +102,14 @@ func (s *Server) ContainerScaling(name string) verda.ContainerScalingOptions {
 	return s.containers[name].scaling
 }
 
+// SetScalingReadLag makes the next n GETs of a deployment's scaling after each
+// PATCH return the options from before it, as production reads lag writes.
+func (s *Server) SetScalingReadLag(n int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.scalingReadLag = n
+}
+
 // ScalingPatchBodies returns every PATCH .../scaling body as decoded JSON, in
 // order — the wire-level view of what a client sent.
 func (s *Server) ScalingPatchBodies() []map[string]any {
@@ -154,9 +165,16 @@ func (s *Server) handleContainerStatus(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleGetContainerScaling(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if c, ok := s.containerLocked(w, r); ok {
-		writeJSON(w, http.StatusOK, c.scaling)
+	c, ok := s.containerLocked(w, r)
+	if !ok {
+		return
 	}
+	if c.staleReads > 0 {
+		c.staleReads--
+		writeJSON(w, http.StatusOK, c.staleScaling)
+		return
+	}
+	writeJSON(w, http.StatusOK, c.scaling)
 }
 
 // handlePatchContainerScaling merges set fields (an omitted trigger keeps its
@@ -182,6 +200,7 @@ func (s *Server) handlePatchContainerScaling(w http.ResponseWriter, r *http.Requ
 	}
 	s.scalingPatches = append(s.scalingPatches, raw)
 
+	c.staleScaling, c.staleReads = c.scaling, s.scalingReadLag
 	mergeScaling(&c.scaling, &req)
 	writeJSON(w, http.StatusOK, c.scaling)
 }

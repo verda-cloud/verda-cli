@@ -73,6 +73,7 @@ type Server struct {
 	containers       map[string]*containerFixture
 	containerActions map[string]int // "name/action" -> POST count
 	scalingPatches   []map[string]any
+	scalingReadLag   int
 	failures         map[string]int // exact path -> HTTP status override
 	hangs            map[string]bool
 	forceFormToken   bool
