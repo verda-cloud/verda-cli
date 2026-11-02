@@ -399,15 +399,19 @@ func (s *Server) handleCreateVM(ctx context.Context, req mcp.CallToolRequest) (*
 	}
 
 	if wait {
-		inst, err = s.pollInstance(ctx, inst.ID, verda.StatusRunning, 5*time.Minute)
+		polled, err := s.pollInstance(ctx, inst.ID, verda.StatusRunning, 5*time.Minute)
 		if err != nil {
-			// Return what we have even if polling fails.
+			// Return what we have even if polling fails: the VM exists and bills.
+			if polled != nil {
+				inst = polled
+			}
 			return jsonResult(map[string]any{
 				"instance":       inst,
 				"poll_error":     err.Error(),
 				"poll_timed_out": true,
 			})
 		}
+		inst = polled
 	}
 
 	result := map[string]any{"instance": inst}
@@ -542,6 +546,9 @@ func (s *Server) pollInstance(ctx context.Context, id, expectStatus string, time
 		return nil, err
 	}
 
+	// The deadline must bound each GET too: the shared http.Client has no Timeout.
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 	deadline := time.Now().Add(timeout)
 	for {
 		inst, err := client.Instances.GetByID(ctx, id)

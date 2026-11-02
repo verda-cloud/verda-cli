@@ -229,6 +229,10 @@ func (s *Server) handleGetRunningCosts(ctx context.Context, _ mcp.CallToolReques
 		for _, volID := range cmdutil.UniqueVolumeIDs(&instances[i]) {
 			vol, err := client.Volumes.GetVolume(ctx, volID)
 			if err != nil {
+				// Out of time: fail rather than report an understated total.
+				if ctx.Err() != nil {
+					return mcp.NewToolResultError(ctx.Err().Error()), nil
+				}
 				continue
 			}
 			volCount++
