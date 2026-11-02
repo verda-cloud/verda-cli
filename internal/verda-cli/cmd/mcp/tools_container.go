@@ -131,7 +131,7 @@ type containerDeploymentView struct {
 type containerView struct {
 	Name         string                       `json:"name"`
 	Image        string                       `json:"image"`
-	ExposedPort  int                          `json:"exposed_port,omitempty"`
+	ExposedPort  int                          `json:"exposed_port,omitzero"`
 	Healthcheck  *verda.ContainerHealthcheck  `json:"healthcheck,omitempty"`
 	EnvNames     []string                     `json:"env_names,omitempty"`
 	VolumeMounts []verda.ContainerVolumeMount `json:"volume_mounts,omitempty"`

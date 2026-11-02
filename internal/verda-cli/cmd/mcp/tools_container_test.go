@@ -15,7 +15,6 @@
 package mcp
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -33,7 +32,7 @@ func TestListContainerDeployments(t *testing.T) {
 	s, mock := newMockBackedServer(t)
 	mock.SeedContainerDeployment(testDeployment)
 
-	res, err := s.handleListContainerDeployments(context.Background(), callReq("list_container_deployments", nil))
+	res, err := s.handleListContainerDeployments(t.Context(), callReq("list_container_deployments", nil))
 	if err != nil {
 		t.Fatalf("handler error: %v", err)
 	}
@@ -58,7 +57,7 @@ func TestDescribeContainerDeployment(t *testing.T) {
 	s, mock := newMockBackedServer(t)
 	mock.SeedContainerDeployment(testDeployment)
 
-	res, err := s.handleDescribeContainerDeployment(context.Background(),
+	res, err := s.handleDescribeContainerDeployment(t.Context(),
 		callReq("describe_container_deployment", map[string]any{"name": testDeployment}))
 	if err != nil {
 		t.Fatalf("handler error: %v", err)
@@ -92,7 +91,7 @@ func TestDescribeContainerDeploymentBestEffort(t *testing.T) {
 	mock.FailRoute("/container-deployments/"+testDeployment+"/status", http.StatusInternalServerError)
 	mock.FailRoute("/container-deployments/"+testDeployment+"/scaling", http.StatusInternalServerError)
 
-	res, err := s.handleDescribeContainerDeployment(context.Background(),
+	res, err := s.handleDescribeContainerDeployment(t.Context(),
 		callReq("describe_container_deployment", map[string]any{"name": testDeployment}))
 	if err != nil {
 		t.Fatalf("handler error: %v", err)
@@ -114,7 +113,7 @@ func TestListContainerReplicas(t *testing.T) {
 	s, mock := newMockBackedServer(t)
 	mock.SeedContainerDeployment(testDeployment)
 
-	res, err := s.handleListContainerReplicas(context.Background(),
+	res, err := s.handleListContainerReplicas(t.Context(),
 		callReq("list_container_replicas", map[string]any{"name": testDeployment}))
 	if err != nil {
 		t.Fatalf("handler error: %v", err)
@@ -134,7 +133,7 @@ func scalingCall(t *testing.T, s *Server, a map[string]any) *mcp.CallToolResult 
 	if _, ok := a["name"]; !ok {
 		a["name"] = testDeployment
 	}
-	res, err := s.handleUpdateContainerScaling(context.Background(), callReq("update_container_scaling", a))
+	res, err := s.handleUpdateContainerScaling(t.Context(), callReq("update_container_scaling", a))
 	if err != nil {
 		t.Fatalf("handler error: %v", err)
 	}
@@ -254,7 +253,7 @@ func TestUpdateContainerScalingValidation(t *testing.T) {
 func actionCall(t *testing.T, s *Server, a map[string]any) *mcp.CallToolResult {
 	t.Helper()
 	a["name"] = testDeployment
-	res, err := s.handleContainerAction(context.Background(), callReq("container_action", a))
+	res, err := s.handleContainerAction(t.Context(), callReq("container_action", a))
 	if err != nil {
 		t.Fatalf("handler error: %v", err)
 	}
