@@ -80,7 +80,7 @@ func runDoctor(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 	apiResult := checkAPIReachable(ctx, f)
 
 	// 3. Authentication valid (skip if creds or API failed)
-	authResult := checkAuthentication(f, credResult, apiResult)
+	authResult := checkAuthentication(ctx, f, credResult, apiResult)
 
 	// CLI update check hits GitHub; spinner covers ~2s of silence.
 	versionResult, _ := cmdutil.WithSpinner(ctx, f.Status(), "Checking for CLI updates...", func(ctx context.Context) (checkResult, error) {
@@ -175,14 +175,17 @@ func checkAPIReachable(ctx context.Context, f cmdutil.Factory) checkResult {
 }
 
 // checkAuthentication verifies that f.Token() returns a valid token.
-func checkAuthentication(f cmdutil.Factory, cred, api checkResult) checkResult {
+func checkAuthentication(ctx context.Context, f cmdutil.Factory, cred, api checkResult) checkResult {
 	name := "Authentication valid"
 
 	if cred.Status != "ok" || api.Status != "ok" {
 		return checkResult{Name: name, Status: "skip", Detail: "skipped"}
 	}
 
-	token := f.Token()
+	ctx, cancel := context.WithTimeout(ctx, f.Options().Timeout)
+	defer cancel()
+
+	token := f.Token(ctx)
 	if token == "" {
 		return checkResult{Name: name, Status: "fail", Detail: "could not obtain token"}
 	}

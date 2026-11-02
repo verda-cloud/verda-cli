@@ -16,6 +16,7 @@ package util
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -96,9 +97,9 @@ type Factory interface {
 	// VerdaClient returns a configured Verda SDK client.
 	VerdaClient() (*verda.Client, error)
 	// Login authenticates and returns a bearer token.
-	Login() (string, error)
+	Login(ctx context.Context) (string, error)
 	// Token resolves a bearer token using the best available method.
-	Token() string
+	Token(ctx context.Context) string
 	// Prompter returns the interactive prompt interface.
 	Prompter() tui.Prompter
 	// Status returns the status/output display interface.
@@ -306,13 +307,13 @@ func (f *factoryImpl) VerdaClient() (*verda.Client, error) {
 }
 
 // Login performs authentication against the API server.
-func (f *factoryImpl) Login() (string, error) {
+func (f *factoryImpl) Login(ctx context.Context) (string, error) {
 	client, err := f.VerdaClient()
 	if err != nil {
 		return "", err
 	}
 
-	token, err := client.Auth.GetBearerToken()
+	token, err := client.Auth.GetBearerTokenContext(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -321,13 +322,13 @@ func (f *factoryImpl) Login() (string, error) {
 }
 
 // Token resolves a bearer token using the best available method.
-func (f *factoryImpl) Token() string {
+func (f *factoryImpl) Token(ctx context.Context) string {
 	auth := f.opts.AuthOptions
 	if auth.BearerToken != "" {
 		return auth.BearerToken
 	}
 	if auth.ClientID != "" && auth.ClientSecret != "" {
-		token, _ := f.Login()
+		token, _ := f.Login(ctx)
 		return token
 	}
 	return ""
