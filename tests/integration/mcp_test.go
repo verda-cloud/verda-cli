@@ -199,6 +199,8 @@ func TestMCP_ToolsList(t *testing.T) {
 		"list_vms", "describe_vm", "create_vm", "vm_action", "vm_availability",
 		"list_ssh_keys", "add_ssh_key", "get_ssh_command",
 		"list_volumes", "create_volume", "list_volumes_in_trash",
+		"list_container_deployments", "describe_container_deployment", "list_container_replicas",
+		"update_container_scaling", "container_action",
 	}
 
 	toolNames := make(map[string]bool)
