@@ -54,6 +54,8 @@ func (s *Server) registerContainerTools() {
 		s.handleListContainerReplicas,
 	)
 
+	s.registerContainerScalingTool()
+
 	s.mcpServer.AddTool(
 		mcp.NewTool("container_action",
 			mcp.WithDescription("Run a lifecycle action on a serverless container deployment: pause (stops all replicas until resumed), resume, restart (replaces all replicas; in-flight requests are dropped), or purge_queue (drops every pending request; cannot be undone). restart and purge_queue REQUIRE confirm: true — pass it after the user approved the action, or when the user has given standing instructions for this automation; without it the tool fails with CONFIRMATION_REQUIRED and nothing happens. Returns status 'accepted': the action runs asynchronously, so call describe_container_deployment to see the resulting status."),

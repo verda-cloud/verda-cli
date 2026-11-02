@@ -71,12 +71,16 @@ func NewLazyServer(getClient clientFunc) *Server {
 // serverInstructions carries the confirm gate and the error envelope — the two
 // contracts that decide whether an agent spends money correctly. It is prompt
 // context in every session, so keep it short.
-const serverInstructions = `Verda Cloud: GPU/CPU instances, volumes, SSH keys, object storage.
+const serverInstructions = `Verda Cloud: GPU/CPU instances, volumes, SSH keys, object storage, serverless
+container deployments.
 
 CONFIRM GATE — tools that create billing or destructive changes (create_vm,
-create_volume, and vm_action with shutdown/force_shutdown/hibernate/delete)
-refuse to run unless you pass confirm: true. Show the user the exact target and
-its cost first, then retry with confirm. A refused call has no side effects.
+create_volume, update_container_scaling, vm_action with
+shutdown/force_shutdown/hibernate/delete, container_action with
+restart/purge_queue) refuse to run unless you pass confirm: true. Show the user
+the exact target and its cost first, then retry with confirm; standing
+instructions from the user for an automation also count. A refused call has no
+side effects.
 
 ERRORS — a failed tool returns isError with a JSON text payload:
   {"error": {"code": "...", "message": "...", "details": {...}}}
@@ -275,6 +279,53 @@ func optionalInt(a map[string]any, name string) (int, error) {
 		return 0, nil
 	}
 	return strictInt(a, name, v)
+}
+
+// optionalIntPtr is optionalInt that keeps an absent argument (nil) apart from
+// an explicit 0 — min_replica_count: 0 means scale to zero, not "unchanged".
+func optionalIntPtr(a map[string]any, name string) (*int, error) {
+	v, ok := a[name]
+	if !ok || v == nil {
+		return nil, nil
+	}
+	i, err := strictInt(a, name, v)
+	if err != nil {
+		return nil, err
+	}
+	return &i, nil
+}
+
+// optionalFloatPtr extracts an optional number that may be fractional; nil
+// when absent.
+func optionalFloatPtr(a map[string]any, name string) (*float64, error) {
+	v, ok := a[name]
+	if !ok || v == nil {
+		return nil, nil
+	}
+	var f float64
+	switch n := v.(type) {
+	case float64:
+		f = n
+	case int:
+		f = float64(n)
+	default:
+		return nil, invalidArgError(name, "must be a number, got "+jsonTypeName(v))
+	}
+	return &f, nil
+}
+
+// optionalBoolPtr is optionalBool that keeps an absent argument (nil) apart
+// from an explicit false.
+func optionalBoolPtr(a map[string]any, name string) (*bool, error) {
+	v, ok := a[name]
+	if !ok || v == nil {
+		return nil, nil
+	}
+	b, ok := v.(bool)
+	if !ok {
+		return nil, invalidArgError(name, "must be a boolean, got "+jsonTypeName(v))
+	}
+	return &b, nil
 }
 
 func strictInt(a map[string]any, name string, v any) (int, error) {

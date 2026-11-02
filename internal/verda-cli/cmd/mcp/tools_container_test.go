@@ -129,6 +129,128 @@ func TestListContainerReplicas(t *testing.T) {
 	}
 }
 
+func scalingCall(t *testing.T, s *Server, a map[string]any) *mcp.CallToolResult {
+	t.Helper()
+	if _, ok := a["name"]; !ok {
+		a["name"] = testDeployment
+	}
+	res, err := s.handleUpdateContainerScaling(context.Background(), callReq("update_container_scaling", a))
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	return res
+}
+
+func TestUpdateContainerScalingConfirmGate(t *testing.T) {
+	t.Parallel()
+	s, mock := newMockBackedServer(t)
+	mock.SeedContainerDeployment(testDeployment)
+
+	assertToolErrorCode(t, scalingCall(t, s, map[string]any{"min_replica_count": float64(2)}), "CONFIRMATION_REQUIRED")
+	assertToolErrorCode(t, scalingCall(t, s, map[string]any{"min_replica_count": float64(2), "confirm": false}), "CONFIRMATION_REQUIRED")
+	if n := len(mock.ScalingPatchBodies()); n != 0 {
+		t.Fatalf("refused call reached the API: %d PATCH requests", n)
+	}
+
+	out := parseSuccess(t, scalingCall(t, s, map[string]any{"min_replica_count": float64(2), "confirm": true}))
+	if out["status"] != "accepted" {
+		t.Errorf("status = %v, want accepted", out["status"])
+	}
+	prev, _ := out["previous"].(map[string]any)
+	exp, _ := out["expected"].(map[string]any)
+	if prev["min_replica_count"] != float64(0) || exp["min_replica_count"] != float64(2) {
+		t.Errorf("previous/expected = %v / %v", prev, exp)
+	}
+	// Reads lag the PATCH; without wait nothing is reported as current.
+	if _, ok := out["current"]; ok {
+		t.Errorf("current reported without wait: %v", out["current"])
+	}
+	if got := mock.ContainerScaling(testDeployment).MinReplicaCount; got != 2 {
+		t.Errorf("stored min = %d, want 2", got)
+	}
+}
+
+// Wire-level: only the fields the agent set reach the API, and an explicit 0
+// is sent rather than dropped as "unset".
+func TestUpdateContainerScalingWireBody(t *testing.T) {
+	t.Parallel()
+	s, mock := newMockBackedServer(t)
+	mock.SeedContainerDeployment(testDeployment)
+
+	parseSuccess(t, scalingCall(t, s, map[string]any{"min_replica_count": float64(2), "confirm": true}))
+	parseSuccess(t, scalingCall(t, s, map[string]any{"min_replica_count": float64(0), "confirm": true}))
+	parseSuccess(t, scalingCall(t, s, map[string]any{"cpu_utilization_threshold": float64(60), "scale_up_delay_seconds": float64(30), "confirm": true}))
+
+	bodies := mock.ScalingPatchBodies()
+	if len(bodies) != 3 {
+		t.Fatalf("PATCH count = %d, want 3", len(bodies))
+	}
+	if v, ok := bodies[1]["min_replica_count"]; !ok || v != float64(0) || len(bodies[1]) != 1 {
+		t.Errorf("min 0 body = %v, want exactly {min_replica_count: 0}", bodies[1])
+	}
+	want := `{"scale_up_policy":{"delay_seconds":30},"scaling_triggers":{"cpu_utilization":{"enabled":true,"threshold":60}}}`
+	if got, _ := json.Marshal(bodies[2]); string(got) != want {
+		t.Errorf("trigger body = %s, want %s", got, want)
+	}
+}
+
+func TestUpdateContainerScalingTriggers(t *testing.T) {
+	t.Parallel()
+	s, mock := newMockBackedServer(t)
+	mock.SeedContainerDeployment(testDeployment)
+
+	// Seeded GPU is already off: the disable is still sent, since reads lag.
+	parseSuccess(t, scalingCall(t, s, map[string]any{"gpu_utilization_enabled": false, "confirm": true}))
+	want := `{"scaling_triggers":{"gpu_utilization":{"enabled":false,"threshold":0}}}`
+	if bodies := mock.ScalingPatchBodies(); len(bodies) != 1 {
+		t.Fatalf("PATCH count = %d, want 1", len(bodies))
+	} else if got, _ := json.Marshal(bodies[0]); string(got) != want {
+		t.Errorf("disable body = %s, want %s", got, want)
+	}
+
+	// Enabling without a threshold reuses the stored one.
+	parseSuccess(t, scalingCall(t, s, map[string]any{"cpu_utilization_enabled": true, "confirm": true}))
+	if cpu := mock.ContainerScaling(testDeployment).ScalingTriggers.CPUUtilization; !cpu.Enabled || cpu.Threshold != 70 {
+		t.Errorf("cpu after enable = %+v, want {true 70}", cpu)
+	}
+
+	parseSuccess(t, scalingCall(t, s, map[string]any{"queue_load_threshold": 1.5, "confirm": true}))
+	if q := mock.ContainerScaling(testDeployment).ScalingTriggers.QueueLoad; q.Threshold != 1.5 {
+		t.Errorf("queue load = %v, want 1.5", q.Threshold)
+	}
+}
+
+func TestUpdateContainerScalingValidation(t *testing.T) {
+	t.Parallel()
+	s, mock := newMockBackedServer(t)
+	mock.SeedContainerDeployment(testDeployment)
+
+	cases := []struct {
+		name string
+		args map[string]any
+		code string
+	}{
+		{"no fields", map[string]any{"confirm": true}, "MISSING_REQUIRED_FLAGS"},
+		{"max zero", map[string]any{"max_replica_count": float64(0), "confirm": true}, "VALIDATION_ERROR"},
+		{"max over limit", map[string]any{"max_replica_count": float64(1001), "confirm": true}, "VALIDATION_ERROR"},
+		{"util below 5", map[string]any{"cpu_utilization_threshold": float64(4), "confirm": true}, "VALIDATION_ERROR"},
+		{"queue load below 1", map[string]any{"queue_load_threshold": 0.5, "confirm": true}, "VALIDATION_ERROR"},
+		// Seeded max is 3: min alone must be checked against the current max.
+		{"min above current max", map[string]any{"min_replica_count": float64(5), "confirm": true}, "VALIDATION_ERROR"},
+		{"min above new max", map[string]any{"min_replica_count": float64(5), "max_replica_count": float64(4), "confirm": true}, "VALIDATION_ERROR"},
+		// Seeded GPU is off with threshold 0: there is no threshold to reuse.
+		{"enable without threshold", map[string]any{"gpu_utilization_enabled": true, "confirm": true}, "VALIDATION_ERROR"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assertToolErrorCode(t, scalingCall(t, s, tc.args), tc.code)
+		})
+	}
+	if n := len(mock.ScalingPatchBodies()); n != 0 {
+		t.Fatalf("invalid calls reached the API: %d PATCH requests", n)
+	}
+}
+
 func actionCall(t *testing.T, s *Server, a map[string]any) *mcp.CallToolResult {
 	t.Helper()
 	a["name"] = testDeployment
