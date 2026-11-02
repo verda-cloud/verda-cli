@@ -66,25 +66,31 @@ const (
 type Server struct {
 	srv *httptest.Server
 
-	mu             sync.Mutex
-	instances      map[string]*verda.Instance
-	volumes        map[string]*verda.Volume
-	sshKeys        map[string]*verda.SSHKey
-	failures       map[string]int // exact path -> HTTP status override
-	hangs          map[string]bool
-	forceFormToken bool
-	instanceGets   int // GET /instances/{id} count — status polling signal
-	idSeq          int
+	mu               sync.Mutex
+	instances        map[string]*verda.Instance
+	volumes          map[string]*verda.Volume
+	sshKeys          map[string]*verda.SSHKey
+	containers       map[string]*containerFixture
+	containerActions map[string]int // "name/action" -> POST count
+	scalingPatches   []map[string]any
+	scalingReadLag   int
+	failures         map[string]int // exact path -> HTTP status override
+	hangs            map[string]bool
+	forceFormToken   bool
+	instanceGets     int // GET /instances/{id} count — status polling signal
+	idSeq            int
 }
 
 // New starts a mock API server. The caller is responsible for Close.
 func New() *Server {
 	s := &Server{
-		instances: map[string]*verda.Instance{},
-		volumes:   map[string]*verda.Volume{},
-		sshKeys:   map[string]*verda.SSHKey{},
-		failures:  map[string]int{},
-		hangs:     map[string]bool{},
+		instances:        map[string]*verda.Instance{},
+		volumes:          map[string]*verda.Volume{},
+		sshKeys:          map[string]*verda.SSHKey{},
+		containers:       map[string]*containerFixture{},
+		containerActions: map[string]int{},
+		failures:         map[string]int{},
+		hangs:            map[string]bool{},
 	}
 
 	mux := http.NewServeMux()
@@ -107,6 +113,7 @@ func New() *Server {
 	mux.HandleFunc("GET /instance-availability", s.handleAvailability)
 	mux.HandleFunc("GET /instance-availability/{type}", s.handleTypeAvailability)
 	mux.HandleFunc("GET /balance", s.handleBalance)
+	s.registerContainerRoutes(mux)
 	mux.HandleFunc("/", s.handleNotFound)
 
 	s.srv = httptest.NewServer(s.guard(mux))

@@ -166,6 +166,59 @@ func TestNumbersStrict(t *testing.T) {
 	}
 }
 
+var ptrHelperArgs = map[string]any{
+	"zero":  float64(0),
+	"five":  float64(5),
+	"frac":  float64(1.5),
+	"str":   "3",
+	"false": false,
+	"null":  nil,
+}
+
+func TestOptionalIntPtr(t *testing.T) {
+	a := ptrHelperArgs
+	if got, err := optionalIntPtr(a, "zero"); err != nil || got == nil || *got != 0 {
+		t.Errorf("optionalIntPtr(zero) = %v, %v; want ptr to 0", got, err)
+	}
+	if got, err := optionalIntPtr(a, "missing"); err != nil || got != nil {
+		t.Errorf("optionalIntPtr(missing) = %v, %v; want nil, nil", got, err)
+	}
+	if got, err := optionalIntPtr(a, "null"); err != nil || got != nil {
+		t.Errorf("optionalIntPtr(null) = %v, %v; want nil, nil", got, err)
+	}
+	for _, name := range []string{"frac", "str", "false"} {
+		if _, err := optionalIntPtr(a, name); err == nil {
+			t.Errorf("optionalIntPtr(%s) = nil error, want rejection", name)
+		}
+	}
+}
+
+func TestOptionalFloatPtr(t *testing.T) {
+	a := ptrHelperArgs
+	if got, err := optionalFloatPtr(a, "frac"); err != nil || got == nil || *got != 1.5 {
+		t.Errorf("optionalFloatPtr(frac) = %v, %v; want ptr to 1.5", got, err)
+	}
+	if got, err := optionalFloatPtr(a, "missing"); err != nil || got != nil {
+		t.Errorf("optionalFloatPtr(missing) = %v, %v; want nil, nil", got, err)
+	}
+	if _, err := optionalFloatPtr(a, "str"); err == nil {
+		t.Error("optionalFloatPtr(str) = nil error, want rejection")
+	}
+}
+
+func TestOptionalBoolPtr(t *testing.T) {
+	a := ptrHelperArgs
+	if got, err := optionalBoolPtr(a, "false"); err != nil || got == nil || *got {
+		t.Errorf("optionalBoolPtr(false) = %v, %v; want ptr to false", got, err)
+	}
+	if got, err := optionalBoolPtr(a, "missing"); err != nil || got != nil {
+		t.Errorf("optionalBoolPtr(missing) = %v, %v; want nil, nil", got, err)
+	}
+	if _, err := optionalBoolPtr(a, "five"); err == nil {
+		t.Error("optionalBoolPtr(five) = nil error, want rejection")
+	}
+}
+
 func TestOptionalStringSliceStrict(t *testing.T) {
 	a := map[string]any{
 		"arr":      []any{"a", "b"},

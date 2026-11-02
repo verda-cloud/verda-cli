@@ -34,6 +34,8 @@ type mcpClient struct {
 	stderr *bytes.Buffer
 	t      *testing.T
 	nextID int
+	// timeout bounds each response; raise it for tools that poll (wait: true).
+	timeout time.Duration
 }
 
 // startMCP starts the MCP server as a subprocess.
@@ -66,12 +68,13 @@ func startMCP(t *testing.T, profile string) *mcpClient {
 	})
 
 	return &mcpClient{
-		cmd:    cmd,
-		stdin:  stdin,
-		stdout: bufio.NewReader(stdout),
-		stderr: &stderr,
-		t:      t,
-		nextID: 1,
+		cmd:     cmd,
+		stdin:   stdin,
+		stdout:  bufio.NewReader(stdout),
+		stderr:  &stderr,
+		t:       t,
+		nextID:  1,
+		timeout: 30 * time.Second,
 	}
 }
 
@@ -119,7 +122,7 @@ func (c *mcpClient) send(method string, params any) map[string]any {
 	case err := <-errCh:
 		c.t.Fatalf("read error: %v\nstderr: %s", err, c.stderr.String())
 		return nil
-	case <-time.After(30 * time.Second):
+	case <-time.After(c.timeout):
 		c.t.Fatalf("timeout waiting for MCP response\nstderr: %s", c.stderr.String())
 		return nil
 	}
@@ -199,6 +202,8 @@ func TestMCP_ToolsList(t *testing.T) {
 		"list_vms", "describe_vm", "create_vm", "vm_action", "vm_availability",
 		"list_ssh_keys", "add_ssh_key", "get_ssh_command",
 		"list_volumes", "create_volume", "list_volumes_in_trash",
+		"list_container_deployments", "describe_container_deployment", "list_container_replicas",
+		"update_container_scaling", "container_action",
 	}
 
 	toolNames := make(map[string]bool)

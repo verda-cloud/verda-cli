@@ -37,12 +37,30 @@ Credentials are shared with the CLI — run `verda auth login` first in the same
 | `create_volume` | **yes, billing** — `confirm:true` required | `name`, `size_gb`, `confirm` (required); `type`, `location` |
 | `create_vm` | **yes, billing** — `confirm:true` required | `instance_type`, `image`, `hostname`, `confirm` (required); `location`, `description`, `os_volume_size_gb`, `ssh_key_ids`, `startup_script_id`, `spot`, `storage_size_gb`, `storage_type`, `wait` (default true) |
 | `vm_action` | **action-dependent** | `id`, `action` (required); `confirm`, `wait` |
+| `list_container_deployments` | no | — |
+| `describe_container_deployment` | no | `name` (required) |
+| `list_container_replicas` | no | `name` (required) |
+| `update_container_scaling` | **yes, billing** — `confirm:true` required | `name`, `confirm` (required); at least one of `min_replica_count`, `max_replica_count`, `concurrent_requests_per_replica`, `queue_message_ttl_seconds`, `scale_up_delay_seconds`, `scale_down_delay_seconds`, `queue_load_threshold`, `cpu_utilization_enabled`, `cpu_utilization_threshold`, `gpu_utilization_enabled`, `gpu_utilization_threshold` |
+| `container_action` | **action-dependent** | `name`, `action` (required: `pause`, `resume`, `restart`, `purge_queue`); `confirm` |
+
+The container tools are registered whether or not `VERDA_SERVERLESS_ENABLED` is set; that variable gates only the pre-GA `verda container` / `verda batchjob` CLI commands.
+
+## Serverless containers
+
+- **No secrets out.** `describe_container_deployment` returns env var *names* only, never values (which may be secrets), like the CLI describe card. Status and scaling are best-effort: if either call fails, the deployment is still returned with `status_error` / `scaling_error`.
+- **Partial updates.** `update_container_scaling` sends only the fields the agent passes; scaling triggers it leaves out keep their current values. An explicit `min_replica_count: 0` is sent as 0 (scale to zero when idle), not treated as "unset".
+- **Checked before the call.** Spec limits, and `min_replica_count` ≤ the current `max_replica_count` when only one is passed; a violation is `VALIDATION_ERROR` and nothing is sent.
+- **Triggers.** Setting `*_utilization_threshold` turns that trigger on unless `*_utilization_enabled: false` is also passed. `*_utilization_enabled: true` alone reuses the stored threshold (error if there is none; a disabled trigger reads back with threshold 0). A disable is always sent, even when a read says the trigger is already off, because reads lag.
+- **Result.** Reads show a scaling change after 10–20 s, so the tool returns `status: "accepted"` with `previous` (the read before the change, which may lag) and `expected` (the PATCH response: the stored options with the change). With `wait: true` it polls for up to 60 s until reads show the fields the call set, then returns `status: "applied"` and `current`; on timeout it adds `wait_error` (the update itself succeeded). Replicas start and stop asynchronously — use `list_container_replicas`.
+- **Transient 503.** Raising replica counts can fail with `API_ERROR` 503 "Failed to check quota. Try again"; retrying is safe.
 
 Hibernate is deprecated and will be removed in a future version. It discontinues compute and retains volumes. Retained volumes continue billing.
 
 ## Confirmation contract
 
-Tools that create billed resources (`create_vm`, `create_volume`) or perform destructive actions (`vm_action` with `shutdown`, `force_shutdown`, `hibernate` (deprecated), `delete`) require the boolean argument `confirm: true`. This mirrors `--yes` in the CLI's `--agent` mode.
+Tools that create billed resources (`create_vm`, `create_volume`, `update_container_scaling`) or perform destructive actions (`vm_action` with `shutdown`, `force_shutdown`, `hibernate` (deprecated), `delete`; `container_action` with `restart`, `purge_queue`) require the boolean argument `confirm: true`. This mirrors `--yes` in the CLI's `--agent` mode.
+
+`confirm` is set by the agent and is not an approval check: unattended automation under standing instructions from its owner (for example, scale to `min_replica_count: 0` at night) passes it on the first call.
 
 Without it, the tool fails with `isError: true` and a JSON payload following the CLI agent-error envelope (see [docs/agent-errors.md](../../../docs/agent-errors.md)):
 
@@ -78,4 +96,6 @@ mcp-go does not validate arguments against the declared schema. All handlers typ
 - `tools_vm.go` — VM list/describe/create/action; `vmActions` table mirrors `cmd/vm/action.go`
 - `tools_ssh.go` — SSH key list/add, ssh command construction
 - `tools_volume.go` — volume list/create/trash
+- `tools_container.go` — container deployment list/describe/replicas and `container_action`; `containerActions` table mirrors `cmd/serverless/container_actions.go`; views drop env var values
+- `tools_container_scaling.go` — `update_container_scaling`: argument parsing, spec limits, request built against the current options
 - `server_test.go` — strict helper + envelope tests; `lazy_init_test.go` — concurrent-init race repro (`-race`); `tools_test.go` — handler tests against `tests/contract/mockapi`

@@ -103,6 +103,10 @@ Mount types in `ContainerVolumeMount.Type` that the CLI currently sends:
 
 `newContainerActionCmd` / `newBatchjobActionCmd` build a `*cobra.Command` from `(verb, short, spinner, successMsg, destructive, fn)`. This avoids five nearly-identical files per subcommand. If you need to add an action (e.g. a future `scaling get`), add a new call site with the right SDK method. If you need per-action flags beyond `--yes`, you'll have to step out of the factory — acceptable if one action grows special, not if two do.
 
+### MCP surface
+
+The MCP `containerActions` table (`cmd/mcp/tools_container.go`) mirrors the destructive set here (restart, purge-queue) — change both together.
+
 ### Destructive confirms
 
 `restart` and `purge-queue` are marked destructive (they break in-flight requests); `pause` and `resume` are not. In agent mode, destructive actions require `--yes` and return `CONFIRMATION_REQUIRED` otherwise. Non-agent TTY uses `confirmDestructive` from `shared.go` (red warning + "cannot be undone" line + `prompter.Confirm`).
