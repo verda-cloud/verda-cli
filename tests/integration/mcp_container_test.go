@@ -18,6 +18,7 @@ package integration
 
 import (
 	"encoding/json"
+	"maps"
 	"os"
 	"reflect"
 	"strings"
@@ -208,11 +209,7 @@ func restoreScaling(t *testing.T, c *mcpClient, name string, orig map[string]any
 			a[p+"_utilization_enabled"] = false
 		}
 	}
-	for k, v := range a {
-		if v == nil {
-			delete(a, k)
-		}
-	}
+	maps.DeleteFunc(a, func(_ string, v any) bool { return v == nil })
 	updateScaling(t, c, name, a)
 }
 
