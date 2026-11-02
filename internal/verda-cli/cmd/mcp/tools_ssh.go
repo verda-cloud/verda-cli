@@ -65,6 +65,8 @@ func (s *Server) handleListSSHKeys(ctx context.Context, req mcp.CallToolRequest)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
+	ctx, cancel := s.apiContext(ctx)
+	defer cancel()
 
 	keys, err := client.SSHKeys.GetAllSSHKeys(ctx)
 	if err != nil {
@@ -91,6 +93,8 @@ func (s *Server) handleAddSSHKey(ctx context.Context, req mcp.CallToolRequest) (
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
+	ctx, cancel := s.apiContext(ctx)
+	defer cancel()
 
 	name, err := requiredString(args(req), "name")
 	if err != nil {
@@ -162,6 +166,8 @@ func (s *Server) resolveInstance(ctx context.Context, idOrHostname string) (*ver
 	if err != nil {
 		return nil, err
 	}
+	ctx, cancel := s.apiContext(ctx)
+	defer cancel()
 
 	// Try by ID first.
 	inst, err := client.Instances.GetByID(ctx, idOrHostname)

@@ -65,6 +65,8 @@ func (s *Server) handleListLocations(ctx context.Context, _ mcp.CallToolRequest)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
+	ctx, cancel := s.apiContext(ctx)
+	defer cancel()
 
 	locations, err := client.Locations.Get(ctx)
 	if err != nil {
@@ -90,6 +92,8 @@ func (s *Server) handleListInstanceTypes(ctx context.Context, req mcp.CallToolRe
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
+	ctx, cancel := s.apiContext(ctx)
+	defer cancel()
 
 	types, err := client.InstanceTypes.Get(ctx, "")
 	if err != nil {
@@ -133,6 +137,8 @@ func (s *Server) handleCheckAvailability(ctx context.Context, req mcp.CallToolRe
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
+	ctx, cancel := s.apiContext(ctx)
+	defer cancel()
 
 	// If checking a specific instance type, use the targeted API.
 	if instanceType != "" {
@@ -168,6 +174,8 @@ func (s *Server) handleListImages(ctx context.Context, req mcp.CallToolRequest) 
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
+	ctx, cancel := s.apiContext(ctx)
+	defer cancel()
 
 	var images any
 

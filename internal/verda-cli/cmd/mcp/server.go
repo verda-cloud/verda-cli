@@ -22,6 +22,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -41,6 +42,19 @@ type Server struct {
 	clientOnce sync.Once
 	getClient  clientFunc
 	mcpServer  *server.MCPServer
+	apiTimeout time.Duration
+}
+
+// SetAPITimeout bounds each tool's control-plane calls (the CLI --timeout);
+// zero leaves them unbounded. Call it before serving.
+func (s *Server) SetAPITimeout(d time.Duration) { s.apiTimeout = d }
+
+// apiContext: the shared http.Client has no Timeout, so handlers bound their own calls.
+func (s *Server) apiContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if s.apiTimeout > 0 {
+		return context.WithTimeout(ctx, s.apiTimeout)
+	}
+	return context.WithCancel(ctx)
 }
 
 // NewServer creates a new MCP server backed by the given Verda client.
