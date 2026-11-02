@@ -118,6 +118,7 @@ func newServer(getClient clientFunc) *Server {
 	s.registerVMTools()
 	s.registerSSHTools()
 	s.registerVolumeTools()
+	s.registerContainerTools()
 
 	return s
 }
