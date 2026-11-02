@@ -15,6 +15,7 @@
 package util
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"time"
@@ -84,9 +85,9 @@ func (f *TestFactory) VerdaClient() (*verda.Client, error) {
 	return nil, ErrNoClient
 }
 
-func (f *TestFactory) Login() (string, error) { return "", ErrNoClient }
+func (f *TestFactory) Login(context.Context) (string, error) { return "", ErrNoClient }
 
-func (f *TestFactory) Token() string { return "" }
+func (f *TestFactory) Token(context.Context) string { return "" }
 
 func (f *TestFactory) Prompter() tui.Prompter {
 	if f.PrompterOverride != nil {

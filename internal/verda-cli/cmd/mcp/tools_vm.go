@@ -130,6 +130,8 @@ func (s *Server) handleVMAvailability(ctx context.Context, req mcp.CallToolReque
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
+	ctx, cancel := s.apiContext(ctx)
+	defer cancel()
 
 	// Fetch instance types with pricing.
 	types, err := client.InstanceTypes.Get(ctx, "usd")
@@ -214,6 +216,8 @@ func (s *Server) handleListVMs(ctx context.Context, req mcp.CallToolRequest) (*m
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
+	ctx, cancel := s.apiContext(ctx)
+	defer cancel()
 
 	instances, err := client.Instances.List(ctx, &verda.ListInstancesOptions{Status: status})
 	if err != nil {
@@ -233,6 +237,8 @@ func (s *Server) handleDescribeVM(ctx context.Context, req mcp.CallToolRequest) 
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
+	ctx, cancel := s.apiContext(ctx)
+	defer cancel()
 
 	inst, err := client.Instances.GetByID(ctx, id)
 	if err != nil {
@@ -311,10 +317,12 @@ func (s *Server) handleCreateVM(ctx context.Context, req mcp.CallToolRequest) (*
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
+	apiCtx, cancel := s.apiContext(ctx)
+	defer cancel()
 
 	if location == "" {
 		// Auto-pick a location that has stock for this instance type.
-		loc, err := s.findAvailableLocation(ctx, client, instanceType, spot)
+		loc, err := s.findAvailableLocation(apiCtx, client, instanceType, spot)
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
@@ -325,14 +333,14 @@ func (s *Server) handleCreateVM(ctx context.Context, req mcp.CallToolRequest) (*
 	}
 
 	// Resolve SSH key names to IDs, or use the most recent key as default.
-	sshKeyIDs, err := s.resolveSSHKeyIDs(ctx, client, sshKeyInputs)
+	sshKeyIDs, err := s.resolveSSHKeyIDs(apiCtx, client, sshKeyInputs)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 	var sshKeysNote string
 	if len(sshKeyIDs) == 0 {
 		// Attach all account SSH keys as default.
-		keys, kerr := client.SSHKeys.GetAllSSHKeys(ctx)
+		keys, kerr := client.SSHKeys.GetAllSSHKeys(apiCtx)
 		if kerr == nil && len(keys) > 0 {
 			names := make([]string, 0, len(keys))
 			for i := range keys {
@@ -383,7 +391,7 @@ func (s *Server) handleCreateVM(ctx context.Context, req mcp.CallToolRequest) (*
 		createReq.Contract = "SPOT"
 	}
 
-	inst, err := client.Instances.Create(ctx, createReq)
+	inst, err := client.Instances.Create(apiCtx, createReq)
 	if err != nil {
 		// Envelope, not a bare string: agents branch on create failures
 		// (SSH_KEY_REQUIRED, INSUFFICIENT_BALANCE).
@@ -391,15 +399,19 @@ func (s *Server) handleCreateVM(ctx context.Context, req mcp.CallToolRequest) (*
 	}
 
 	if wait {
-		inst, err = s.pollInstance(ctx, inst.ID, verda.StatusRunning, 5*time.Minute)
+		polled, err := s.pollInstance(ctx, inst.ID, verda.StatusRunning, 5*time.Minute)
 		if err != nil {
-			// Return what we have even if polling fails.
+			// Return what we have even if polling fails: the VM exists and bills.
+			if polled != nil {
+				inst = polled
+			}
 			return jsonResult(map[string]any{
 				"instance":       inst,
 				"poll_error":     err.Error(),
 				"poll_timed_out": true,
 			})
 		}
+		inst = polled
 	}
 
 	result := map[string]any{"instance": inst}
@@ -490,8 +502,10 @@ func (s *Server) handleVMAction(ctx context.Context, req mcp.CallToolRequest) (*
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
+	apiCtx, cancel := s.apiContext(ctx)
+	defer cancel()
 
-	if err := action.exec(ctx, client, id); err != nil {
+	if err := action.exec(apiCtx, client, id); err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
@@ -532,6 +546,9 @@ func (s *Server) pollInstance(ctx context.Context, id, expectStatus string, time
 		return nil, err
 	}
 
+	// The deadline must bound each GET too: the shared http.Client has no Timeout.
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 	deadline := time.Now().Add(timeout)
 	for {
 		inst, err := client.Instances.GetByID(ctx, id)

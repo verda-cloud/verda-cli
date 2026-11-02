@@ -21,6 +21,7 @@ package mockapi
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -224,6 +225,8 @@ func (s *Server) guard(next http.Handler) http.Handler {
 		hang := s.hangs[r.URL.Path]
 		s.mu.Unlock()
 		if hang {
+			// The server sees a client disconnect only after the body is read; POST /oauth2/token has one.
+			_, _ = io.Copy(io.Discard, r.Body)
 			<-r.Context().Done()
 			writeError(w, http.StatusServiceUnavailable, "mock hung route: client context canceled")
 			return

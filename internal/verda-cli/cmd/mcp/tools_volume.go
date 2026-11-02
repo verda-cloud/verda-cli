@@ -55,6 +55,8 @@ func (s *Server) handleListVolumes(ctx context.Context, _ mcp.CallToolRequest) (
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
+	ctx, cancel := s.apiContext(ctx)
+	defer cancel()
 
 	volumes, err := client.Volumes.ListVolumes(ctx)
 	if err != nil {
@@ -101,6 +103,8 @@ func (s *Server) handleCreateVolume(ctx context.Context, req mcp.CallToolRequest
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
+	ctx, cancel := s.apiContext(ctx)
+	defer cancel()
 
 	if volType == "" {
 		volType = verda.VolumeTypeNVMe
@@ -135,6 +139,8 @@ func (s *Server) handleListVolumesInTrash(ctx context.Context, _ mcp.CallToolReq
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
+	ctx, cancel := s.apiContext(ctx)
+	defer cancel()
 
 	volumes, err := client.Volumes.GetVolumesInTrash(ctx)
 	if err != nil {

@@ -19,6 +19,9 @@
 - The gate runs BEFORE `verdaClient()`/API calls; a refused call must have zero side effects
 - Agent-facing codes: `CONFIRMATION_REQUIRED`, `VALIDATION_ERROR`, `MISSING_REQUIRED_FLAGS` — same names as the CLI `--agent` contract
 
+### API timeout
+- The shared `http.Client` has no `Timeout`: every handler bounds its API calls, OAuth token request included, with `s.apiContext(ctx)` (`--timeout`, set via `SetAPITimeout` in `mcp.go`); `wait` polling keeps the raw ctx and its own deadline
+
 ### Action honesty
 - Never report `"completed"` without observing it: default is `"accepted"`; `wait: true` polls via `cmdutil.PollInstanceStatus` (5 min timeout, nil writer — no TUI spinner over MCP)
 - `vmActions.expectStatus` and the destructive set mirror `cmd/vm/action.go` — keep both in sync

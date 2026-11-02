@@ -74,6 +74,7 @@ func NewCmdServe(f cmdutil.Factory, _ cmdutil.IOStreams) *cobra.Command {
 				}
 				return f.VerdaClient()
 			})
+			server.SetAPITimeout(opts.Timeout)
 			fmt.Fprintln(os.Stderr, "Verda MCP server listening on stdio")
 			return server.ServeStdio(cmd.Context())
 		},

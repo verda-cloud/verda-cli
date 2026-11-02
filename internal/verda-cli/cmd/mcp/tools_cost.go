@@ -60,6 +60,8 @@ func (s *Server) handleGetBalance(ctx context.Context, _ mcp.CallToolRequest) (*
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
+	ctx, cancel := s.apiContext(ctx)
+	defer cancel()
 
 	balance, err := client.Balance.Get(ctx)
 	if err != nil {
@@ -100,6 +102,8 @@ func (s *Server) handleEstimateCost(ctx context.Context, req mcp.CallToolRequest
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
+	ctx, cancel := s.apiContext(ctx)
+	defer cancel()
 
 	// Get instance type pricing by fetching all types and filtering.
 	allTypes, err := client.InstanceTypes.Get(ctx, "")
@@ -187,6 +191,8 @@ func (s *Server) handleGetRunningCosts(ctx context.Context, _ mcp.CallToolReques
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
+	ctx, cancel := s.apiContext(ctx)
+	defer cancel()
 
 	instances, err := client.Instances.List(ctx, &verda.ListInstancesOptions{Status: "running"})
 	if err != nil {
@@ -223,6 +229,10 @@ func (s *Server) handleGetRunningCosts(ctx context.Context, _ mcp.CallToolReques
 		for _, volID := range cmdutil.UniqueVolumeIDs(&instances[i]) {
 			vol, err := client.Volumes.GetVolume(ctx, volID)
 			if err != nil {
+				// Out of time: fail rather than report an understated total.
+				if ctx.Err() != nil {
+					return mcp.NewToolResultError(ctx.Err().Error()), nil
+				}
 				continue
 			}
 			volCount++

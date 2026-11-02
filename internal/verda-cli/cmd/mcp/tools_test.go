@@ -21,6 +21,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
@@ -457,5 +458,27 @@ func TestEstimateCostSuccess(t *testing.T) {
 	}
 	if st, _ := breakdown["storage"].(float64); st <= 0 {
 		t.Errorf("storage hourly = %v, want > 0 for 200GB HDD", st)
+	}
+}
+
+// A stalled API, including the OAuth token request, fails within --timeout.
+func TestToolsHonorAPITimeout(t *testing.T) {
+	t.Parallel()
+	s, mock := newMockBackedServer(t)
+	mock.HangRoute("/oauth2/token")
+	s.SetAPITimeout(200 * time.Millisecond)
+
+	done := make(chan *mcp.CallToolResult, 1)
+	go func() {
+		res, _ := s.handleListLocations(context.Background(), callReq("list_locations", nil))
+		done <- res
+	}()
+	select {
+	case res := <-done:
+		if res == nil || !res.IsError {
+			t.Fatalf("expected a timeout error, got: %v", res)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("list_locations did not honor the API timeout")
 	}
 }
