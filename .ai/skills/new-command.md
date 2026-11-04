@@ -123,16 +123,16 @@ interactive flow; everything else stays one-shot. Gate it exactly like this:
 if len(args) >= wantArgs {            // explicit args -> run directly
     return run(cmd, f, ioStreams, opts, args...)
 }
-if f.AgentMode() {                    // agents get a structured error, never a prompt
-    return cmdutil.NewMissingFlagsError([]string{"s3://bucket/key"})
-}
-if !interactiveTTY(f) {               // non-TTY or json/yaml output -> help, no silent prompt
-    return cmd.Help()
+if !interactiveTTY(f) {               // agent, pipe, -o json|yaml -> structured error, never a prompt
+    return cmdutil.NewMissingFlagsError([]string{"<name>"})
 }
 return runInteractive(cmd, f, ioStreams, opts, args)
 ```
 
-`interactiveTTY(f)` == `IsStdoutTerminal() && !AgentMode() && OutputFormat() == "table"`.
+`interactiveTTY(f)` == stdin, stdout and stderr are terminals && `!AgentMode()` && `OutputFormat() == "table"`.
+
+Why an error, not help: help on stdout with exit 0 breaks `-o json` scripts, and prompts read stdin and draw on stderr.
+`objectstorage` still prints help in this case; don't copy it.
 
 **The hint bar is mandatory on every direct `Select` / `MultiSelect`.** Pass
 `tui.WithShowHints(true)` (or `tui.WithMultiSelectShowHints(true)`) so the user

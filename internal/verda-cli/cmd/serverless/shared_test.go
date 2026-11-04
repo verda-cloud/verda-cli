@@ -17,6 +17,7 @@ package serverless
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestValidateDeploymentName(t *testing.T) {
@@ -148,6 +149,31 @@ func TestParseSecretMountFlag(t *testing.T) {
 			}
 			if m.SecretName != tc.wantSecret || m.MountPath != tc.wantPath || m.Type != mountTypeSecret {
 				t.Fatalf("got %+v, want secret=%s path=%s", m, tc.wantSecret, tc.wantPath)
+			}
+		})
+	}
+}
+
+func TestDeleteTimeout(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		cliTimeout time.Duration
+		explicit   bool
+		timeoutMs  int
+		want       time.Duration
+	}{
+		{"default covers the API wait", 30 * time.Second, false, -1, 75 * time.Second},
+		{"explicit --timeout is used as is", 5 * time.Second, true, -1, 5 * time.Second},
+		{"explicit --timeout wins over --timeout-ms", 5 * time.Second, true, 120000, 5 * time.Second},
+		{"--timeout-ms 0", 30 * time.Second, false, 0, 15 * time.Second},
+		{"--timeout-ms above the server cap", 30 * time.Second, false, 900000, 315 * time.Second},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := deleteTimeout(tt.cliTimeout, tt.explicit, tt.timeoutMs); got != tt.want {
+				t.Errorf("deleteTimeout(%s, %v, %d) = %s, want %s", tt.cliTimeout, tt.explicit, tt.timeoutMs, got, tt.want)
 			}
 		})
 	}

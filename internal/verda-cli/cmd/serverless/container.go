@@ -23,13 +23,9 @@ import (
 // NewCmdContainer creates the top-level `verda container` command tree.
 func NewCmdContainer(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "container",
-		Short: "Manage serverless container deployments (always-on endpoints)",
-		// Pre-release: hidden from `verda --help`. The env-var gate in
-		// cmd/cmd.go (serverlessEnabled) decides whether the command is even
-		// registered; this covers testers who flip VERDA_SERVERLESS_ENABLED on.
-		// Drop both when serverless ships GA.
-		Hidden: true,
+		Use:         "container",
+		Short:       "Manage serverless container deployments (always-on endpoints)",
+		Annotations: map[string]string{cmdutil.TagAnnotation: "beta"},
 		Long: cmdutil.LongDesc(`
 			Create and manage always-on serverless container deployments. Each
 			deployment exposes an HTTPS endpoint that auto-scales based on queue
@@ -47,6 +43,8 @@ func NewCmdContainer(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Comm
 		newCmdContainerResume(f, ioStreams),
 		newCmdContainerRestart(f, ioStreams),
 		newCmdContainerPurgeQueue(f, ioStreams),
+		newCmdContainerScale(f, ioStreams),
+		newCmdContainerReplicas(f, ioStreams),
 	)
 	return cmd
 }

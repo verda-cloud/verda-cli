@@ -205,23 +205,31 @@ func stepContainerConcurrency(target *int) wizard.Step {
 
 // --- Queue-load preset + custom value ---
 
+// queuePresetChoices: the named presets (labels with the threshold if withThreshold), then Custom.
+func queuePresetChoices(withThreshold bool, customDesc string) []wizard.Choice {
+	choices := make([]wizard.Choice, 0, len(queuePresets)+1)
+	for _, p := range queuePresets {
+		label := p.label
+		if withThreshold {
+			label += " (" + strconv.Itoa(p.threshold) + ")"
+		}
+		choices = append(choices, wizard.Choice{Label: label, Value: p.name, Description: p.description})
+	}
+	return append(choices, wizard.Choice{Label: "Custom", Value: presetCustom, Description: customDesc})
+}
+
 func stepContainerQueuePreset(target *string) wizard.Step {
 	return wizard.Step{
 		Name:        "queue-preset",
 		Description: "Queue-load preset",
 		Prompt:      wizard.SelectPrompt,
 		Required:    true,
-		Loader: wizard.StaticChoices(
-			wizard.Choice{Label: "Instant", Value: presetInstant, Description: "Scale up as soon as any request arrives. Minimizes time in queue."},
-			wizard.Choice{Label: "Balanced", Value: presetBalanced, Description: "Short queue wait before scaling up. Good for most APIs."},
-			wizard.Choice{Label: "Cost saver", Value: presetCostSaver, Description: "Fewer replicas; requests may wait longer in queue."},
-			wizard.Choice{Label: "Custom", Value: presetCustom, Description: "Specify a queue-load threshold yourself."},
-		),
-		Default:  func(_ map[string]any) any { return *target },
-		Setter:   func(v any) { *target = v.(string) },
-		Resetter: func() { *target = presetBalanced },
-		IsSet:    func() bool { return false },
-		Value:    func() any { return *target },
+		Loader:      wizard.StaticChoices(queuePresetChoices(false, "Specify a queue-load threshold yourself.")...),
+		Default:     func(_ map[string]any) any { return *target },
+		Setter:      func(v any) { *target = v.(string) },
+		Resetter:    func() { *target = presetBalanced },
+		IsSet:       func() bool { return false },
+		Value:       func() any { return *target },
 	}
 }
 

@@ -314,3 +314,55 @@ func TestContainerCreate_SecretMountWireFormat(t *testing.T) {
 		t.Errorf("second mount must be the secret, got %+v", mounts[1])
 	}
 }
+
+func TestContainerCreate_QueuePresetWireFormat(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		args []string
+		want float64
+	}{
+		{"instant", []string{"--queue-preset", "instant"}, 1},
+		{"balanced", []string{"--queue-preset", "balanced"}, 3},
+		{"cost-saver", []string{"--queue-preset", "cost-saver"}, 6},
+		{"cost_saver alias", []string{"--queue-preset", "cost_saver"}, 6},
+		{"custom", []string{"--queue-preset", "custom", "--queue-load", "10"}, 10},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			rec := newRecordingServer(t)
+			f := newTestFactory(t, rec.srv.URL)
+
+			var stdout, stderr bytes.Buffer
+			cmd := NewCmdContainer(f, cmdutil.IOStreams{Out: &stdout, ErrOut: &stderr})
+			cmd.SetArgs(append([]string{
+				"create",
+				"--name", "cli-test",
+				"--image", "ghcr.io/org/app:v1.2",
+				"--compute", "RTX4500Ada", "--compute-size", "1",
+				"--yes",
+			}, tt.args...))
+			if err := cmd.Execute(); err != nil {
+				t.Fatalf("container create failed: %v\nstderr:\n%s", err, stderr.String())
+			}
+
+			body := rec.containerBody()
+			var got struct {
+				Scaling struct {
+					ScalingTriggers struct {
+						QueueLoad struct {
+							Threshold float64 `json:"threshold"`
+						} `json:"queue_load"`
+					} `json:"scaling_triggers"`
+				} `json:"scaling"`
+			}
+			if err := json.Unmarshal(body, &got); err != nil {
+				t.Fatalf("unmarshal: %v\nbody: %s", err, body)
+			}
+			if th := got.Scaling.ScalingTriggers.QueueLoad.Threshold; th != tt.want {
+				t.Errorf("queue_load.threshold = %v, want %v; body=%s", th, tt.want, body)
+			}
+		})
+	}
+}

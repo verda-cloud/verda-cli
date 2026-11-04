@@ -50,6 +50,18 @@ const (
 	defaultRequestTTL      = 300 * time.Second
 )
 
+// queuePreset is a named queue-load threshold; presetCustom is not one.
+type queuePreset struct {
+	name, label, description string
+	threshold                int
+}
+
+var queuePresets = []queuePreset{
+	{presetInstant, "Instant", "Scale up as soon as any request arrives. Minimizes time in queue.", queueLoadInstant},
+	{presetBalanced, "Balanced", "Short queue wait before scaling up. Good for most APIs.", queueLoadBalanced},
+	{presetCostSaver, "Cost saver", "Fewer replicas; requests may wait longer in queue.", queueLoadCostSaver},
+}
+
 // containerCreateOptions holds flags/wizard state; request() builds the SDK payload.
 type containerCreateOptions struct {
 	Name  string
@@ -60,8 +72,7 @@ type containerCreateOptions struct {
 	Compute     string
 	ComputeSize int
 
-	RegistryCreds  string // empty = public
-	RegistryPublic bool   // explicit --registry-public, just for clarity
+	RegistryCreds string // empty = public
 
 	Port            int
 	HealthcheckOff  bool
@@ -105,9 +116,10 @@ func newCmdContainerCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobr
 		Use:   "create",
 		Short: "Create a serverless container deployment",
 		Long: cmdutil.LongDesc(`
-			Create an always-on serverless container deployment. Without flags,
-			launches an interactive wizard (coming in a follow-up task). With
-			flags, builds the deployment request directly and submits it.
+			Create an always-on serverless container deployment. If --name,
+			--image or --compute is missing (outside agent mode), an interactive
+			wizard asks for the settings. With flags, builds the deployment
+			request directly and submits it.
 
 			Images must use a specific tag — ":latest" is rejected client-side.
 		`),
@@ -141,7 +153,9 @@ func newCmdContainerCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobr
 	flags.IntVar(&opts.ComputeSize, "compute-size", 1, "Number of GPUs or vCPU cores per replica")
 
 	flags.StringVar(&opts.RegistryCreds, "registry-creds", "", "Registry credentials name (empty = public)")
-	flags.BoolVar(&opts.RegistryPublic, "registry-public", false, "Pull image anonymously (default)")
+	// No-op kept so existing scripts don't fail on an unknown flag; public is the default.
+	flags.Bool("registry-public", false, "Pull image anonymously (default)")
+	_ = flags.MarkDeprecated("registry-public", "a public image is already the default when --registry-creds is not set")
 
 	flags.IntVar(&opts.Port, "port", opts.Port, "Exposed HTTP port")
 	flags.BoolVar(&opts.HealthcheckOff, "healthcheck-off", false, "Disable healthcheck (default: on at /health)")
@@ -364,23 +378,26 @@ func (o *containerCreateOptions) request() (*verda.CreateDeploymentRequest, erro
 
 func resolveQueueLoad(preset string, custom int) (int, error) {
 	if custom > 0 {
-		if custom > 1000 {
-			return 0, errors.New("--queue-load must be in 1..1000")
+		if custom > maxQueueLoad {
+			return 0, fmt.Errorf("--queue-load must be in %d..%d", minQueueLoad, maxQueueLoad)
 		}
 		return custom, nil
 	}
-	switch strings.ToLower(preset) {
-	case presetInstant:
-		return queueLoadInstant, nil
-	case presetBalanced, "":
-		return queueLoadBalanced, nil
-	case presetCostSaver, "cost_saver", "costsaver":
-		return queueLoadCostSaver, nil
+	name := strings.ToLower(preset)
+	switch name {
+	case "":
+		name = presetBalanced
+	case "cost_saver", "costsaver":
+		name = presetCostSaver
 	case presetCustom:
 		return 0, errors.New("--queue-preset=custom requires --queue-load")
-	default:
-		return 0, fmt.Errorf("invalid --queue-preset %q: expected instant, balanced, cost-saver, or custom", preset)
 	}
+	for _, p := range queuePresets {
+		if p.name == name {
+			return p.threshold, nil
+		}
+	}
+	return 0, fmt.Errorf("invalid --queue-preset %q: expected instant, balanced, cost-saver, or custom", preset)
 }
 
 func buildEnvVars(plain, secret []string) ([]verda.ContainerEnvVar, error) {

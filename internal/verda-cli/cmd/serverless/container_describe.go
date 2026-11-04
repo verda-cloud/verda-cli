@@ -45,12 +45,12 @@ func newCmdContainerDescribe(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *co
 	return cmd
 }
 
-// resolveContainerName: args[0], else picker; agent requires <name>.
+// resolveContainerName: args[0], else picker; agent, pipes and -o json|yaml require <name>.
 func resolveContainerName(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, args []string) (string, error) {
 	if len(args) > 0 {
 		return args[0], nil
 	}
-	if f.AgentMode() {
+	if !interactiveTTY(f) {
 		return "", cmdutil.NewMissingFlagsError([]string{"<name>"})
 	}
 	return selectContainerDeployment(cmd.Context(), f, ioStreams)
@@ -110,10 +110,12 @@ func runContainerDescribe(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdut
 	ctx, cancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
 	defer cancel()
 
-	// Status fetched under the same spinner; best-effort with a short
-	// subordinate timeout so a slow status RPC can't blank it. Describe still
-	// succeeds if the status RPC fails.
+	// Status and scaling fetched under the same spinner; best-effort with a
+	// short subordinate timeout so a slow RPC can't blank it. Describe still
+	// succeeds if either fails.
 	var status string
+	var scaling *verda.ContainerScalingOptions
+	var scalingErr error
 	deployment, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading deployment...", func(ctx context.Context) (*verda.ContainerDeployment, error) {
 		d, derr := client.ContainerDeployments.GetDeploymentByName(ctx, name)
 		if derr != nil {
@@ -124,6 +126,9 @@ func runContainerDescribe(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdut
 		if s, statusErr := client.ContainerDeployments.GetDeploymentStatus(statusCtx, name); statusErr == nil && s != nil {
 			status = s.Status
 		}
+		scalingCtx, scalingCancel := context.WithTimeout(ctx, statusRPCTimeout)
+		defer scalingCancel()
+		scaling, scalingErr = client.ContainerDeployments.GetDeploymentScaling(scalingCtx, name)
 		return d, nil
 	})
 	if err != nil {
@@ -131,17 +136,42 @@ func runContainerDescribe(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdut
 	}
 
 	cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), "Deployment:", deployment)
+	cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), "Scaling:", scaling)
 
-	// Embed adds Status alongside SDK fields; if SDK gains json:"status", switch to explicit fields.
+	var scalingErrMsg string
+	if scalingErr != nil {
+		scalingErrMsg = scalingErr.Error()
+	}
+	// Embed adds fields alongside SDK ones; if SDK gains json:"status", switch to explicit fields.
 	if wrote, werr := cmdutil.WriteStructured(ioStreams.Out, f.OutputFormat(), struct {
 		*verda.ContainerDeployment
-		Status string `json:"status,omitempty"`
-	}{deployment, status}); wrote {
+		Status       string                         `json:"status,omitempty"`
+		Scaling      *verda.ContainerScalingOptions `json:"scaling,omitempty"`
+		ScalingError string                         `json:"scaling_error,omitempty"`
+	}{deployment, status, scaling, scalingErrMsg}); wrote {
 		return werr
 	}
 
 	renderContainerDeploymentCard(ioStreams.Out, deployment, status)
+	renderDescribeScaling(ioStreams.Out, scaling, scalingErr)
 	return nil
+}
+
+// renderDescribeScaling: a failed scaling read leaves a note, not an error.
+func renderDescribeScaling(w io.Writer, sc *verda.ContainerScalingOptions, err error) {
+	label := lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Bold(true)
+	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	if err != nil || sc == nil {
+		msg := "unavailable"
+		if err != nil {
+			msg += ": " + err.Error()
+		}
+		_, _ = fmt.Fprintf(w, "  %s  %s\n\n", label.Render("Scaling"), dim.Render(msg))
+		return
+	}
+	_, _ = fmt.Fprintf(w, "  %s\n", label.Render("Scaling"))
+	writeScalingLines(w, "    ", sc)
+	_, _ = fmt.Fprintln(w)
 }
 
 func renderContainerDeploymentCard(w io.Writer, d *verda.ContainerDeployment, status string) {
