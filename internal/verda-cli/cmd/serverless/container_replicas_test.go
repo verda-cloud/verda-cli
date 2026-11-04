@@ -30,7 +30,7 @@ func TestContainerReplicas(t *testing.T) {
 		if err != nil {
 			t.Fatalf("replicas: %v", err)
 		}
-		for _, want := range []string{"ID", "STATUS", "STARTED", "r-1", "running", "2026-08-09 01:00:00", "1 replica(s): 1 running"} {
+		for _, want := range []string{"ID", "STATUS", "STARTED", "IMAGE", "r-1", "running", "2026-08-09 01:00:00", "1 replica(s): 1 running"} {
 			if !strings.Contains(stdout, want) {
 				t.Errorf("stdout lacks %q:\n%s", want, stdout)
 			}

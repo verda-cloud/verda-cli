@@ -46,6 +46,10 @@ func NewCmdContainer(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Comm
 		newCmdContainerPurgeQueue(f, ioStreams),
 		newCmdContainerScale(f, ioStreams),
 		newCmdContainerReplicas(f, ioStreams),
+		newCmdContainerEnv(f, ioStreams),
+		newCmdContainerSecret(f, ioStreams),
+		newCmdContainerFileSecret(f, ioStreams),
+		newCmdContainerRegistryCreds(f, ioStreams),
 	)
 	return cmd
 }

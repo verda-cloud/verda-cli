@@ -40,10 +40,10 @@ func newCmdContainerReplicas(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *co
 		Use:   "replicas [<name>]",
 		Short: "List the replicas of a container deployment",
 		Long: cmdutil.LongDesc(`
-			List the current replicas of a container deployment with their status
-			and start time, and a count per status (running, initializing,
-			imagepulling, terminating, error, unavailable). Use it after
-			'verda container scale' to watch replicas start or stop.
+			List the current replicas of a container deployment with their status,
+			start time, and container image, plus a count per status (running,
+			initializing, imagepulling, terminating, error, unavailable). Use it
+			after 'verda container scale' to watch replicas start or stop.
 		`),
 		Example: cmdutil.Examples(`
 			verda container replicas my-api
@@ -58,6 +58,19 @@ func newCmdContainerReplicas(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *co
 			return runContainerReplicas(cmd, f, ioStreams, name)
 		},
 	}
+}
+
+func replicaImage(rep *verda.ReplicaInfo) string {
+	if rep.Image != "" {
+		return rep.Image
+	}
+	if rep.ImageName == "" {
+		return ""
+	}
+	if rep.ImageTag != "" {
+		return rep.ImageName + ":" + rep.ImageTag
+	}
+	return rep.ImageName
 }
 
 func runContainerReplicas(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, name string) error {
@@ -98,14 +111,15 @@ func printReplicaTable(w io.Writer, r *containerReplicasResult) error {
 		return nil
 	}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	_, _ = fmt.Fprintln(tw, "ID\tSTATUS\tSTARTED")
+	_, _ = fmt.Fprintln(tw, "ID\tSTATUS\tSTARTED\tIMAGE")
 	for i := range r.Replicas {
 		rep := &r.Replicas[i]
 		started := "-"
 		if !rep.StartedAt.IsZero() {
 			started = rep.StartedAt.Format("2006-01-02 15:04:05")
 		}
-		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\n", rep.ID, rep.Status, started)
+		style := statusColor(rep.Status)
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", rep.ID, style.Render(rep.Status), started, replicaImage(rep))
 	}
 	if err := tw.Flush(); err != nil {
 		return err

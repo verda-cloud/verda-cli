@@ -215,6 +215,8 @@ const (
 	flagRequestTTL      = "request-ttl"
 	flagDeadline        = "deadline"
 	flagYes             = "yes"
+
+	outputTable = "table"
 )
 
 // isPromptCancel is a terse package-local alias for cmdutil.IsPromptCancel,
