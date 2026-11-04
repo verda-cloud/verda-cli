@@ -39,6 +39,7 @@ func NewCmdBatchjob(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Comma
 
 	cmd.AddCommand(
 		newCmdBatchjobCreate(f, ioStreams),
+		newCmdBatchjobUpdate(f, ioStreams),
 		newCmdBatchjobList(f, ioStreams),
 		newCmdBatchjobDescribe(f, ioStreams),
 		newCmdBatchjobDelete(f, ioStreams),
