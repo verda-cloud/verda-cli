@@ -154,7 +154,7 @@ func TestFileSecretCreate_Flags(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	certPath := filepath.Join(tmpDir, "cert.pem")
-	if err := os.WriteFile(certPath, []byte("cert-content"), 0644); err != nil {
+	if err := os.WriteFile(certPath, []byte("cert-content"), 0600); err != nil {
 		t.Fatalf("write temp file: %v", err)
 	}
 
@@ -287,10 +287,10 @@ func TestFileSecretCreate_MultipleFiles(t *testing.T) {
 	tmpDir := t.TempDir()
 	certPath := filepath.Join(tmpDir, "cert.pem")
 	keyPath := filepath.Join(tmpDir, "key.pem")
-	if err := os.WriteFile(certPath, []byte("cert-data"), 0644); err != nil {
+	if err := os.WriteFile(certPath, []byte("cert-data"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(keyPath, []byte("key-data"), 0644); err != nil {
+	if err := os.WriteFile(keyPath, []byte("key-data"), 0600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -340,7 +340,7 @@ func TestFileSecretCreate_JSONOutput(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	certPath := filepath.Join(tmpDir, "cert.pem")
-	if err := os.WriteFile(certPath, []byte("data"), 0644); err != nil {
+	if err := os.WriteFile(certPath, []byte("data"), 0600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -376,7 +376,7 @@ func TestParseFileFlags(t *testing.T) {
 	t.Run("valid", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		certPath := filepath.Join(tmpDir, "cert.pem")
-		if err := os.WriteFile(certPath, []byte("hello"), 0644); err != nil {
+		if err := os.WriteFile(certPath, []byte("hello"), 0600); err != nil {
 			t.Fatal(err)
 		}
 		files, err := parseFileFlags([]string{"cert.pem=" + certPath})

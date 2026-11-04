@@ -226,8 +226,6 @@ func isPromptCancel(err error) bool {
 	return cmdutil.IsPromptCancel(err)
 }
 
-const outputTable = "table"
-
 // isInteractiveTerminal: prompts read stdin and draw on stderr, so all three
 // streams must be terminals. A var so tests can drive the interactive paths.
 var isInteractiveTerminal = func() bool {
