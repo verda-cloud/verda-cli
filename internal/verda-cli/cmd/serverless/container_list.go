@@ -79,7 +79,7 @@ func runContainerList(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.I
 
 	cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), "Deployments:", deployments)
 
-	interactive := cmdutil.IsStdoutTerminal() && !f.AgentMode() && f.OutputFormat() == "table"
+	interactive := cmdutil.IsStdoutTerminal() && !f.AgentMode() && f.OutputFormat() == outputTable
 
 	// List response omits status; prefetch when filtering/structured/non-interactive,
 	// otherwise LiveList fills rows lazily.

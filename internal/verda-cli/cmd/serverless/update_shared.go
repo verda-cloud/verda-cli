@@ -78,7 +78,7 @@ func mergeEnvVarsForUpdate(envChanged, envSecretChanged bool, envFlags, envSecre
 // mergeVolumeMountsForUpdate keeps non-secret mounts (scratch) and replaces
 // secret mounts with the new set.
 func mergeVolumeMountsForUpdate(secretMounts []string, current []verda.ContainerVolumeMount) ([]verda.ContainerVolumeMount, error) {
-	var mounts []verda.ContainerVolumeMount
+	mounts := make([]verda.ContainerVolumeMount, 0, len(current)+len(secretMounts))
 	for _, m := range current {
 		if m.Type != mountTypeSecret {
 			mounts = append(mounts, m)
