@@ -4,6 +4,7 @@
 ## [Unreleased]
 - [`2a464bc`] Chore(deps): update verdacloud-sdk-go to v1.7.0 and add go fix check
 - [`92ff69c`] Fix(mcp): bound MCP tool API calls by --timeout
+- [`3c6889f`] Feat(container): release verda container as a beta, add scale and replicas
 
 ## [v1.9.0] - 2026-10-22
 - [`ebc44f0`] Include ldflags in builds, have a version command where it's normally found from
