@@ -18,26 +18,31 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
 	"time"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/term"
 	"github.com/verda-cloud/verda-cli/pkg/tui"
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
 
+	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/serverless/scaling"
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
 
 // Create-request limits; keep in sync with the SDK, which rejects values outside them before sending.
 const (
 	maxComputeSize         = 128
-	maxReplicas            = 1000
-	maxConcurrency         = 5000
-	minUtilThreshold       = 5
-	maxUtilThreshold       = 100
-	maxScalingDelay        = time.Hour
-	maxContainerRequestTTL = 24 * time.Hour
+	maxReplicas            = scaling.MaxReplicas
+	maxConcurrency         = scaling.MaxConcurrency
+	minUtilThreshold       = scaling.MinUtilThreshold
+	maxUtilThreshold       = scaling.MaxUtilThreshold
+	minQueueLoad           = scaling.MinQueueLoad
+	maxQueueLoad           = scaling.MaxQueueLoad
+	maxScalingDelay        = scaling.MaxDelaySeconds * time.Second
+	maxContainerRequestTTL = scaling.MaxQueueTTLSeconds * time.Second
 	maxBatchjobRequestTTL  = 7 * 24 * time.Hour
 )
 
@@ -54,6 +59,28 @@ func checkUtilThreshold(name string, n int) error {
 		return fmt.Errorf("%s must be 0 (off) or in %d..%d", name, minUtilThreshold, maxUtilThreshold)
 	}
 	return nil
+}
+
+// Server-side DELETE wait: --timeout-ms -1 means the API default, >0 is capped.
+const (
+	defaultDeleteWait = 60 * time.Second
+	maxDeleteWait     = 300 * time.Second
+	deleteWaitMargin  = 15 * time.Second
+)
+
+// deleteTimeout: an explicit --timeout is used as is; otherwise the deadline covers the server wait + margin.
+func deleteTimeout(cliTimeout time.Duration, explicitTimeout bool, timeoutMs int) time.Duration {
+	if explicitTimeout {
+		return cliTimeout
+	}
+	wait := defaultDeleteWait
+	switch {
+	case timeoutMs == 0:
+		wait = 0
+	case timeoutMs > 0:
+		wait = min(time.Duration(timeoutMs)*time.Millisecond, maxDeleteWait)
+	}
+	return wait + deleteWaitMargin
 }
 
 // checkDurationRange compares whole seconds, which is what the request carries.
@@ -164,6 +191,19 @@ func isPromptCancel(err error) bool {
 	return cmdutil.IsPromptCancel(err)
 }
 
+const outputTable = "table"
+
+// isInteractiveTerminal: prompts read stdin and draw on stderr, so all three
+// streams must be terminals. A var so tests can drive the interactive paths.
+var isInteractiveTerminal = func() bool {
+	return term.IsTerminal(os.Stdin.Fd()) && cmdutil.IsStdoutTerminal() && cmdutil.IsStderrTerminal()
+}
+
+// interactiveTTY: prompts only on a terminal, outside agent mode, with table output.
+func interactiveTTY(f cmdutil.Factory) bool {
+	return isInteractiveTerminal() && !f.AgentMode() && f.OutputFormat() == outputTable
+}
+
 // confirmDestructive renders a red-bold warning line and prompts the user to
 // confirm. Returns (true, nil) to proceed, (false, nil) on a clean prompter
 // cancel (Ctrl+C / Esc), or (false, err) on a real prompter failure that
@@ -191,10 +231,11 @@ func confirmDestructive(ctx context.Context, ioStreams cmdutil.IOStreams, prompt
 func statusColor(status string) lipgloss.Style {
 	s := strings.ToLower(status)
 	switch {
+	// Red before green: "unhealthy" contains "healthy".
+	case strings.Contains(s, "unhealthy"), strings.Contains(s, "error"), strings.Contains(s, "failed"):
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Bold(true) // red
 	case strings.Contains(s, "running"), strings.Contains(s, "active"), strings.Contains(s, "healthy"):
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("2")).Bold(true) // green
-	case strings.Contains(s, "error"), strings.Contains(s, "failed"):
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Bold(true) // red
 	case strings.Contains(s, "paused"), strings.Contains(s, "stopped"), strings.Contains(s, "offline"):
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("8")) // dim
 	default:

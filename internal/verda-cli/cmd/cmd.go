@@ -158,16 +158,15 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) (*cobra.Command, *clioptions.Op
 			},
 		},
 	}
-	if serverlessEnabled() {
-		groups = append(groups, cmdutil.CommandGroup{
-			Message: "Serverless Commands:",
-			Commands: []*cobra.Command{
-				serverless.NewCmdContainer(f, ioStreams),
-				serverless.NewCmdBatchjob(f, ioStreams),
-			},
-		})
+	serverlessCmds := []*cobra.Command{serverless.NewCmdContainer(f, ioStreams)}
+	if batchjobEnabled() {
+		serverlessCmds = append(serverlessCmds, serverless.NewCmdBatchjob(f, ioStreams))
 	}
 	groups = append(groups,
+		cmdutil.CommandGroup{
+			Message:  "Serverless Commands:",
+			Commands: serverlessCmds,
+		},
 		cmdutil.CommandGroup{
 			Message:  "Resource Commands:",
 			Commands: resourceCmds,
@@ -204,13 +203,12 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) (*cobra.Command, *clioptions.Op
 	return cmd, opts
 }
 
-// serverlessEnabled gates the container + batchjob subtrees behind
-// VERDA_SERVERLESS_ENABLED=1/true (pre-GA). Without it the Serverless group is
-// not registered; `verda container`/`verda batchjob` return "unknown command".
-// The parent commands also set Hidden so they stay out of `verda --help` even
-// when a tester flips the env var on.
-func serverlessEnabled() bool {
-	v := os.Getenv("VERDA_SERVERLESS_ENABLED")
+// batchjobEnabled gates the pre-release batchjob subtree behind
+// VERDA_BATCHJOB_ENABLED=1/true. Without it `verda batchjob` returns "unknown
+// command". The parent command also sets Hidden so it stays out of
+// `verda --help` even when a tester flips the env var on.
+func batchjobEnabled() bool {
+	v := os.Getenv("VERDA_BATCHJOB_ENABLED")
 	return v == "1" || v == "true"
 }
 

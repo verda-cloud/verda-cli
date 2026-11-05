@@ -47,7 +47,7 @@ Each command directory has its own `CLAUDE.md` (domain knowledge) and `README.md
 | `cmd/update/` | CLAUDE.md, README.md | CLI self-update |
 | `cmd/settings/` | CLAUDE.md, README.md | CLI settings management |
 | `cmd/objectstorage/` | CLAUDE.md, README.md | S3-style object storage: configure, mb/rb, cp/mv/sync/ls/rm, uploads, presign |
-| `cmd/serverless/` | CLAUDE.md, README.md | Serverless containers and batch jobs |
+| `cmd/serverless/` | CLAUDE.md, README.md | Serverless containers (beta: create, list, describe, scale, replicas, pause/resume/restart, purge-queue, delete) and batch jobs (hidden, gated by `VERDA_BATCHJOB_ENABLED`) |
 | `cmd/doctor/` | — | Environment diagnostics |
 | `cmd/availability/` | — | Instance availability by location |
 | `cmd/cost/` | — | Balance, running costs, estimates |

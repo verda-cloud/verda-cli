@@ -57,6 +57,34 @@ func TestWriteAgentError(t *testing.T) {
 	}
 }
 
+func TestNewMissingOneOfFlagsError_JSON(t *testing.T) {
+	var buf bytes.Buffer
+	WriteAgentError(&buf, NewMissingOneOfFlagsError(nil, []string{"--a", "--b"}))
+	var envelope struct {
+		Error struct {
+			Code    string          `json:"code"`
+			Message string          `json:"message"`
+			Details json.RawMessage `json:"details"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &envelope); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+	if envelope.Error.Code != "MISSING_REQUIRED_FLAGS" {
+		t.Errorf("code = %q, want MISSING_REQUIRED_FLAGS", envelope.Error.Code)
+	}
+	if want := "required flags not provided: set at least one of --a, --b"; envelope.Error.Message != want {
+		t.Errorf("message = %q, want %q", envelope.Error.Message, want)
+	}
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, envelope.Error.Details); err != nil {
+		t.Fatalf("compact details: %v", err)
+	}
+	if got, want := compact.String(), `{"missing":[],"one_of":["--a","--b"]}`; got != want {
+		t.Errorf("details = %s, want %s", got, want)
+	}
+}
+
 func TestNewConfirmationRequiredError(t *testing.T) {
 	ae := NewConfirmationRequiredError("delete")
 	if ae.Code != "CONFIRMATION_REQUIRED" {

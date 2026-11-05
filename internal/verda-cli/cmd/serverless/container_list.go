@@ -56,7 +56,7 @@ func newCmdContainerList(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.
 			return runContainerList(cmd, f, ioStreams, opts)
 		},
 	}
-	cmd.Flags().StringVar(&opts.Status, "status", "", "Filter by status substring (e.g., healthy, initializing, error)")
+	cmd.Flags().StringVar(&opts.Status, "status", "", "Filter by exact status, case-insensitive (e.g., healthy, unhealthy, paused)")
 	return cmd
 }
 
@@ -91,10 +91,9 @@ func runContainerList(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.I
 	}
 
 	if opts.Status != "" {
-		needle := strings.ToLower(opts.Status)
 		filtered := deployments[:0]
 		for i := range deployments {
-			if strings.Contains(strings.ToLower(statuses.get(deployments[i].Name)), needle) {
+			if strings.EqualFold(statuses.get(deployments[i].Name), opts.Status) {
 				filtered = append(filtered, deployments[i])
 			}
 		}

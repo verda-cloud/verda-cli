@@ -71,6 +71,19 @@ func NewMissingFlagsError(missing []string) *AgentError {
 	}
 }
 
+// NewMissingOneOfFlagsError: missing lists required flags; at least one of oneOf must also be set.
+func NewMissingOneOfFlagsError(missing, oneOf []string) *AgentError {
+	if missing == nil {
+		missing = []string{}
+	}
+	return &AgentError{
+		Code:     "MISSING_REQUIRED_FLAGS",
+		Message:  "required flags not provided: set at least one of " + strings.Join(oneOf, ", "),
+		Details:  map[string]any{"missing": missing, "one_of": oneOf},
+		ExitCode: ExitBadArgs,
+	}
+}
+
 // NewConfirmationRequiredError creates an AgentError for destructive actions
 // that need --yes in agent mode.
 func NewConfirmationRequiredError(action string) *AgentError {

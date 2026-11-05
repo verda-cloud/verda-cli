@@ -21,17 +21,20 @@ import (
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
 
-// Serverless is pre-GA: both parents stay Hidden so they don't surface in
-// `verda --help` even when VERDA_SERVERLESS_ENABLED registers them. Drop these
-// assertions (and the Hidden flags) at GA.
-func TestServerlessParentsHiddenPreGA(t *testing.T) {
+// container is a visible beta; batchjob stays Hidden (and env-gated in
+// cmd/cmd.go) until it ships.
+func TestServerlessGate(t *testing.T) {
 	f := cmdutil.NewTestFactory(nil)
 	streams := cmdutil.IOStreams{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}
 
-	if c := NewCmdContainer(f, streams); !c.Hidden {
-		t.Errorf("container command should be Hidden pre-GA")
+	c := NewCmdContainer(f, streams)
+	if c.Hidden {
+		t.Errorf("container command should be visible")
+	}
+	if got := c.Annotations[cmdutil.TagAnnotation]; got != "beta" {
+		t.Errorf("container tag = %q, want beta", got)
 	}
 	if c := NewCmdBatchjob(f, streams); !c.Hidden {
-		t.Errorf("batchjob command should be Hidden pre-GA")
+		t.Errorf("batchjob command should stay Hidden")
 	}
 }

@@ -70,6 +70,9 @@ type Server struct {
 	instances      map[string]*verda.Instance
 	volumes        map[string]*verda.Volume
 	sshKeys        map[string]*verda.SSHKey
+	containers     map[string]*containerFixture
+	scalingPatches []map[string]any
+	scalingReadLag int
 	failures       map[string]int // exact path -> HTTP status override
 	hangs          map[string]bool
 	forceFormToken bool
@@ -80,11 +83,12 @@ type Server struct {
 // New starts a mock API server. The caller is responsible for Close.
 func New() *Server {
 	s := &Server{
-		instances: map[string]*verda.Instance{},
-		volumes:   map[string]*verda.Volume{},
-		sshKeys:   map[string]*verda.SSHKey{},
-		failures:  map[string]int{},
-		hangs:     map[string]bool{},
+		instances:  map[string]*verda.Instance{},
+		volumes:    map[string]*verda.Volume{},
+		sshKeys:    map[string]*verda.SSHKey{},
+		containers: map[string]*containerFixture{},
+		failures:   map[string]int{},
+		hangs:      map[string]bool{},
 	}
 
 	mux := http.NewServeMux()
@@ -107,6 +111,7 @@ func New() *Server {
 	mux.HandleFunc("GET /instance-availability", s.handleAvailability)
 	mux.HandleFunc("GET /instance-availability/{type}", s.handleTypeAvailability)
 	mux.HandleFunc("GET /balance", s.handleBalance)
+	s.registerContainerRoutes(mux)
 	mux.HandleFunc("/", s.handleNotFound)
 
 	s.srv = httptest.NewServer(s.guard(mux))

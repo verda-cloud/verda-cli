@@ -15,9 +15,12 @@
 package cmd
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/spf13/cobra"
+
+	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
 
 func TestSkipCredentialResolution_RegistryChildren(t *testing.T) {
@@ -61,6 +64,35 @@ func TestShouldCheckVersion(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := shouldCheckVersion(tc.cmd); got != tc.want {
 				t.Errorf("shouldCheckVersion(%q) = %v, want %v", tc.cmd.Name(), got, tc.want)
+			}
+		})
+	}
+}
+
+// container is always registered (beta); batchjob only with VERDA_BATCHJOB_ENABLED.
+func TestServerlessCommandRegistration(t *testing.T) {
+	for _, tc := range []struct {
+		env      string
+		batchjob bool
+	}{
+		{"", false},
+		{"1", true},
+		{"true", true},
+		{"0", false},
+	} {
+		t.Run("VERDA_BATCHJOB_ENABLED="+tc.env, func(t *testing.T) {
+			t.Setenv("VERDA_HOME", t.TempDir())
+			t.Setenv("VERDA_BATCHJOB_ENABLED", tc.env)
+			root, _ := NewRootCommand(cmdutil.IOStreams{In: &bytes.Buffer{}, Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}})
+			found := map[string]*cobra.Command{}
+			for _, c := range root.Commands() {
+				found[c.Name()] = c
+			}
+			if c := found["container"]; c == nil || c.Hidden {
+				t.Errorf("container: registered=%v, want registered and not hidden", c != nil)
+			}
+			if _, ok := found["batchjob"]; ok != tc.batchjob {
+				t.Errorf("batchjob registered = %v, want %v", ok, tc.batchjob)
 			}
 		})
 	}

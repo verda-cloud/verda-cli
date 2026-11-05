@@ -25,17 +25,21 @@ This rule applies equally to Claude, Codex, Cursor, or a human editing the packa
   - `verda container` → `/container-deployments` (continuous endpoints, supports spot)
   - `verda batchjob` → `/job-deployments` (one-shot jobs, deadline-based, **no spot**)
 - There is **no** `verda serverless` parent command — the two trees were promoted to root for shorter invocations. They still share this Go package because they share wizard step factories, validators, and the API cache.
-- Verbs (both trees): `create`, `list` (alias `ls`), `describe` (aliases `get`, `show`), `delete` (aliases `rm`, `del`), `pause`, `resume`, `purge-queue`. Container also has `restart`.
+- Verbs (both trees): `create`, `list` (alias `ls`), `describe` (aliases `get`, `show`), `delete` (aliases `rm`, `del`), `pause`, `resume`, `purge-queue`. Container also has `restart`, `scale` and `replicas`.
 - Files:
-  - `container.go`, `batchjob.go` — Top-level command builders. `NewCmdContainer` and `NewCmdBatchjob` are exported and called directly from `cmd/cmd.go`. **Pre-release, two-layer gated like registry:** the Serverless command group is only registered when `VERDA_SERVERLESS_ENABLED=1` (`serverlessEnabled()` in `cmd/cmd.go`), and both parents set `Hidden: true` so they stay out of `verda --help` even when a tester flips the env var on. Drop the env gate + the two `Hidden: true` flags when serverless ships GA.
+  - `container.go`, `batchjob.go` — Top-level command builders. `NewCmdContainer` and `NewCmdBatchjob` are exported and called directly from `cmd/cmd.go`. **`container` is beta:** always registered, `cmdutil.TagAnnotation: "beta"`. **`batchjob` is two-layer gated:** registered only when `VERDA_BATCHJOB_ENABLED=1` (`batchjobEnabled()` in `cmd/cmd.go`), and `Hidden: true`. Drop both gates when batchjob ships. `gate_test.go` and `cmd/cmd_test.go` guard this.
   - `container_create.go` — `containerCreateOptions`, flags, `request()`, validate(), wizard entry point.
   - `container_list.go` — `GetDeployments` + tabwriter + structured output.
-  - `container_describe.go` — `GetDeploymentByName` + `GetDeploymentStatus` (best-effort) + `selectContainerDeployment` picker.
+  - `container_describe.go` — `GetDeploymentByName` + `GetDeploymentStatus` + `GetDeploymentScaling` (both best-effort) + `resolveContainerName` / `selectContainerDeployment` picker.
+  - `scaling/` — Package with the scaling rules and limits, no cobra or wizard imports: `Change` (nil = unchanged), `Validate`, `Request()`, `BoundWarning`, `Applied`, `Wait`, `FieldError` (field in flag form, e.g. `min-replicas`). The `shared.go` limits alias its constants. See "Scaling".
+  - `container_scale.go` — `container scale`: flags → `scaling.Change`, confirm, PATCH, optional `--wait`.
+  - `container_scale_wizard.go` — `buildScaleFlow`: setting multi-select, then one step per setting.
+  - `container_replicas.go` — `container replicas`: `GetDeploymentReplicas` + table / structured output.
   - `container_delete.go` — `DeleteDeployment(timeoutMs)` + destructive confirm.
   - `container_actions.go` — Data-driven action factory `newContainerActionCmd` (pause/resume/restart/purge-queue).
   - `batchjob_create.go` — `batchjobCreateOptions` (simpler: no spot, deadline required).
   - `batchjob_list.go`, `batchjob_describe.go`, `batchjob_delete.go`, `batchjob_actions.go` — Same shape as container, trimmed.
-  - `shared.go` — `validateDeploymentName` (RFC-1123 subset), `rejectLatestTag`, `parseEnvFlag`, `parseSecretMountFlag`, `confirmDestructive`, `statusColor`, `mountType*` + `envType*` constants.
+  - `shared.go` — `validateDeploymentName` (RFC-1123 subset), `rejectLatestTag`, `parseEnvFlag`, `parseSecretMountFlag`, `confirmDestructive`, `statusColor`, `interactiveTTY`, `deleteTimeout`, `mountType*` + `envType*` constants.
   - `wizard_shared.go` — Step builders shared by both create wizards: `stepName`, `stepImage`, `stepCompute`, `stepComputeSize`, `stepRegistryCreds`, `stepPort`, `stepEnvVars`, `stepMaxReplicas`, `stepRequestTTL`, `stepSecretMounts`. Plus the generic `durationStep` helper and three int validators. Each takes a `*T` pointer to the field it mutates, so the same step definition drives both `containerCreateOptions` and `batchjobCreateOptions`.
   - `wizard.go` — `buildContainerCreateFlow` + container-only steps: spot/compute-type, healthcheck on/off + path (port is NOT prompted; it always defaults to the exposed port in `request()`), min-replicas, concurrency, queue-load preset + custom override, CPU/GPU util triggers, scale-up/down delays. 21 total steps in the container flow.
   - `wizard_batchjob.go` — `buildBatchjobCreateFlow` + `stepBatchjobDeadline`. 11 total steps: 10 reused from `wizard_shared.go` + the batchjob-only deadline. Jobs have no spot, no min replicas, no scaling triggers, no healthcheck, no concurrency — all of those steps are simply absent from the flow.
@@ -66,7 +70,7 @@ Consequence: **the CLI never re-asks** deployment type inside the wizard. Pick t
 | `cost-saver` | 6 |
 | `custom` | value of `--queue-load` (1..1000) |
 
-Setting `--queue-load N` alone (without `--queue-preset custom`) is also accepted and behaves as custom. The preset name is NOT persisted server-side — on describe, the CLI reverses the mapping for display (threshold 1/3/6 → the named preset, else "custom: N"). See `resolveQueueLoad` in `container_create.go`.
+Setting `--queue-load N` alone (without `--queue-preset custom`) is also accepted and behaves as custom. The preset name is NOT persisted server-side — on describe, the CLI reverses the mapping for display (threshold 1/3/6 → the named preset, else `custom (N)`). See `resolveQueueLoad` in `container_create.go`.
 
 Aliases accepted for the "cost-saver" preset: `cost_saver`, `costsaver` — underscore and camel-case forms show up in copy-pasted configs, so we normalize.
 
@@ -97,11 +101,11 @@ Mount types in `ContainerVolumeMount.Type` that the CLI currently sends:
 
 ### Deadline is required for batchjob
 
-`JobScalingOptions.DeadlineSeconds` has a range that the SDK enforces in `JobScalingOptions.Validate` (run by `CreateJobDeployment`) before the request is sent. The CLI mirrors it with `minBatchjobDeadline` / `maxBatchjobDeadline` in `validateBatchjobDeadline`, used by both `request()` and the wizard's deadline step, so a bad value fails at the prompt, not after the whole wizard. A missing deadline is listed in `missingBatchjobCreateFlags`. `defaultBatchjobDeadline` must stay inside the range — `TestBatchjobWizardDefaultDeadline_PassesSDKValidation` guards it.
+`JobScalingOptions.DeadlineSeconds` has a range (10m..7d) that the SDK enforces in `JobScalingOptions.Validate` (run by `CreateJobDeployment`) before the request is sent. The CLI mirrors it with `minBatchjobDeadline` / `maxBatchjobDeadline` in `validateBatchjobDeadline`, used by both `request()` and the wizard's deadline step, so a bad value fails at the prompt, not after the whole wizard. A missing deadline is listed in `missingBatchjobCreateFlags`. `defaultBatchjobDeadline` must stay inside the range. No test guards it.
 
 ### Action-command factory pattern
 
-`newContainerActionCmd` / `newBatchjobActionCmd` build a `*cobra.Command` from `(verb, short, spinner, successMsg, destructive, fn)`. This avoids five nearly-identical files per subcommand. If you need to add an action (e.g. a future `scaling get`), add a new call site with the right SDK method. If you need per-action flags beyond `--yes`, you'll have to step out of the factory — acceptable if one action grows special, not if two do.
+`newContainerActionCmd` / `newBatchjobActionCmd` build a `*cobra.Command` from `(verb, short, spinner, successMsg, destructive, fn)`. This avoids five nearly-identical files per subcommand. If you need to add an action, add a new call site with the right SDK method. Actions are async, so agent JSON reports `"status": "accepted"`. If you need per-action flags beyond `--yes`, you'll have to step out of the factory — acceptable if one action grows special, not if two do.
 
 ### Destructive confirms
 
@@ -109,9 +113,22 @@ Mount types in `ContainerVolumeMount.Type` that the CLI currently sends:
 
 ### Status color and card rendering
 
-`statusColor(status)` in `shared.go` heuristically picks green (running/active/healthy), red (error/failed), dim (paused/stopped/offline), yellow (transitional) by substring match. There's no SDK enum for deployment status — the server returns free-form strings today. Keep the matcher lenient.
+`statusColor(status)` in `shared.go` picks red (unhealthy/error/failed), green (running/active/healthy), dim (paused/stopped/offline), or yellow (other) by substring match. The SDK enumerates statuses (`verda.ContainerDeploymentStatus*`, `verda.ReplicaStatus*`), but substring match gives a new server status a color too. `list --status` is an exact, case-insensitive match.
 
 Describe cards (`renderContainerDeploymentCard`, `renderJobDeploymentCard`) print one `Label  value` line per section, using color-6 bold for labels. Env var VALUES are intentionally not printed — only names — since values may contain secrets.
+
+`-o json|yaml` and `--agent` print env vars verbatim, values included. Sensitive data belongs in `--env-secret`. The `--debug` HTTP log redacts `value_or_reference_to_secret` (`sensitiveJSONFieldRe` in `cmd/util/factory.go`).
+
+### Scaling (`container scale`)
+
+- **Partial PATCH:** only changed flags are sent (`cmd.Flags().Changed`), so `--min-replicas 0` is sent. An omitted trigger keeps its server value.
+- **Limits:** `scaling.Change.Validate` enforces the spec (`PatchScalingOptionsPublicApiDto`). The spec is stricter than the SDK: it rejects max 0, concurrency 0, and an enabled threshold 0.
+- **min <= max:** a hard error (`Request()`) only when both bounds are in the request. One bound alone is sent: the pre-read can be stale, and the backend rejects min > stored max with a 400 (CC-1024). On table output, `BoundWarning` warns when the one bound conflicts with the read. Never resend the other bound: that overwrites a concurrent change.
+- **Triggers:** a threshold turns a trigger on. `Request` never copies a value from the read, which can undo a recent write. A disable is always sent, as `{"enabled":false,"threshold":0}`. A GPU trigger on CPU compute gets an API 400.
+- **Result:** `accepted` with `previous` and `expected`. Only `--wait` reports `completed` + `current` (the settings show in reads; replicas may still be starting) (`scaling.Applied` compares the set fields only). The result is written once, after the wait.
+- **`--wait`** uses `cmdutil.Poll`, not a Bubble Tea spinner, so Ctrl+C keeps the default SIGINT exit. A client error (4xx other than 408/429) ends the wait at once. Its errors must not wrap a ctx error: `main.go` treats `IsPromptCancel` errors as exit 0.
+- **Wizard:** every picked setting is sent, even one equal to the read: the read can lag, so an equal value may be a deliberate revert of a write it doesn't show yet. The diff marks those rows `(same as last read; still sent)`.
+- **Confirm:** every interactive run confirms (default No). Agent and non-TTY runs need a name, an option, and `--yes` before any API call.
 
 ## Gotchas & Edge Cases
 
@@ -120,15 +137,15 @@ Describe cards (`renderContainerDeploymentCard`, `renderJobDeploymentCard`) prin
 - **`compute-size` is a separate step from `compute`.** VM's wizard combines resource + count in a single step via in-Loader prompting; serverless keeps them separate so users can go back and change the size without re-picking the resource. Lower engineering cost, same UX.
 - **Util triggers off by default, but wizard asks anyway.** The CPU/GPU util steps accept empty ("off"), "off", or `minUtilThreshold..maxUtilThreshold`. Setter maps empty/"off" to 0 (trigger disabled). Users should be able to Enter-through both without setting them.
 - **Custom queue-load is a separate step.** `queue-load-custom` has `ShouldSkip: c["queue-preset"] != "custom"`. If the user goes back and changes preset to a named one, the engine's reset logic clears the custom value via `Resetter`.
-- **No `+ Create new` for registry creds in the wizard.** v1 intentionally omits the inline create-new sub-flow for registry credentials — users pick existing or Public. Adding new creds requires `verda registry configure` out-of-band, or a future top-level `verda registry-creds` command. The design doc notes this as future work.
+- **No `+ Create new` for registry creds in the wizard.** v1 intentionally omits the inline create-new sub-flow for registry credentials — users pick existing or Public. Registry credentials and secrets are created in the Verda web console. `verda registry` manages vccr.io access, not these.
 - **Confirm is NOT a wizard step.** `runContainerCreate` prints the summary + runs `prompter.Confirm` after `engine.Run` returns. Keeps the review card at full terminal width and lets us pipe through `--yes` cleanly. If you move it into the wizard, you lose layout control.
 - **Agent mode + create = flag-only.** In `--agent`, if any of `--name/--image/--compute` is missing we return `MISSING_REQUIRED_FLAGS` immediately. The wizard is never launched under `--agent`, even without credentials — that would be an interactive prompt, which is blocked.
 - **Batchjob wizard shares 10 steps with container.** The split lives in `wizard_shared.go` (shared factories taking `*T` pointers) vs `wizard.go` (container-only) vs `wizard_batchjob.go` (batchjob-only). Adding a new shared field: put the step factory in `wizard_shared.go` and wire it into both flows. Adding a field that only one subcommand needs: put it directly in `wizard.go` or `wizard_batchjob.go`.
-- **Scaling preset + legacy rows on describe.** When a deployment was created via the web UI with a custom queue-load (say 10), our CLI shows "custom: 10" rather than a named preset. Don't try to round-trip it back to a named preset — exact threshold wins.
+- **Scaling preset + legacy rows on describe.** When a deployment was created via the web UI with a custom queue-load (say 10), our CLI shows `custom (10)` rather than a named preset. Don't try to round-trip it back to a named preset — exact threshold wins.
 - **`ContainerDeployment.Status` is NOT in the `GetDeployments` list response.** The list endpoint returns `ContainerDeployment` without status. We call `GetDeploymentStatus(name)` per-row in `describe`, but NOT in `list` (would N+1). If the web UI grows a bulk status endpoint, wire it in.
 - **Env-var name validation:** `^[A-Z_][A-Z0-9_]*$`. Lowercase or leading-digit names are rejected client-side in both `parseEnvFlag` and `promptEnvVar`. This is stricter than POSIX (which allows lowercase) but matches Verda's conventions.
 - **Secret mount path must be absolute.** `parseSecretMountFlag` and `promptSecretMount` both check `strings.HasPrefix(path, "/")`. No trailing-slash normalization is applied.
-- **`DeleteDeployment` timeout semantics:** `--timeout-ms` flag maps directly to the SDK's `timeoutMs` parameter. `-1` (default) uses the API default of 60s; `0` returns immediately; `>0` waits up to that many ms (capped at 300000 server-side).
+- **`DeleteDeployment` timeout semantics:** `--timeout-ms` flag maps directly to the SDK's `timeoutMs` parameter. `-1` (default) uses the API default of 60s; `0` returns immediately; `>0` waits up to that many ms (capped at 300000 server-side). The CLI deadline (`deleteTimeout`) is an explicit `--timeout` as is; otherwise that wait + 15 s (75 s by default). With `0`, agent JSON reports `accepted`, not `completed`.
 
 ## Relationships
 
@@ -136,7 +153,7 @@ Describe cards (`renderContainerDeploymentCard`, `renderJobDeploymentCard`) prin
 - `pkg/tui/wizard` — `Flow`, `Step`, `Choice`, `Store`, `Engine`, `NewEngine`, `StaticChoices`, `WithOutput`, prompt-type enums.
 - `pkg/tui` — `Prompter`, `Status`, `WithConfirmDefault`.
 - SDK (`verdacloud-sdk-go/pkg/verda`):
-  - `ContainerDeploymentsService` — `GetDeployments`, `CreateDeployment`, `GetDeploymentByName`, `DeleteDeployment`, `GetDeploymentStatus`, `PauseDeployment`, `ResumeDeployment`, `RestartDeployment`, `PurgeDeploymentQueue`, `GetServerlessComputeResources`, `GetRegistryCredentials`, `GetSecrets`, `GetFileSecrets`, `ValidateCreateDeploymentRequest`.
+  - `ContainerDeploymentsService` — `GetDeployments`, `CreateDeployment`, `GetDeploymentByName`, `DeleteDeployment`, `GetDeploymentStatus`, `GetDeploymentScaling`, `UpdateDeploymentScaling`, `GetDeploymentReplicas`, `PauseDeployment`, `ResumeDeployment`, `RestartDeployment`, `PurgeDeploymentQueue`, `GetServerlessComputeResources`, `GetRegistryCredentials`, `GetSecrets`, `GetFileSecrets`, `ValidateCreateDeploymentRequest`.
   - `ServerlessJobsService` — `GetJobDeployments`, `CreateJobDeployment`, `GetJobDeploymentByName`, `DeleteJobDeployment`, `GetJobDeploymentStatus`, `PauseJobDeployment`, `ResumeJobDeployment`, `PurgeJobDeploymentQueue`, `ValidateCreateJobDeploymentRequest`.
   - Types: `ContainerDeployment`, `JobDeployment`, `JobDeploymentShortInfo`, `CreateDeploymentRequest`, `CreateJobDeploymentRequest`, `ContainerScalingOptions`, `JobScalingOptions`, `ScalingTriggers`, `QueueLoadTrigger`, `UtilizationTrigger`, `ScalingPolicy`, `ContainerCompute`, `ContainerRegistrySettings`, `RegistryCredentialsRef`, `ContainerEnvVar`, `ContainerVolumeMount`, `ContainerHealthcheck`, `ContainerEntrypointOverrides`, `ComputeResource`, `Secret`, `FileSecret`, `RegistryCredentials`.
 - `charm.land/lipgloss/v2` — status color styles + describe-card labels.

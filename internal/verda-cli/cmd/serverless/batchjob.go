@@ -25,8 +25,9 @@ func NewCmdBatchjob(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Comma
 	cmd := &cobra.Command{
 		Use:   "batchjob",
 		Short: "Manage serverless batch-job deployments (one-shot runs)",
-		// Pre-release: hidden from `verda --help`. See NewCmdContainer for the
-		// gating rationale; both drop when serverless ships GA.
+		// Pre-release: cmd/cmd.go (batchjobEnabled) registers it only with
+		// VERDA_BATCHJOB_ENABLED; Hidden keeps it out of `verda --help` even
+		// then. Drop both when batchjob ships.
 		Hidden: true,
 		Long: cmdutil.LongDesc(`
 			Create and manage one-shot batch-job deployments. Jobs accept queued

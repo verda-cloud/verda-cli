@@ -42,7 +42,22 @@ Required CLI flags were not provided. The agent should read `details.missing` an
 }
 ```
 
-**Agent action:** Read the missing flags, determine values, and retry the command with all required flags.
+When a command needs at least one of several flags (e.g. `container scale` with no option), `details.one_of` lists them and `missing` may be empty:
+
+```json
+{
+  "error": {
+    "code": "MISSING_REQUIRED_FLAGS",
+    "message": "required flags not provided: set at least one of --min-replicas, --max-replicas, ...",
+    "details": {
+      "missing": [],
+      "one_of": ["--min-replicas", "--max-replicas", "--concurrency", "..."]
+    }
+  }
+}
+```
+
+**Agent action:** Read the missing flags, determine values, and retry the command with all required flags. If `details.one_of` is present, also set at least one of those flags.
 
 ### `CONFIRMATION_REQUIRED`
 
