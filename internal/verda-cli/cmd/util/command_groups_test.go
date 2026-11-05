@@ -41,3 +41,23 @@ func TestSetUsageTemplate_TagAnnotation(t *testing.T) {
 		t.Errorf("untagged command must not get a tag; got:\n%s", tmpl)
 	}
 }
+
+func TestCommandGroupsAdd_NativeGroups(t *testing.T) {
+	t.Parallel()
+	auth := &cobra.Command{Use: "auth"}
+	vm := &cobra.Command{Use: "vm"}
+	root := &cobra.Command{Use: "verda"}
+	groups := CommandGroups{
+		{Message: "Auth Commands:", Commands: []*cobra.Command{auth}},
+		{Message: "VM Commands:", Commands: []*cobra.Command{vm}},
+	}
+	groups.Add(root)
+
+	got := root.Groups()
+	if len(got) != 2 || got[0].Title != "Auth Commands:" || got[1].Title != "VM Commands:" {
+		t.Fatalf("groups should keep declared order; got %+v", got)
+	}
+	if auth.GroupID != got[0].ID || vm.GroupID != got[1].ID {
+		t.Errorf("commands should carry their group ID; auth=%q vm=%q", auth.GroupID, vm.GroupID)
+	}
+}
