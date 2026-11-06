@@ -87,14 +87,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
-      # The action's image bundles Go 1.24, which can't load this module (go.mod pins a newer Go),
-      # so its govulncheck call analysis errors out (exit 127) whenever any Go advisory matches.
-      # Reachability is covered by the Vulnerability Scan job in ci.yml on the pinned toolchain.
+      # The image's Go (GOTOOLCHAIN=local) must be >= go.mod's go directive, or Go call
+      # analysis fails with exit 127 whenever an advisory matches. v2.7.0 ships Go 1.27.1.
       - name: Run OSV Scanner
-        uses: google/osv-scanner-action/osv-scanner-action@v2.1.0
+        uses: google/osv-scanner-action/osv-scanner-action@v2.7.0
         with:
           scan-args: |-
-            --no-call-analysis=go
             --recursive
             .
 
