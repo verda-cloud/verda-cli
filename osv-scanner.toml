@@ -1,0 +1,12 @@
+# OSV-Scanner config (read by the osv-scanner job in .github/workflows/security.yml).
+# Every ignore needs a reason and an expiry; re-check the advisory before extending it.
+
+[[IgnoredVulns]]
+id = "GO-2026-6911"
+ignoreUntil = 2027-02-06
+reason = """
+No fixed mcp-go release exists (all versions affected). The flaw is in the MCP HTTP client \
+(client/transport.NewStreamableHTTP follows redirects with auth headers). verda-cli imports only \
+mcp-go/mcp and mcp-go/server and serves MCP over stdio; govulncheck finds no call path. \
+Upgrade and drop this entry once https://github.com/mark3labs/mcp-go/issues/1164 ships a fix.\
+"""
