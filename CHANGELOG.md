@@ -1,7 +1,7 @@
 # Changelog
 
 
-## [Unreleased]
+## [v1.10.0] - 2026-11-06
 - [`2a464bc`] Chore(deps): update verdacloud-sdk-go to v1.7.0 and add go fix check
 - [`92ff69c`] Fix(mcp): bound MCP tool API calls by --timeout
 - [`3c6889f`] Feat(container): release verda container as a beta, add scale and replicas
