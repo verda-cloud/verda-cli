@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 
 	"charm.land/lipgloss/v2"
 	"github.com/spf13/cobra"
@@ -30,6 +31,8 @@ import (
 
 // NewCmdTheme creates the settings theme command.
 func NewCmdTheme(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
+	themes := bubbletea.ThemeNames()
+	slices.Sort(themes)
 	cmd := &cobra.Command{
 		Use:   "theme [name]",
 		Short: "View or change the CLI color theme",
@@ -38,7 +41,7 @@ func NewCmdTheme(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command 
 
 			Without arguments, opens an interactive theme selector.
 			With a theme name, sets it directly.
-		`),
+		`) + "\n\nAvailable themes: " + strings.Join(themes, ", "),
 		Example: cmdutil.Examples(`
 			# Interactive selection
 			verda settings theme

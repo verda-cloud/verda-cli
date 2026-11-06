@@ -35,9 +35,14 @@ type CommandGroup struct {
 // CommandGroups is an ordered list of command groups.
 type CommandGroups []CommandGroup
 
-// Add registers every command in each group as a subcommand of c.
+// Add registers every command in each group as a subcommand of c, mirroring
+// the groups as native cobra groups so docgen can read their order and titles.
 func (g CommandGroups) Add(c *cobra.Command) {
 	for _, group := range g {
+		c.AddGroup(&cobra.Group{ID: group.Message, Title: group.Message})
+		for _, sub := range group.Commands {
+			sub.GroupID = group.Message
+		}
 		c.AddCommand(group.Commands...)
 	}
 }
