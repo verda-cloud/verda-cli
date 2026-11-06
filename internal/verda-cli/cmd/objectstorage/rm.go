@@ -68,8 +68,8 @@ func NewCmdRm(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 			with --recursive the URI is treated as a prefix and every
 			matching object under it is deleted. --include and --exclude
 			glob patterns filter the recursive set (matched against the
-			full key; '*' does not cross '/'). Excludes take precedence
-			over includes.
+			key relative to the prefix, as in cp; '*' does not cross '/').
+			Excludes take precedence over includes.
 
 			Pass --dryrun to preview the set of keys without issuing any
 			deletes. In --agent mode, --yes is required unless --dryrun
@@ -85,7 +85,7 @@ func NewCmdRm(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 			# Only delete .txt files, keep everything else
 			verda object-storage rm s3://my-bucket/data/ --recursive --include "*.txt"
 
-			# Delete everything except .log files
+			# Delete everything except the .log files directly under data/
 			verda object-storage rm s3://my-bucket/data/ --recursive --exclude "*.log"
 
 			# Preview without deleting
@@ -303,7 +303,7 @@ func listRmTargets(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOS
 
 		for i := range out.Contents {
 			k := aws.ToString(out.Contents[i].Key)
-			if matchFilters(k, includes, excludes) {
+			if matchFilters(relKey(uri.Key, k), includes, excludes) {
 				keys = append(keys, k)
 			}
 		}
@@ -316,15 +316,12 @@ func listRmTargets(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOS
 	return keys, nil
 }
 
-// matchFilters applies AWS-CLI-style include/exclude glob filters against a
-// full key. Semantics: default-include when no includes; includes require at
-// least one match; excludes always skip. Pattern errors are treated as
-// no-match to keep the command robust against bad user input.
-func matchFilters(key string, includes, excludes []string) bool {
+// matchFilters: rel must be relative to the source prefix/dir (relKey), never a full key.
+func matchFilters(rel string, includes, excludes []string) bool {
 	if len(includes) > 0 {
 		matched := false
 		for _, p := range includes {
-			if ok, _ := filepath.Match(p, key); ok {
+			if ok, _ := filepath.Match(p, rel); ok {
 				matched = true
 				break
 			}
@@ -334,7 +331,7 @@ func matchFilters(key string, includes, excludes []string) bool {
 		}
 	}
 	for _, p := range excludes {
-		if ok, _ := filepath.Match(p, key); ok {
+		if ok, _ := filepath.Match(p, rel); ok {
 			return false
 		}
 	}
