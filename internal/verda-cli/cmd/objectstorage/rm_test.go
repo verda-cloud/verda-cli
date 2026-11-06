@@ -222,7 +222,6 @@ func prefixedRmFake() *rmFakeAPI {
 	}
 }
 
-// Filters match the key relative to the URI prefix, as in cp/mv/sync; '*' still does not cross '/'.
 func TestRm_FiltersMatchKeyRelativeToPrefix(t *testing.T) {
 	// no t.Parallel (withFakeClient swaps a package global)
 	tests := []struct {

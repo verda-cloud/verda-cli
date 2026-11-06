@@ -316,16 +316,12 @@ func listRmTargets(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOS
 	return keys, nil
 }
 
-// matchFilters applies AWS-CLI-style include/exclude glob filters to a path
-// relative to the source prefix/dir (callers pass relKey or the walked rel
-// path, never a full key). Semantics: default-include when no includes;
-// includes require at least one match; excludes always skip. Pattern errors
-// are treated as no-match to keep the command robust against bad user input.
-func matchFilters(key string, includes, excludes []string) bool {
+// matchFilters: rel must be relative to the source prefix/dir (relKey), never a full key.
+func matchFilters(rel string, includes, excludes []string) bool {
 	if len(includes) > 0 {
 		matched := false
 		for _, p := range includes {
-			if ok, _ := filepath.Match(p, key); ok {
+			if ok, _ := filepath.Match(p, rel); ok {
 				matched = true
 				break
 			}
@@ -335,7 +331,7 @@ func matchFilters(key string, includes, excludes []string) bool {
 		}
 	}
 	for _, p := range excludes {
-		if ok, _ := filepath.Match(p, key); ok {
+		if ok, _ := filepath.Match(p, rel); ok {
 			return false
 		}
 	}
