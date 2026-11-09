@@ -118,7 +118,7 @@ func selectThemeWizard(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.
 
 func setTheme(ioStreams cmdutil.IOStreams, name string) error {
 	if !bubbletea.SetThemeByName(name) {
-		return fmt.Errorf("unknown theme %q\n\nAvailable themes: %v", name, sortedThemeNames())
+		return fmt.Errorf("unknown theme %q\n\nAvailable themes: %s", name, strings.Join(sortedThemeNames(), ", "))
 	}
 
 	if err := options.SaveSetting("settings.theme", name); err != nil {
