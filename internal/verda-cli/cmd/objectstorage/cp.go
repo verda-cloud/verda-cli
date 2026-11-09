@@ -132,12 +132,12 @@ func NewCmdCp(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 			cross '/').
 
 			Large single-file uploads and single-object downloads are multipart
-				and parallel, and they RESUME: re-run the EXACT same command to
-				continue an interrupted transfer (only the missing parts move).
-				--no-resume starts over; --concurrency / --part-size tune throughput.
-				Interactive downloads from the "verda object-storage ls" browser resume the same way.
+			and parallel, and they RESUME: re-run the EXACT same command to
+			continue an interrupted transfer (only the missing parts move).
+			--no-resume starts over; --concurrency / --part-size tune throughput.
+			Interactive downloads from the "verda object-storage ls" browser resume the same way.
 
-				With --dryrun, the planned transfers are listed but no SDK
+			With --dryrun, the planned transfers are listed but no SDK
 			calls are made.
 		`),
 		Example: cmdutil.Examples(`
