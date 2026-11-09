@@ -223,7 +223,7 @@ func prefixedRmFake() *rmFakeAPI {
 }
 
 func TestRm_FiltersMatchKeyRelativeToPrefix(t *testing.T) {
-	// no t.Parallel (withFakeClient swaps a package global)
+	// no t.Parallel: withFakeClient swaps the package-level clientBuilder.
 	tests := []struct {
 		name string
 		args []string
@@ -275,7 +275,7 @@ func TestRm_FiltersMatchKeyRelativeToPrefix(t *testing.T) {
 }
 
 func TestRm_DryrunPreviewAppliesFiltersUnderPrefix(t *testing.T) {
-	// no t.Parallel
+	// no t.Parallel: withFakeClient swaps the package-level clientBuilder.
 	fake := prefixedRmFake()
 	restore := withFakeClient(fake)
 	defer restore()
