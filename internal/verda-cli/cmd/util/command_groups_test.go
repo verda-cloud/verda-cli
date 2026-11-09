@@ -42,6 +42,23 @@ func TestSetUsageTemplate_TagAnnotation(t *testing.T) {
 	}
 }
 
+func TestTagSuffix(t *testing.T) {
+	t.Parallel()
+	tests := map[string]struct {
+		cmd  *cobra.Command
+		want string
+	}{
+		"tagged":            {&cobra.Command{Use: "s3", Annotations: map[string]string{TagAnnotation: "beta"}}, " (beta)"},
+		"other annotations": {&cobra.Command{Use: "vm", Annotations: map[string]string{"x": "y"}}, ""},
+		"no annotations":    {&cobra.Command{Use: "vm"}, ""},
+	}
+	for name, tc := range tests {
+		if got := TagSuffix(tc.cmd); got != tc.want {
+			t.Errorf("%s: TagSuffix = %q, want %q", name, got, tc.want)
+		}
+	}
+}
+
 func TestCommandGroupsAdd_NativeGroups(t *testing.T) {
 	t.Parallel()
 	auth := &cobra.Command{Use: "auth"}

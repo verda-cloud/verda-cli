@@ -27,6 +27,15 @@ import (
 // next to its name in the grouped root help. Set via cmd.Annotations.
 const TagAnnotation = "verda.tag"
 
+// TagSuffix returns " (<tag>)" for a command with TagAnnotation, else "".
+// The root help and the generated docs both use it, so they cannot drift.
+func TagSuffix(c *cobra.Command) string {
+	if tag := c.Annotations[TagAnnotation]; tag != "" {
+		return " (" + tag + ")"
+	}
+	return ""
+}
+
 // CommandGroup represents a logical group of subcommands with a heading message.
 type CommandGroup struct {
 	Message  string
@@ -110,11 +119,7 @@ func SetUsageTemplate(cmd *cobra.Command, groups CommandGroups) {
 			if c.Hidden {
 				continue
 			}
-			name := c.Name()
-			if tag := c.Annotations[TagAnnotation]; tag != "" {
-				name += " (" + tag + ")"
-			}
-			fmt.Fprintf(&b, "  %-18s %s\n", name, c.Short)
+			fmt.Fprintf(&b, "  %-18s %s\n", c.Name()+TagSuffix(c), c.Short)
 		}
 		b.WriteString("\n")
 	}

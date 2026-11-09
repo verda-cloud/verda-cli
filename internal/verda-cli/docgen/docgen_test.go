@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
@@ -210,6 +211,64 @@ func TestGenerate_UsageShowsInheritedFlags(t *testing.T) {
 	}
 	if page := string(files["reference/locations.md"]); !strings.Contains(page, "verda locations [flags]") {
 		t.Errorf("usage should include [flags] from global flags, as --help does; got:\n%s", page)
+	}
+}
+
+// registryLsSection renders a tree whose registry group declares persistent flags
+// via addFlags, and returns the "verda registry ls" section of its page.
+func registryLsSection(t *testing.T, addFlags func(*pflag.FlagSet)) string {
+	t.Helper()
+	root := &cobra.Command{Use: "verda"}
+	root.PersistentFlags().StringP("output", "o", "table", "Output format")
+	registry := &cobra.Command{Use: "registry", Short: "Manage the registry"}
+	addFlags(registry.PersistentFlags())
+	ls := &cobra.Command{Use: "ls", Short: "List repositories", Run: func(*cobra.Command, []string) {}}
+	ls.Flags().Bool("all", false, "Include empty repositories")
+	registry.AddCommand(ls)
+	root.AddCommand(registry)
+
+	files, err := Generate(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(files["reference/registry.md"])
+	_, section, ok := strings.Cut(page, "## verda registry ls\n")
+	if !ok {
+		t.Fatalf("page has no registry ls section; got:\n%s", page)
+	}
+	return section
+}
+
+func TestGenerate_InheritedFlags(t *testing.T) {
+	t.Parallel()
+	section := registryLsSection(t, func(fs *pflag.FlagSet) {
+		fs.String("project", "", "Registry project")
+	})
+	local, inherited, ok := strings.Cut(section, "**Inherited flags**")
+	if !ok {
+		t.Fatalf("a group's persistent flag should be listed under Inherited flags; got:\n%s", section)
+	}
+	if !strings.Contains(local, "--all") {
+		t.Errorf("local flag --all should be listed under Flags; got:\n%s", section)
+	}
+	if !strings.Contains(inherited, "--project string") {
+		t.Errorf("group flag --project should be listed under Inherited flags; got:\n%s", section)
+	}
+	if strings.Contains(section, "-o, --output") {
+		t.Errorf("global flags belong on the index only; got:\n%s", section)
+	}
+}
+
+// Cobra gives a subcommand the nearest parent's flag of a name, so a group flag
+// that shadows a global one is not the global flag and must be listed.
+func TestGenerate_InheritedFlagShadowsGlobal(t *testing.T) {
+	t.Parallel()
+	section := registryLsSection(t, func(fs *pflag.FlagSet) {
+		fs.String("output", "json", "Registry output format")
+	})
+	_, inherited, ok := strings.Cut(section, "**Inherited flags**")
+	if !ok || !strings.Contains(inherited, `Registry output format (default "json")`) {
+		t.Errorf("the group's --output should be listed under Inherited flags; got:\n%s", section)
 	}
 }
 

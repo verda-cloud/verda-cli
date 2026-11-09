@@ -41,7 +41,11 @@ func main() {
 }
 
 func run(out string) error {
-	isolateEnv()
+	cleanup, err := isolateEnv()
+	if err != nil {
+		return err
+	}
+	defer cleanup()
 	var discard bytes.Buffer
 	root, _ := cmd.NewRootCommand(cmdutil.IOStreams{In: &bytes.Buffer{}, Out: &discard, ErrOut: &discard})
 	files, err := docgen.Generate(root)
@@ -64,14 +68,19 @@ func run(out string) error {
 	return nil
 }
 
-// isolateEnv keeps output machine-independent: no inherited VERDA_* (so the
-// batchjob gate stays off) and a fixed home for any path-derived defaults.
-func isolateEnv() {
+// isolateEnv: no inherited VERDA_* (batchjob gate off) and a throwaway home, so building
+// the tree can't touch a real config dir; docs.check catches any home-derived help text.
+func isolateEnv() (cleanup func(), err error) {
 	for _, kv := range os.Environ() {
 		if name, _, _ := strings.Cut(kv, "="); strings.HasPrefix(name, "VERDA_") {
 			_ = os.Unsetenv(name)
 		}
 	}
-	_ = os.Setenv("HOME", "/home/user")
-	_ = os.Setenv("VERDA_HOME", "/home/user/.verda")
+	home, err := os.MkdirTemp("", "verda-gen-docs-")
+	if err != nil {
+		return nil, err
+	}
+	_ = os.Setenv("HOME", home)
+	_ = os.Setenv("VERDA_HOME", filepath.Join(home, ".verda"))
+	return func() { _ = os.RemoveAll(home) }, nil
 }
