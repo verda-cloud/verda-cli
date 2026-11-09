@@ -44,8 +44,7 @@ type RepositoryInfo struct {
 
 // ArtifactInfo is the normalized per-artifact row returned by
 // RepositoryLister.ListArtifacts. It maps Harbor's `/artifacts` response
-// to the subset the CLI renders in the repo drill-down view (digest,
-// tags, size, push time, pull time).
+// to the subset the CLI uses (digest, tags, size, push time, pull time).
 //
 // An "artifact" in Harbor is a unique manifest digest. Multiple tags can
 // point at the same artifact (same content, renamed), so Tags is a slice.

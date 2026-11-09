@@ -438,7 +438,7 @@ func TestLs_Interactive_ArtifactsAccessDeniedShowsPullPath(t *testing.T) {
 }
 
 // TestLs_Interactive_ArtifactsAccessDenied_FallsBackToV2Tags: when Harbor's
-// artifact API is denied but the Docker v2 tag list works, the drill-down still
+// artifact API is denied but the Docker v2 tag list works, "Get pull URL" still
 // offers the tag picker → pull URL via the v2 fallback.
 func TestLs_Interactive_ArtifactsAccessDenied_FallsBackToV2Tags(t *testing.T) {
 	writeLsCredsFile(t, validLsCredsBody("vccr.io", "abc"))
