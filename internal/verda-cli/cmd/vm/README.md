@@ -28,7 +28,9 @@ Hibernate is deprecated and will be removed in a future version. It discontinues
 # Interactive (wizard launches when required fields are missing)
 verda vm create
 
-# From a saved template (only prompts for hostname + confirm)
+# From a saved template: no prompt or confirmation when the template and flags
+# give instance type, OS, hostname and location; otherwise the wizard asks for
+# what is missing, then asks to confirm
 verda vm create --from gpu-training
 
 # From a template, override specific fields with flags

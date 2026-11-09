@@ -86,7 +86,7 @@ const registryAuthFailedRecoveryMessage = "Registry authentication failed. Your 
 	"  2. If the problem persists, contact Verda support at support@verda.cloud."
 
 // registryAccessDeniedRecoveryMessage is the user-facing text for a 403
-// from the Harbor REST listing endpoints (`ls` / artifact drill-down).
+// from the Harbor REST listing endpoints (`ls` and its artifact listing).
 // 403 here means the credential itself is valid but the robot account
 // does not carry the required `list repository` / `pull artifact`
 // permission bit. The practical fix from a user's perspective is

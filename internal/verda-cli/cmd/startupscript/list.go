@@ -34,7 +34,7 @@ func NewCmdList(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 		`),
 		Example: cmdutil.Examples(`
 			verda startup-script list
-			verda script ls
+			verda startup-script ls
 		`),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {

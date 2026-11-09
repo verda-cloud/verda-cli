@@ -46,9 +46,8 @@ type lsPayload struct {
 // NewCmdLs creates the `verda registry ls` command.
 //
 // ls lists every repository in the active Verda project using Harbor's
-// REST API. On a TTY, selecting a repository drills into its artifact
-// list (digest / tags / size / pushed / pulled) — mirroring the Harbor
-// UI's "Image list" view. When piped or redirected (or with -o json /
+// REST API. On a TTY, selecting a repository opens an action menu (get a
+// pull URL, delete images). When piped or redirected (or with -o json /
 // yaml), ls prints a single non-interactive table/document.
 func NewCmdLs(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 	opts := &lsOptions{}
@@ -63,13 +62,15 @@ func NewCmdLs(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 			the catalog endpoint is admin-only on Harbor and is not
 			accessible to the project-scoped robot accounts VCR issues.
 
-			When run on a terminal, selecting a repository drills into its
-			per-artifact details (digest, tags, size, push/pull times).
+			When run on a terminal, selecting a repository opens an action
+			menu: get a pull URL (pick a tag, and ls prints its full pull
+			reference) or delete image(s) with the same confirmation flow
+			as "verda registry delete".
 			When piped to a file or another command (or when -o json/yaml
 			is set), ls prints a single non-interactive document.
 		`),
 		Example: cmdutil.Examples(`
-			# Interactive: pick a repo to see its image list
+			# Interactive: pick a repo, then get a pull URL or delete images
 			verda registry ls
 
 			# Non-interactive table (piping suppresses the picker)
@@ -160,7 +161,7 @@ func runLs(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, o
 		return nil
 	}
 
-	// TTY: interactive drill-down. Mirrors cmd/vm/list.go — use the
+	// TTY: repo picker, then an action menu. Mirrors cmd/vm/list.go — use the
 	// factory's prompter so agent mode / automation still gets a
 	// structured AgentError instead of a blocked terminal.
 	//
@@ -362,7 +363,7 @@ func runRepoActions(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IO
 	}
 }
 
-// tagEntry is one row in the drill-down tag picker. suffix is appended to the
+// tagEntry is one row in the "Get pull URL" tag picker. suffix is appended to the
 // repo's pull base to form the full reference: ":<tag>" for tagged artifacts,
 // "@<digest>" for untagged ones (SBOMs, referrers).
 type tagEntry struct {
@@ -413,7 +414,7 @@ func tagEntriesFromNames(tags []string) []tagEntry {
 	return entries
 }
 
-// runTagPicker drives the repo drill-down over a prebuilt entry list: filter
+// runTagPicker drives the "Get pull URL" picker over a prebuilt entry list: filter
 // (type-to-filter on the Select) and pick a tag, then print its full,
 // copy-pasteable pull reference (base + suffix) and quit — getting the URL is
 // the goal, so once it's on stdout the user can copy it and move on rather than

@@ -54,35 +54,17 @@ The `login` command enters interactive wizard mode when `--client-id` or `--clie
 
 ## Credential Resolution Order
 
-Authentication credentials are resolved from multiple sources. The table below
-shows the order of precedence (highest first):
-
-| Priority | Source | Example |
-|----------|--------|---------|
-| 1 | CLI flags | `--auth.client-id=xxx --auth.client-secret=yyy` |
-| 2 | Config file (viper) | `auth.client-id` in `~/.verda/config.yaml` |
-| 3 | Environment variables | `VERDA_CLIENT_ID`, `VERDA_CLIENT_SECRET` |
-| 4 | Credentials file profile | `[default]` section in `~/.verda/credentials` |
-
-### Supported Environment Variables
-
-| Variable | Description |
-|----------|-------------|
-| `VERDA_CLIENT_ID` | API client ID |
-| `VERDA_CLIENT_SECRET` | API client secret |
-| `VERDA_PROFILE` | Credentials profile name |
-| `VERDA_SHARED_CREDENTIALS_FILE` | Path to credentials file |
-| `VERDA_AGENT` | Enable agent mode (`1` or `true`) |
-| `VERDA_HOME` | Base directory for config (default `~/.verda`) |
+Run `verda auth --help` for the full order in which flags, environment
+variables, `~/.verda/config.yaml` and the credentials file are checked,
+including how `login`, `use`, registry and object-storage differ. The
+environment variables are listed in
+[docs/commands.md](../../../../docs/commands.md#environment-variables).
 
 ### Explicit Profile Selection
 
 `--auth.profile` / `VERDA_PROFILE` choose WHICH credentials file section
 supplies missing values — they do not promote stored values over inline
-sources. Per field, the precedence table above always applies: CLI flag >
-config file (including `VERDA_AUTH_CLIENT_ID` / `VERDA_AUTH_CLIENT_SECRET` via
-viper's env binding) > `VERDA_CLIENT_ID` / `VERDA_CLIENT_SECRET` > credentials
-file. The selected profile additionally pins its own `verda_base_url`.
+sources. The `auth` help says which selections are explicit and what that changes.
 
 For example:
 

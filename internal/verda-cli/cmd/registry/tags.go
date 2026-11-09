@@ -81,9 +81,8 @@ func NewCmdTags(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 			List every tag in the given repository plus per-tag metadata
 			(digest, size). On a terminal, tags are shown as an interactive,
 			filterable picker — select one to print its full pull reference and
-			exit (the same picker "verda registry ls" uses when you drill into a
-			repository). Piped output, -o json/yaml, or --agent print the table
-			instead.
+			exit (the same picker as "Get pull URL" in "verda registry ls").
+			Piped output, -o json/yaml, or --agent print the table instead.
 
 			The repository may be passed as a full reference
 			("vccr.io/<project>/<name>") or a short reference ("<name>"). Short
@@ -228,9 +227,9 @@ func runTags(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams,
 		}
 	}
 
-	// Interactive terminal: present the same filterable tag picker `ls`'s
-	// drill-down uses; selecting a tag prints its full pull reference. Piped /
-	// redirected / -o json / --agent fall through to the plain table so scripts
+	// Interactive terminal: present the same filterable tag picker as `ls`'s
+	// "Get pull URL" action; selecting a tag prints its full pull reference.
+	// Piped / redirected / -o json / --agent fall through to the plain table so scripts
 	// stay deterministic. The picker uses cmd.Context() (not the per-request
 	// timeout ctx) so user think-time can't cancel it mid-prompt.
 	if !f.AgentMode() && isTerminalFn(ioStreams.Out) {

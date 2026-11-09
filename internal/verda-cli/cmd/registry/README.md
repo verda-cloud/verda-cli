@@ -62,8 +62,7 @@ verda registry push
 ### 4. List repositories and tags
 
 ```bash
-# Every repository in the active project, then pick one to see its image list
-# (digest / tags / size / push / pull — the same view Harbor's web UI shows)
+# Every repository in the active project, then pick one to get a pull URL or delete images
 verda registry ls
 
 # Scriptable (piping suppresses the picker; JSON/YAML do too)
@@ -164,7 +163,7 @@ verda registry configure-docker --config /tmp/dc.json     # write to a non-defau
 ## Listing
 
 ```bash
-# Interactive: pick a repo to see its image list (like Harbor's web UI)
+# Interactive: pick a repo, then get a pull URL or delete images
 verda registry ls
 
 # Non-interactive table (pipe or redirect => no picker, deterministic output)
@@ -192,7 +191,7 @@ When `ls` is piped or redirected, or when `-o json` / `-o yaml` is set, the pick
 
 ### Artifacts vs. tags (what the columns mean)
 
-- **Artifact** (`ARTIFACTS` column in `ls`, rows in the drill-down card) = a **unique manifest digest**. Uploading the same content under a second tag does not create a second artifact; re-pushing with different content under an existing tag does.
+- **Artifact** (`ARTIFACTS` column in `ls`) = a **unique manifest digest**. Uploading the same content under a second tag does not create a second artifact; re-pushing with different content under an existing tag does.
 - **Tag** = a mutable label pointing to one artifact at a time (like a Git tag or branch tip). `verda registry tags <repo>` is still the right command when you want a tag-centric view.
 
 So an `ARTIFACTS` count of `1` with two tags means both tags point at the same pushed content; a count of `2` with two tags means the tags point at different content.
@@ -453,7 +452,7 @@ The artifact-count / digest / removed-tags fields come from a best-effort pre-de
 `--profile`, `--credentials-file`.
 
 ### `tags`
-`--profile`, `--credentials-file`, `--limit`, `--all`. On a terminal `tags <repo>` is an interactive filterable picker (type to filter; select a tag → prints its pull reference and exits — the same picker `ls`'s drill-down uses); piped / `-o json` / `--agent` print the per-tag table instead. **Bare `tags`** (no repo) returns a usage error pointing at `tags <repo>` / `ls` — `tags` is tag-centric; browsing repositories interactively is `ls`'s job.
+`--profile`, `--credentials-file`, `--limit`, `--all`. On a terminal `tags <repo>` is an interactive filterable picker (type to filter; select a tag → prints its pull reference and exits — the same picker as `ls`'s "Get pull URL" action); piped / `-o json` / `--agent` print the per-tag table instead. **Bare `tags`** (no repo) returns a usage error pointing at `tags <repo>` / `ls` — `tags` is tag-centric; browsing repositories interactively is `ls`'s job.
 
 ### `push`
 `--profile`, `--credentials-file`, `--repo`, `--tag`, `--source` (`auto|daemon|oci|tar`), `--jobs`, `--image-jobs`, `--retries`, `--progress` (`auto|plain|json|none`), `--no-mount` (currently a no-op; prints a notice).
@@ -549,7 +548,7 @@ Business logic highlights:
 - **Retries**: GET/HEAD/PUT/DELETE/PATCH retried on 408/429/500/502/503/504 and network timeouts. POST (blob-upload init) is never retried — a duplicate could orphan a partial upload. Across-invocation resume is free from the registry protocol (content-addressed dedup).
 - **Worker pool (`copy --all-tags`)**: `--image-jobs` defaults auto-pick: `1` for < 4 tags, else `min(NumCPU/2, 4)`. User values are clamped to `min(hw, 8)`.
 - **Listing via Harbor REST, not `_catalog`**: `/v2/_catalog` is admin-only on Harbor and returns 401 for the project-scoped robot accounts VCR issues. `ls` therefore talks to Harbor's REST API (`/api/v2.0/projects`, `/api/v2.0/repositories`, and `/api/v2.0/projects/{project}/repositories/{repo}/artifacts`) using the rich-query filter `q=project_id=N` for the repo page — the plain `?project_id=N` parameter is silently ignored by Harbor and must not be used. `ListRepositories` also applies a client-side `r.ProjectID == projectID` filter as belt-and-suspenders. `ListArtifacts` percent-encodes the repository path segment (`url.PathEscape`) so names containing `/` route correctly. See `harbor.go` for the full implementation and the "List Repositories / artifacts" section in the package CLAUDE.md for the permission history.
-- **Interactive `ls` drill-down**: on a TTY, `ls` routes through `f.Prompter().Select` to let the user pick a repository, then calls `RepositoryLister.ListArtifacts` and renders a per-artifact card (digest / tags / size / push / pull). Non-TTY output is always the flat repo table; structured output (`-o json|yaml`) never enters the picker. TTY detection is swappable via `isTerminalFn` (shared with `copy` / `push_view.go`), which also lets tests exercise the picker path without a real terminal.
+- **Interactive `ls` action menu**: on a TTY, `ls` routes through `f.Prompter().Select` to let the user pick a repository, then calls `RepositoryLister.ListArtifacts` and offers an action menu: get a pull URL (tag picker that prints the pull reference) or delete image(s) through the same confirm flow as `registry delete`. Non-TTY output is always the flat repo table; structured output (`-o json|yaml`) never enters the picker. TTY detection is swappable via `isTerminalFn` (shared with `copy` / `push_view.go`), which also lets tests exercise the picker path without a real terminal.
 - **Delete target classification**: `classifyTarget` inspects the raw positional argument's last path segment for `@` or `:` to distinguish bare repositories from artifact references, *before* calling `Normalize`. `Normalize` defaults the tag to `"latest"` for push/copy semantics — reusing that default for delete would silently convert `delete library/hello-world` into `delete library/hello-world:latest`, which is the wrong intent. Cross-project targets are rejected locally with `registry_invalid_reference` so the user gets a useful message instead of a 403 from Harbor.
 - **Policy-blocked deletes (HTTP 412)**: Harbor returns 412 when a project Tag Immutability / Tag Retention rule forbids the operation. `translateHarborError` maps that to `registry_delete_blocked` with a recovery message walking the user through editing the policy in the web UI or escalating to support; the Harbor response body (usually `"matched rule X"`) is folded into the message verbatim.
 - **Interactive delete flow**: on a TTY with no positional arg, `delete` drives a two-level menu — outer picker over repositories (same `formatRepoRow` as `ls`), inner menu per repo (delete image(s) / delete repository / back / exit). The image-delete step uses `prompter.MultiSelect`, which natively supports Ctrl+A "select all" (see `pkg/tui/bubbletea/multiselect.go`); the prompt label advertises the keystroke. Batches run sequentially with partial-success reporting — one failing artifact never cancels siblings.

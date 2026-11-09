@@ -179,7 +179,7 @@ func newCmdContainerCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobr
 
 	flags.StringArrayVar(&opts.SecretMounts, flagSecretMount, nil, "Secret mount SECRET:MOUNT_PATH; repeat for multiple")
 
-	flags.BoolVarP(&opts.Yes, flagYes, "y", false, "Skip confirmation (required in agent mode)")
+	flags.BoolVarP(&opts.Yes, flagYes, "y", false, "Skip the deploy confirmation (agent mode never prompts)")
 
 	return cmd
 }
@@ -208,7 +208,7 @@ func runContainerCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil
 
 	cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), "Request payload:", req)
 
-	// Human confirm after summary; agent requires --yes.
+	// Human confirm after summary; agent mode and --yes skip it.
 	if !f.AgentMode() && !opts.Yes {
 		renderContainerSummary(ioStreams.ErrOut, opts)
 		confirmed, err := f.Prompter().Confirm(cmd.Context(), fmt.Sprintf("Deploy %s?", opts.Name))
