@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 
 	"charm.land/lipgloss/v2"
 	"github.com/spf13/cobra"
@@ -38,7 +39,7 @@ func NewCmdTheme(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command 
 
 			Without arguments, opens an interactive theme selector.
 			With a theme name, sets it directly.
-		`),
+		`) + "\n\nAvailable themes: " + strings.Join(sortedThemeNames(), ", "),
 		Example: cmdutil.Examples(`
 			# Interactive selection
 			verda settings theme
@@ -63,8 +64,7 @@ func selectThemeWizard(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.
 	current := bubbletea.GetThemeName()
 	var selected string
 
-	names := bubbletea.ThemeNames()
-	slices.Sort(names)
+	names := sortedThemeNames()
 
 	// The wizard engine drives its own terminal UI (it bypasses f.Prompter),
 	// so the factory's agentPrompter cannot block it — gate here instead.
@@ -118,9 +118,7 @@ func selectThemeWizard(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.
 
 func setTheme(ioStreams cmdutil.IOStreams, name string) error {
 	if !bubbletea.SetThemeByName(name) {
-		names := bubbletea.ThemeNames()
-		slices.Sort(names)
-		return fmt.Errorf("unknown theme %q\n\nAvailable themes: %v", name, names)
+		return fmt.Errorf("unknown theme %q\n\nAvailable themes: %s", name, strings.Join(sortedThemeNames(), ", "))
 	}
 
 	if err := options.SaveSetting("settings.theme", name); err != nil {
@@ -159,6 +157,11 @@ func renderThemePreview(name string, theme *bubbletea.Theme) string {
 }
 
 func completeThemeNames(_ *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	return sortedThemeNames(), cobra.ShellCompDirectiveNoFileComp
+}
+
+func sortedThemeNames() []string {
 	names := bubbletea.ThemeNames()
-	return names, cobra.ShellCompDirectiveNoFileComp
+	slices.Sort(names)
+	return names
 }

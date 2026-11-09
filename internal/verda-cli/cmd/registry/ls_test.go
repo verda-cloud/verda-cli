@@ -291,14 +291,13 @@ func sampleArtifacts() []ArtifactInfo {
 	}
 }
 
-// TestLs_Interactive_DrillsIntoArtifacts exercises the full TTY path:
-// picker selects the first repo, ls fetches artifacts, renders the
-// detail card, then the picker loops and the user picks Exit.
+// TestLs_Interactive_PicksPullURL exercises the full TTY path: repo picker →
+// ListArtifacts → action menu "Get pull URL" → tag picker → pull ref on stdout.
 //
 // This is the headline test for the feature — if the wiring between
-// prompter.Select, ListArtifacts, and the renderer regresses, this is
+// prompter.Select, ListArtifacts, and the tag picker regresses, this is
 // the assertion that catches it.
-func TestLs_Interactive_DrillsIntoArtifacts(t *testing.T) {
+func TestLs_Interactive_PicksPullURL(t *testing.T) {
 	writeLsCredsFile(t, validLsCredsBody("vccr.io", "abc"))
 	lister := &fakeLister{
 		repos: sampleRepos(),
@@ -438,7 +437,7 @@ func TestLs_Interactive_ArtifactsAccessDeniedShowsPullPath(t *testing.T) {
 }
 
 // TestLs_Interactive_ArtifactsAccessDenied_FallsBackToV2Tags: when Harbor's
-// artifact API is denied but the Docker v2 tag list works, the drill-down still
+// artifact API is denied but the Docker v2 tag list works, "Get pull URL" still
 // offers the tag picker → pull URL via the v2 fallback.
 func TestLs_Interactive_ArtifactsAccessDenied_FallsBackToV2Tags(t *testing.T) {
 	writeLsCredsFile(t, validLsCredsBody("vccr.io", "abc"))

@@ -128,7 +128,9 @@ func NewCmdCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 			# Interactive wizard
 			verda vm create
 
-			# From a saved template (only prompts for hostname + confirm)
+			# From a saved template. When the template and flags supply instance type,
+			# OS, hostname and location, this deploys with no prompt or confirmation;
+			# otherwise the wizard asks for what is missing, then asks to confirm.
 			verda vm create --from gpu-training
 			verda vm create --from gpu-training --hostname my-vm
 
