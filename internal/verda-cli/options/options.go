@@ -143,6 +143,8 @@ func (o *Options) Complete() {
 	a := o.AuthOptions
 
 	// --- 1. Resolve credentials file first (needed by profile resolution). ---
+	// flag > viper auth.credentials-file (VERDA_AUTH_CREDENTIALS_FILE, then
+	// config file) > VERDA_SHARED_CREDENTIALS_FILE > default.
 	if a.CredentialsFile == "" {
 		a.CredentialsFile = viper.GetString("auth.credentials-file")
 	}
@@ -156,9 +158,9 @@ func (o *Options) Complete() {
 	}
 
 	// --- 2. Resolve profile. Track whether it was explicitly set. ---
-	// Priority: flag > env var > config file > auto-detect.
-	// Only flag and env var count as "explicit" (runtime override that
-	// should force-load credentials from that profile).
+	// Priority: flag > VERDA_PROFILE > viper auth.profile (VERDA_AUTH_PROFILE,
+	// then config file) > auto-detect. Only flag and VERDA_PROFILE are
+	// "explicit" (force-load that profile).
 	explicitProfile := a.Profile != "" // set via --auth.profile flag
 	if a.Profile == "" {
 		if p := os.Getenv("VERDA_PROFILE"); p != "" {
@@ -167,13 +169,13 @@ func (o *Options) Complete() {
 		}
 	}
 	if a.Profile == "" {
-		a.Profile = viper.GetString("auth.profile") // config file (saved default)
+		a.Profile = viper.GetString("auth.profile") // VERDA_AUTH_PROFILE, then config file
 	}
 	if a.Profile == "" {
 		a.Profile = resolveDefaultProfile(a.CredentialsFile)
 	}
 
-	// --- 3. Resolve inline credentials (flag > config file > env). ---
+	// --- 3. Resolve inline credentials (flag > VERDA_AUTH_* env > config file > VERDA_* env). ---
 	if a.ClientID == "" {
 		a.ClientID = viper.GetString("auth.client-id")
 	}
@@ -191,10 +193,9 @@ func (o *Options) Complete() {
 	}
 
 	// --- 4. Load from credentials file. ---
-	// Inline sources (flag, config file, env — incl. VERDA_AUTH_* spellings via
-	// viper's env binding) always win over the stored profile: the profile only
-	// fills fields still empty. Base URL is the exception — an explicitly
-	// selected profile pins its own verda_base_url.
+	// Every inline source from step 3 wins over the stored profile: the
+	// profile only fills fields still empty. Base URL is the exception: an
+	// explicitly selected profile pins its own verda_base_url.
 	missingRequired := a.ClientID == "" || a.ClientSecret == ""
 	if explicitProfile || missingRequired || a.BearerToken == "" {
 		shared, err := loadSharedCredentials(a.CredentialsFile, a.Profile)
@@ -239,8 +240,8 @@ func (o *Options) Validate() error {
 
 // ActiveProfile resolves the auth profile name for commands that skip
 // Options.Complete() (object-storage, registry — see skipCredentialResolution in cmd.go),
-// honoring the same precedence as full resolution: explicit flag > VERDA_PROFILE
-// env > config file (auth.profile, set by `verda auth use`). Returns "" when
+// with the same precedence as Complete minus auto-detect: flag > VERDA_PROFILE >
+// viper auth.profile (VERDA_AUTH_PROFILE, then config file). Returns "" when
 // none is set so the caller can apply its own default. Without this, those
 // commands ignore `verda auth use` and always read the "default" profile.
 func ActiveProfile(flagProfile string) string {

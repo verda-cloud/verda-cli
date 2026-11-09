@@ -16,7 +16,7 @@
 
 ## Domain-Specific Logic
 - Credentials file resolution order: explicit flag > `VERDA_SHARED_CREDENTIALS_FILE` env var > `options.DefaultCredentialsFilePath()`
-- Config file is always `~/.verda/config.yaml`; active profile stored at YAML path `auth.profile`
+- Config file is `config.yaml` in `options.VerdaDir()` (`~/.verda`, or `VERDA_HOME`); active profile stored at YAML path `auth.profile`
 - Credentials file uses AWS-style INI format with `verda_`-prefixed keys
 - File permissions set to `0600` on non-Windows platforms after writing credentials
 - `show` never prints actual secrets -- only booleans for whether they are loaded
