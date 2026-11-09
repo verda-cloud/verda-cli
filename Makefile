@@ -7,7 +7,7 @@ GOLANGCI_LINT := GOTOOLCHAIN=go$(GO_VERSION) go run github.com/golangci/golangci
 # Toolchain pinned because each Go release adds or removes fixers; the integration tag brings tests/integration into scope.
 GOFIX := GOTOOLCHAIN=go$(GO_VERSION) go fix -tags=integration
 
-.PHONY: all build clean run.sandbox lint lint.fix security fix fix.check test test.integration test-s3-integration fmt changelog changelog.unreleased hooks.install pre-commit help
+.PHONY: all build clean run.sandbox lint lint.fix security fix fix.check docs docs.check test test.integration test-s3-integration fmt changelog changelog.unreleased hooks.install pre-commit help
 
 ## Build -------------------------------------------------------------------
 
@@ -46,6 +46,16 @@ fix: ## Apply go fix modernizers
 
 fix.check: ## Fail if go fix has pending modernizations (CI)
 	@$(GOFIX) -diff ./... || { echo "Pending go fix changes. Run 'make fix'"; exit 1; }
+
+docs: ## Regenerate docs/commands.md and docs/reference/ from the cobra command tree
+	@go run ./cmd/gen-docs -out docs
+
+docs.check: ## Fail if generated command docs are stale (CI)
+	@tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \
+	go run ./cmd/gen-docs -out "$$tmp" || exit 1; \
+	if ! diff -u docs/commands.md "$$tmp/commands.md" || ! diff -ru docs/reference "$$tmp/reference"; then \
+		echo "Command docs are stale. Run 'make docs'"; exit 1; \
+	fi
 
 test: ## Run all tests (with race detector)
 	@go test -race -count=1 ./...

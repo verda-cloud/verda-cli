@@ -17,6 +17,7 @@ package util
 import (
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -35,11 +36,33 @@ type CommandGroup struct {
 // CommandGroups is an ordered list of command groups.
 type CommandGroups []CommandGroup
 
-// Add registers every command in each group as a subcommand of c.
+// orderAnnotation: declaration rank set by Add. Cobra sorts Commands() in
+// place, so it is the only record of the order the grouped --help shows.
+const orderAnnotation = "verda.order"
+
+// Add registers every command in each group as a subcommand of c, mirroring
+// the groups as native cobra groups so docgen can read their order and titles.
 func (g CommandGroups) Add(c *cobra.Command) {
+	rank := 0
 	for _, group := range g {
+		c.AddGroup(&cobra.Group{ID: group.Message, Title: group.Message})
+		for _, sub := range group.Commands {
+			sub.GroupID = group.Message
+			if sub.Annotations == nil {
+				sub.Annotations = map[string]string{}
+			}
+			sub.Annotations[orderAnnotation] = strconv.Itoa(rank)
+			rank++
+		}
 		c.AddCommand(group.Commands...)
 	}
+}
+
+// DeclarationOrder returns c's position in the CommandGroups that added it;
+// ok is false for commands not added through CommandGroups.Add.
+func DeclarationOrder(c *cobra.Command) (rank int, ok bool) {
+	rank, err := strconv.Atoi(c.Annotations[orderAnnotation])
+	return rank, err == nil
 }
 
 // Has returns true if c belongs to any group.

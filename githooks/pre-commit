@@ -10,7 +10,16 @@
 set -euo pipefail
 
 STAGED_GO=$(git diff --cached --name-only --diff-filter=ACM -- '*.go' || true)
+# Generated docs go stale on any Go change (deletions included) or a hand edit.
+DOCS_TRIGGER=$(git diff --cached --name-only -- '*.go' docs/commands.md docs/reference || true)
+if [ -z "$DOCS_TRIGGER" ]; then
+	exit 0
+fi
 if [ -z "$STAGED_GO" ]; then
+	printf "pre-commit: checking generated command docs ...\n"
+	printf "  make docs.check\n"
+	make --no-print-directory docs.check
+	printf "pre-commit: ok.\n"
 	exit 0
 fi
 
@@ -25,6 +34,9 @@ go vet ./...
 # Same pinned targets as CI: the Makefile pins golangci-lint and the go fix toolchain.
 printf "  make fix.check\n"
 make --no-print-directory fix.check
+
+printf "  make docs.check\n"
+make --no-print-directory docs.check
 
 printf "  make lint\n"
 make --no-print-directory lint

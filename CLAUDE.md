@@ -9,6 +9,7 @@ make build        # Build binary to ./bin/verda
 make test         # Run all tests (go test -race)
 make lint         # Lint only (golangci-lint); also run by pre-commit hooks
 make fix          # Apply go fix modernizers; CI runs `make fix.check`
+make docs         # Regenerate docs/commands.md + docs/reference/ from cobra; CI runs `make docs.check`
 make pre-commit   # Full pre-commit suite
 ```
 
@@ -20,6 +21,7 @@ Never use raw `go test ./...` — always `make test` (go test -race). Lint is se
 
 ```
 cmd/verda/                    # Entrypoint
+cmd/gen-docs/                 # `make docs`: writes docs/commands.md + docs/reference/ (generated, don't hand-edit)
 internal/verda-cli/
   cmd/cmd.go                  # Root command, command groups
   cmd/util/                   # Factory, IOStreams, helpers, pricing, hostname
@@ -27,6 +29,7 @@ internal/verda-cli/
     CLAUDE.md                 # Domain knowledge, gotchas, edge cases
     README.md                 # Usage examples, flags, architecture notes
   options/                    # Global CLI options, credentials
+  docgen/                     # Renders the command reference from the cobra tree
 internal/skills/              # Embedded AI skill files (go:embed)
 pkg/                          # In-tree TUI core, log, version (formerly verdagostack)
 ```
@@ -167,6 +170,7 @@ make build                    # Must compile
 make test                     # Must pass (go test -race)
 make lint                     # Must pass (golangci-lint; also run by pre-commit hooks)
 make fix.check                # Must pass (go fix modernizers; `make fix` applies them)
+make docs.check               # Must pass (generated command docs; `make docs` regenerates them)
 ```
 
 **Never** report work as complete with lint failures outstanding. Fix them before the "done" message; don't defer to the pre-commit hook. See the "Go House Style" section above for the patterns that prevent the common hits.

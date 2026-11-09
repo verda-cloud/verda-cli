@@ -53,6 +53,7 @@ Skipping these steps leads to pattern violations, broken dual-mode, and pricing 
 - [ ] `make lint` passes with zero issues (do not rely on pre-commit to surface these)
 - [ ] `make test` passes (unit tests with -race; lint is the separate `make lint` item above)
 - [ ] `make fix.check` passes (run `make fix` to apply pending `go fix` modernizations)
+- [ ] `make docs.check` passes (run `make docs` after changing a command; never hand-edit `docs/commands.md` or `docs/reference/`)
 - [ ] `--help` renders correctly for changed commands
 - [ ] Interactive and non-interactive modes both work
 - [ ] Interactive Selects pass `tui.WithShowHints(true)` so the hint bar renders
