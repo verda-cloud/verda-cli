@@ -87,8 +87,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
+      # The image's Go (GOTOOLCHAIN=local) must be >= go.mod's go directive, or Go call
+      # analysis fails with exit 127 whenever an advisory matches. v2.7.0 ships Go 1.27.1.
       - name: Run OSV Scanner
-        uses: google/osv-scanner-action/osv-scanner-action@v2.1.0
+        uses: google/osv-scanner-action/osv-scanner-action@v2.7.0
         with:
           scan-args: |-
             --recursive

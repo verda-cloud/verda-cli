@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -122,8 +123,8 @@ func TestRm_SingleObject_Yes(t *testing.T) {
 
 func TestRm_RecursiveWithFilter(t *testing.T) {
 	// no t.Parallel
-	// With include='*.txt' applied against the FULL key, matches a.txt and c.txt only
-	// (nested/d.txt is excluded because '*' doesn't cross '/').
+	// At the bucket root the relative key is the full key: include='*.txt' matches
+	// a.txt and c.txt only (nested/d.txt is excluded because '*' doesn't cross '/').
 	fake := &rmFakeAPI{
 		listObjectsPages: []*s3.ListObjectsV2Output{
 			{
@@ -202,6 +203,103 @@ func TestRm_RecursiveWithExclude(t *testing.T) {
 		if keys[i] != k {
 			t.Errorf("deleted keys[%d] = %q, want %q (all=%v)", i, keys[i], k, keys)
 		}
+	}
+}
+
+func prefixedRmFake() *rmFakeAPI {
+	return &rmFakeAPI{
+		listObjectsPages: []*s3.ListObjectsV2Output{
+			{
+				Contents: []s3types.Object{
+					{Key: aws.String("data/a.txt")},
+					{Key: aws.String("data/x.log")},
+					{Key: aws.String("data/keep.csv")},
+					{Key: aws.String("data/sub/y.log")},
+				},
+				IsTruncated: aws.Bool(false),
+			},
+		},
+	}
+}
+
+func TestRm_FiltersMatchKeyRelativeToPrefix(t *testing.T) {
+	// no t.Parallel: withFakeClient swaps the package-level clientBuilder.
+	tests := []struct {
+		name string
+		args []string
+		want []string
+	}{
+		{
+			name: "exclude keeps matching files under the prefix",
+			args: []string{"s3://my-bucket/data/", "--exclude", "*.log"},
+			want: []string{"data/a.txt", "data/keep.csv", "data/sub/y.log"},
+		},
+		{
+			name: "include selects files under the prefix",
+			args: []string{"s3://my-bucket/data/", "--include", "*.txt"},
+			want: []string{"data/a.txt"},
+		},
+		{
+			name: "include can target a nested folder",
+			args: []string{"s3://my-bucket/data/", "--include", "sub/*"},
+			want: []string{"data/sub/y.log"},
+		},
+		{
+			name: "prefix without trailing slash",
+			args: []string{"s3://my-bucket/data", "--exclude", "*.log"},
+			want: []string{"data/a.txt", "data/keep.csv", "data/sub/y.log"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fake := prefixedRmFake()
+			restore := withFakeClient(fake)
+			defer restore()
+
+			f := cmdutil.NewTestFactory(nil)
+			cmd := NewCmdRm(f, cmdutil.IOStreams{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}})
+			cmd.SetArgs(append(tt.args, "--recursive", "--yes"))
+			cmd.SetContext(context.Background())
+
+			if err := cmd.Execute(); err != nil {
+				t.Fatalf("Execute: %v", err)
+			}
+			if fake.deleteObjectsCalls != 1 {
+				t.Fatalf("DeleteObjects calls = %d, want 1", fake.deleteObjectsCalls)
+			}
+			if got := batchKeys(fake.deleteObjectsIns[0]); !slices.Equal(got, tt.want) {
+				t.Errorf("deleted keys = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRm_DryrunPreviewAppliesFiltersUnderPrefix(t *testing.T) {
+	// no t.Parallel: withFakeClient swaps the package-level clientBuilder.
+	fake := prefixedRmFake()
+	restore := withFakeClient(fake)
+	defer restore()
+
+	out := &bytes.Buffer{}
+	f := cmdutil.NewTestFactory(nil)
+	cmd := NewCmdRm(f, cmdutil.IOStreams{Out: out, ErrOut: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"s3://my-bucket/data/", "--recursive", "--exclude", "*.log", "--dryrun"})
+	cmd.SetContext(context.Background())
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if fake.deleteObjectsCalls != 0 || fake.deleteObjectCalls != 0 {
+		t.Fatalf("dryrun must not delete; DeleteObjects=%d DeleteObject=%d", fake.deleteObjectsCalls, fake.deleteObjectCalls)
+	}
+	stdout := out.String()
+	for _, want := range []string{"data/a.txt", "data/keep.csv"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("preview missing %q:\n%s", want, stdout)
+		}
+	}
+	if strings.Contains(stdout, "data/x.log") {
+		t.Errorf("preview lists excluded data/x.log:\n%s", stdout)
 	}
 }
 
