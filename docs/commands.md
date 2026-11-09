@@ -127,10 +127,10 @@ verda vm list
 
 | Command | Description |
 |---------|-------------|
-| `verda settings theme` | View or change the color theme |
-| `verda settings theme --select` | Interactive theme picker |
+| `verda settings theme` | Interactive theme picker |
+| `verda settings theme <name>` | Set the color theme directly |
 
-Available themes: `default`, `dracula`, `catppuccin`, `catppuccin-latte`, `nord`, `tokyonight`, `github-light`, `solarized-light`
+`verda settings theme --help` lists the available themes.
 
 ## Update
 
