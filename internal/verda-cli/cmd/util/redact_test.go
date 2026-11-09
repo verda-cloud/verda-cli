@@ -27,9 +27,9 @@ func TestRedactSensitiveBody_JSON(t *testing.T) {
 
 	secretKeys := []string{
 		"client_secret", "secret_access_key", "service_account_key",
-		"value_or_reference_to_secret", "jupyter_token",
-		"access_token", "refresh_token", "id_token",
-		"password", "api_key", "bearer", "authorization",
+		"value_or_reference_to_secret", "base64_content", "docker_config_json",
+		"jupyter_token", "access_token", "refresh_token", "id_token",
+		"password", "api_key", "bearer", "authorization", "value",
 	}
 	for _, key := range secretKeys {
 		t.Run(key, func(t *testing.T) {

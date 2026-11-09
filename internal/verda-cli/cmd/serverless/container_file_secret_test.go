@@ -16,6 +16,7 @@ package serverless
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -32,6 +33,8 @@ import (
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
 
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
+	"github.com/verda-cloud/verda-cli/pkg/tui"
+	tuitest "github.com/verda-cloud/verda-cli/pkg/tui/testing"
 )
 
 func newFileSecretServer(t *testing.T) (*httptest.Server, *fileSecretRecorder) {
@@ -491,6 +494,36 @@ func TestFileSecretDelete_TableOutput(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "Deleted file secret") {
 		t.Errorf("expected 'Deleted file secret' in output; got:\n%s", stdout.String())
+	}
+}
+
+type cancelTextPrompter struct {
+	*tuitest.Prompter
+}
+
+func (p *cancelTextPrompter) TextInput(_ context.Context, _ string, _ ...tui.TextInputOption) (string, error) {
+	return "", tui.ErrInterrupted
+}
+
+func TestFileSecretCreate_CancelDuringFilePrompt(t *testing.T) {
+	t.Parallel()
+	srv, rec := newFileSecretServer(t)
+	f := newTestFactory(t, srv.URL)
+	f.AgentModeOverride = false
+	f.OutputFormatOverride = outputTable
+	f.PrompterOverride = &cancelTextPrompter{Prompter: tuitest.New()}
+
+	var stdout bytes.Buffer
+	cmd := NewCmdContainer(f, cmdutil.IOStreams{Out: &stdout, ErrOut: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"file-secret", "create", "--name", "my-certs"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("expected clean exit on cancel, got error: %v", err)
+	}
+	rec.mu.Lock()
+	body := rec.createBody
+	rec.mu.Unlock()
+	if body != nil {
+		t.Error("expected no API call on cancel, but POST /file-secrets was called")
 	}
 }
 

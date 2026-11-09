@@ -145,6 +145,9 @@ func newCmdFileSecretCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cob
 				if err != nil {
 					return err
 				}
+				if len(prompted) == 0 {
+					return nil
+				}
 				files = prompted
 			}
 
