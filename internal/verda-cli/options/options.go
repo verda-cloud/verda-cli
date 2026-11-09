@@ -175,7 +175,8 @@ func (o *Options) Complete() {
 		a.Profile = resolveDefaultProfile(a.CredentialsFile)
 	}
 
-	// --- 3. Resolve inline credentials (flag > VERDA_AUTH_* env > config file > VERDA_* env). ---
+	// --- 3. Resolve inline credentials: flag > VERDA_AUTH_* env > config file. ---
+	// Client ID/secret then fall back to VERDA_CLIENT_ID/SECRET; the token has none.
 	if a.ClientID == "" {
 		a.ClientID = viper.GetString("auth.client-id")
 	}

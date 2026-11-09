@@ -55,30 +55,10 @@ The `login` command enters interactive wizard mode when `--client-id` or `--clie
 ## Credential Resolution Order
 
 Run `verda auth --help` for the full order in which flags, environment
-variables, `~/.verda/config.yaml` and the credentials file are checked.
-
-`verda registry` and `verda object-storage` keep their own credentials and pick
-the profile a little differently: they never auto-detect one, so with no profile
-set they use `[default]`. In `verda registry`, its own `--profile` flag comes
-first, and `--auth.profile` ranks below `VERDA_PROFILE`.
-
-### Supported Environment Variables
-
-Pairs such as `VERDA_AUTH_CLIENT_ID` and `VERDA_CLIENT_ID` set the same value at
-different precedence.
-
-| Variable | Description |
-|----------|-------------|
-| `VERDA_CLIENT_ID` | API client ID |
-| `VERDA_CLIENT_SECRET` | API client secret |
-| `VERDA_AUTH_CLIENT_ID` / `VERDA_AUTH_CLIENT_SECRET` | API client ID / secret |
-| `VERDA_AUTH_TOKEN` | Bearer token |
-| `VERDA_PROFILE` | Credentials profile name |
-| `VERDA_AUTH_PROFILE` | Credentials profile name |
-| `VERDA_AUTH_CREDENTIALS_FILE` | Path to credentials file |
-| `VERDA_SHARED_CREDENTIALS_FILE` | Path to credentials file |
-| `VERDA_AGENT` | Enable agent mode (`1` or `true`) |
-| `VERDA_HOME` | Base directory for config (default `~/.verda`) |
+variables, `~/.verda/config.yaml` and the credentials file are checked,
+including how `login`, `use`, registry and object-storage differ. The
+environment variables are listed in
+[docs/commands.md](../../../../docs/commands.md#environment-variables).
 
 ### Explicit Profile Selection
 

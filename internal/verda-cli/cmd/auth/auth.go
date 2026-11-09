@@ -28,12 +28,17 @@ func NewCmdAuth(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 		Long: cmdutil.LongDesc(`
 			Manage Verda shared credentials and the active auth profile.
 
-			Paths below are defaults; VERDA_HOME moves both files.
+			Paths below are defaults; VERDA_HOME moves both files. --config picks
+			another config file; without it, ./config.yaml is read when
+			~/.verda/config.yaml does not exist. 'verda auth use' always writes
+			~/.verda/config.yaml.
 
 			Credentials file: --auth.credentials-file, then
 			VERDA_AUTH_CREDENTIALS_FILE, then auth.credentials-file in
 			~/.verda/config.yaml, then VERDA_SHARED_CREDENTIALS_FILE, then
-			~/.verda/credentials.
+			~/.verda/credentials. 'verda auth login' and 'verda auth use' use
+			their own --credentials-file, then VERDA_SHARED_CREDENTIALS_FILE,
+			then ~/.verda/credentials.
 
 			Each credential is resolved on its own, highest precedence first.
 			Client ID and secret:
@@ -63,7 +68,12 @@ func NewCmdAuth(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 			This order does not apply to registry and object-storage. They keep
 			their own credentials in the profile (for object-storage, VERDA_S3_*
 			env vars override them field by field) and do not auto-detect a
-			profile: with none set, they use "default".
+			profile: with none set, they use "default". In registry, its own
+			--profile comes first, and --auth.profile ranks below VERDA_PROFILE.
+			Their credentials file is a subcommand's own --credentials-file, then
+			VERDA_REGISTRY_CREDENTIALS_FILE (registry) or
+			VERDA_SHARED_CREDENTIALS_FILE (object-storage), then
+			~/.verda/credentials.
 		`),
 		Run: cmdutil.DefaultSubCommandRun(ioStreams.Out),
 	}

@@ -15,8 +15,8 @@
   - `login_test.go` -- Flag-driven write path: new/named profile, merge, re-auth overwrite, 0600, flag-over-env
 
 ## Domain-Specific Logic
-- Credentials file resolution order: explicit flag > `VERDA_SHARED_CREDENTIALS_FILE` env var > `options.DefaultCredentialsFilePath()`
-- Config file is `config.yaml` in `options.VerdaDir()` (`~/.verda`, or `VERDA_HOME`); active profile stored at YAML path `auth.profile`
+- `login` / `use` resolve the credentials file with `resolveCredentialsFile`: own `--credentials-file` > `VERDA_SHARED_CREDENTIALS_FILE` > `options.DefaultCredentialsFilePath()`. They ignore `--auth.credentials-file`, `VERDA_AUTH_CREDENTIALS_FILE` and config.yaml, unlike `show` and every other command (`Options.Complete`). The `auth` Long help states both orders.
+- `use` writes `config.yaml` in `options.VerdaDir()` (`~/.verda`, or `VERDA_HOME`) at YAML path `auth.profile`, even when `--config` points elsewhere
 - Credentials file uses AWS-style INI format with `verda_`-prefixed keys
 - File permissions set to `0600` on non-Windows platforms after writing credentials
 - `show` never prints actual secrets -- only booleans for whether they are loaded
