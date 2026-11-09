@@ -82,9 +82,9 @@ func runBatchjobDelete(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.
 
 	if f.AgentMode() {
 		// --timeout-ms 0 returns before the delete finishes.
-		status := "completed"
+		status := statusCompleted
 		if timeoutMs == 0 {
-			status = "accepted"
+			status = statusAccepted
 		}
 		result := map[string]string{"name": name, "action": "delete", "status": status}
 		_, _ = cmdutil.WriteStructured(ioStreams.Out, f.OutputFormat(), result)

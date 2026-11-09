@@ -423,3 +423,101 @@ func TestParseFileFlags(t *testing.T) {
 		}
 	})
 }
+
+func TestFileSecretDelete_JSONOutput(t *testing.T) {
+	t.Parallel()
+	srv, _ := newFileSecretServer(t)
+	f := newTestFactory(t, srv.URL)
+
+	var stdout bytes.Buffer
+	cmd := NewCmdContainer(f, cmdutil.IOStreams{Out: &stdout, ErrOut: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"file-secret", "delete", "my-certs", "--yes"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("file-secret delete failed: %v", err)
+	}
+
+	var got map[string]string
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal stdout: %v\nstdout: %s", err, stdout.String())
+	}
+	if got["name"] != "my-certs" {
+		t.Errorf("name: got %q, want my-certs", got["name"])
+	}
+	if got["action"] != "deleted" {
+		t.Errorf("action: got %q, want deleted", got["action"])
+	}
+}
+
+func TestFileSecretCreate_AgentMode_PartialFlags(t *testing.T) {
+	t.Parallel()
+	f := cmdutil.NewTestFactory(nil)
+	f.AgentModeOverride = true
+
+	var stdout bytes.Buffer
+	cmd := NewCmdContainer(f, cmdutil.IOStreams{Out: &stdout, ErrOut: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"file-secret", "create", "--name", "my-certs"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	var agentErr *cmdutil.AgentError
+	if !errors.As(err, &agentErr) {
+		t.Fatalf("expected *AgentError, got %T: %v", err, err)
+	}
+	if agentErr.Code != "MISSING_REQUIRED_FLAGS" {
+		t.Errorf("code: got %q, want MISSING_REQUIRED_FLAGS", agentErr.Code)
+	}
+	missing, ok := agentErr.Details["missing"].([]string)
+	if !ok {
+		t.Fatalf("expected Details[missing] to be []string, got %T", agentErr.Details["missing"])
+	}
+	if len(missing) != 1 || missing[0] != "--file" {
+		t.Errorf("expected missing=[--file], got %v", missing)
+	}
+}
+
+func TestFileSecretDelete_TableOutput(t *testing.T) {
+	t.Parallel()
+	srv, _ := newFileSecretServer(t)
+	f := newTestFactory(t, srv.URL)
+	f.OutputFormatOverride = outputTable
+	f.AgentModeOverride = false
+
+	var stdout bytes.Buffer
+	cmd := NewCmdContainer(f, cmdutil.IOStreams{Out: &stdout, ErrOut: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"file-secret", "delete", "my-certs", "--yes"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("file-secret delete failed: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "Deleted file secret") {
+		t.Errorf("expected 'Deleted file secret' in output; got:\n%s", stdout.String())
+	}
+}
+
+func TestFileSecretCreate_TableOutput(t *testing.T) {
+	t.Parallel()
+	srv, _ := newFileSecretServer(t)
+	f := newTestFactory(t, srv.URL)
+	f.OutputFormatOverride = outputTable
+	f.AgentModeOverride = false
+
+	tmpDir := t.TempDir()
+	certPath := filepath.Join(tmpDir, "cert.pem")
+	if err := os.WriteFile(certPath, []byte("data"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout bytes.Buffer
+	cmd := NewCmdContainer(f, cmdutil.IOStreams{Out: &stdout, ErrOut: &bytes.Buffer{}})
+	cmd.SetArgs([]string{
+		"file-secret", "create",
+		"--name", "my-certs",
+		"--file", "cert.pem=" + certPath,
+	})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("file-secret create failed: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "Created file secret") {
+		t.Errorf("expected 'Created file secret' in output; got:\n%s", stdout.String())
+	}
+}

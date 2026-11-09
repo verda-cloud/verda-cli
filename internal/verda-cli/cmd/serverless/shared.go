@@ -217,6 +217,9 @@ const (
 	flagYes             = "yes"
 
 	outputTable = "table"
+
+	statusAccepted  = "accepted"
+	statusCompleted = "completed"
 )
 
 // isPromptCancel is a terse package-local alias for cmdutil.IsPromptCancel,

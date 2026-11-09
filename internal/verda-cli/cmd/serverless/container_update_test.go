@@ -845,6 +845,118 @@ func TestMergeContainerUpdate_PortValid(t *testing.T) {
 
 // -- renderContainerUpdateSummary --
 
+// -- prepareContainerUpdateRequests --
+
+func TestPrepareContainerUpdateRequests_ScalingOnly(t *testing.T) {
+	cmd := testContainerUpdateCmd()
+	_ = cmd.Flags().Set(flagMaxReplicas, "10")
+	opts := &containerUpdateOptions{MaxReplicas: 10}
+
+	deployReq, scalingReq, err := prepareContainerUpdateRequests(cmd, opts, baseContainerDeployment(), baseContainerScaling())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if deployReq != nil {
+		t.Errorf("deployReq should be nil (no deployment flags set)")
+	}
+	if scalingReq == nil {
+		t.Fatal("scalingReq should be non-nil")
+	}
+	if scalingReq.MaxReplicaCount == nil || *scalingReq.MaxReplicaCount != 10 {
+		t.Errorf("MaxReplicaCount: want 10, got %v", scalingReq.MaxReplicaCount)
+	}
+}
+
+func TestPrepareContainerUpdateRequests_DeploymentOnly(t *testing.T) {
+	cmd := testContainerUpdateCmd()
+	_ = cmd.Flags().Set(flagImage, "ghcr.io/org/app:v2.0")
+	opts := &containerUpdateOptions{Image: "ghcr.io/org/app:v2.0"}
+
+	deployReq, scalingReq, err := prepareContainerUpdateRequests(cmd, opts, baseContainerDeployment(), baseContainerScaling())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if deployReq == nil {
+		t.Fatal("deployReq should be non-nil")
+	}
+	if scalingReq != nil {
+		t.Errorf("scalingReq should be nil (no scaling flags set)")
+	}
+}
+
+func TestPrepareContainerUpdateRequests_Both(t *testing.T) {
+	cmd := testContainerUpdateCmd()
+	_ = cmd.Flags().Set(flagImage, "ghcr.io/org/app:v2.0")
+	_ = cmd.Flags().Set(flagMaxReplicas, "10")
+	opts := &containerUpdateOptions{Image: "ghcr.io/org/app:v2.0", MaxReplicas: 10}
+
+	deployReq, scalingReq, err := prepareContainerUpdateRequests(cmd, opts, baseContainerDeployment(), baseContainerScaling())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if deployReq == nil {
+		t.Fatal("deployReq should be non-nil")
+	}
+	if scalingReq == nil {
+		t.Fatal("scalingReq should be non-nil")
+	}
+}
+
+func TestPrepareContainerUpdateRequests_DeploymentBuildError(t *testing.T) {
+	cmd := testContainerUpdateCmd()
+	_ = cmd.Flags().Set(flagImage, "nginx:latest")
+	opts := &containerUpdateOptions{Image: "nginx:latest"}
+
+	_, _, err := prepareContainerUpdateRequests(cmd, opts, baseContainerDeployment(), baseContainerScaling())
+	if err == nil || !strings.Contains(err.Error(), "latest") {
+		t.Fatalf("expected :latest error, got %v", err)
+	}
+}
+
+func TestPrepareContainerUpdateRequests_ScalingBuildError(t *testing.T) {
+	cmd := testContainerUpdateCmd()
+	_ = cmd.Flags().Set(flagMaxReplicas, "0")
+	opts := &containerUpdateOptions{MaxReplicas: 0}
+
+	_, _, err := prepareContainerUpdateRequests(cmd, opts, baseContainerDeployment(), baseContainerScaling())
+	if err == nil || !strings.Contains(err.Error(), "--max-replicas must be >= 1") {
+		t.Fatalf("expected max-replicas error, got %v", err)
+	}
+}
+
+// -- mergeContainerUpdate edge cases --
+
+func TestMergeContainerUpdate_EnvSecretBadFormat(t *testing.T) {
+	cmd := testContainerUpdateCmd()
+	_ = cmd.Flags().Set(flagEnvSecret, "NOSEP")
+	opts := &containerUpdateOptions{EnvSecret: []string{"NOSEP"}}
+
+	_, err := mergeContainerUpdate(cmd, opts, &baseContainerDeployment().Containers[0])
+	if err == nil || !strings.Contains(err.Error(), "expected KEY=VALUE") {
+		t.Fatalf("expected env parse error, got %v", err)
+	}
+}
+
+func TestMergeContainerUpdate_ImageCarriesPort(t *testing.T) {
+	cmd := testContainerUpdateCmd()
+	_ = cmd.Flags().Set(flagImage, "ghcr.io/org/app:v2.0")
+	opts := &containerUpdateOptions{Image: "ghcr.io/org/app:v2.0"}
+
+	c, err := mergeContainerUpdate(cmd, opts, &baseContainerDeployment().Containers[0])
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if c.Image != "ghcr.io/org/app:v2.0" {
+		t.Errorf("image: got %q", c.Image)
+	}
+	if c.ExposedPort != 8080 {
+		t.Errorf("port: want 8080 (carried), got %d", c.ExposedPort)
+	}
+	if c.Name != "main" {
+		t.Errorf("name: want main (carried), got %q", c.Name)
+	}
+}
+
 func TestRenderContainerUpdateSummary(t *testing.T) {
 	cmd := testContainerUpdateCmd()
 	_ = cmd.Flags().Set(flagImage, "ghcr.io/org/app:v2.0")

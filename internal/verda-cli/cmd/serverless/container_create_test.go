@@ -251,6 +251,15 @@ func TestContainerRequest_ValidationErrors(t *testing.T) {
 		{"bad port", func(o *containerCreateOptions) { o.Port = 99999 }, "port"},
 		{"bad cpu-util", func(o *containerCreateOptions) { o.CPUUtil = 150 }, "cpu-util"},
 		{"bad gpu-util", func(o *containerCreateOptions) { o.GPUUtil = -1 }, "gpu-util"},
+		{"compute size too large", func(o *containerCreateOptions) { o.ComputeSize = 999 }, "compute-size"},
+		{"min replicas too large", func(o *containerCreateOptions) { o.MinReplicas = 99999 }, "min-replicas"},
+		{"max replicas too large", func(o *containerCreateOptions) { o.MinReplicas = 0; o.MaxReplicas = 99999 }, "max-replicas"},
+		{"concurrency too large", func(o *containerCreateOptions) { o.Concurrency = 99999 }, "concurrency"},
+		{"request ttl too long", func(o *containerCreateOptions) { o.RequestTTL = 365 * 24 * time.Hour }, "request-ttl"},
+		{"scale up delay too long", func(o *containerCreateOptions) { o.ScaleUpDelay = 365 * 24 * time.Hour }, "scale-up-delay"},
+		{"scale down delay too long", func(o *containerCreateOptions) { o.ScaleDownDelay = 365 * 24 * time.Hour }, "scale-down-delay"},
+		{"bad env format", func(o *containerCreateOptions) { o.Env = []string{"nope"} }, "KEY=VALUE"},
+		{"bad secret mount", func(o *containerCreateOptions) { o.SecretMounts = []string{"nope"} }, "SECRET:MOUNT_PATH"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

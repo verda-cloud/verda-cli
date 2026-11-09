@@ -336,6 +336,42 @@ func TestSecretCreate_JSONOutput(t *testing.T) {
 	}
 }
 
+func TestSecretCreate_TableOutput(t *testing.T) {
+	t.Parallel()
+	srv, _ := newSecretServer(t)
+	f := newTestFactory(t, srv.URL)
+	f.OutputFormatOverride = outputTable
+	f.AgentModeOverride = false
+
+	var stdout, stderr bytes.Buffer
+	cmd := NewCmdContainer(f, cmdutil.IOStreams{Out: &stdout, ErrOut: &stderr})
+	cmd.SetArgs([]string{"secret", "create", "--name", "my-secret", "--value", "s3cr3t"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("secret create failed: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "Created secret") {
+		t.Errorf("expected 'Created secret' in output; got:\n%s", stdout.String())
+	}
+}
+
+func TestSecretDelete_TableOutput(t *testing.T) {
+	t.Parallel()
+	srv, _ := newSecretServer(t)
+	f := newTestFactory(t, srv.URL)
+	f.OutputFormatOverride = outputTable
+	f.AgentModeOverride = false
+
+	var stdout, stderr bytes.Buffer
+	cmd := NewCmdContainer(f, cmdutil.IOStreams{Out: &stdout, ErrOut: &stderr})
+	cmd.SetArgs([]string{"secret", "delete", "my-secret", "--yes"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("secret delete failed: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "Deleted secret") {
+		t.Errorf("expected 'Deleted secret' in output; got:\n%s", stdout.String())
+	}
+}
+
 func TestSecretDelete_JSONOutput(t *testing.T) {
 	t.Parallel()
 	srv, _ := newSecretServer(t)

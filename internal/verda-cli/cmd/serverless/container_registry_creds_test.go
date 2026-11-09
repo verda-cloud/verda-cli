@@ -426,6 +426,178 @@ func TestRegistryCredsCreate_JSONOutput(t *testing.T) {
 	}
 }
 
+func TestRegistryCredsDelete_JSONOutput(t *testing.T) {
+	t.Parallel()
+	rec := newRegistryCredsServer(t, nil)
+	f := newTestFactory(t, rec.srv.URL)
+
+	var stdout, stderr bytes.Buffer
+	cmd := NewCmdContainer(f, cmdutil.IOStreams{Out: &stdout, ErrOut: &stderr})
+	cmd.SetArgs([]string{"registry-creds", "delete", "old-creds", "--yes"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("registry-creds delete failed: %v", err)
+	}
+
+	var got map[string]string
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v\nstdout: %s", err, stdout.String())
+	}
+	if got["name"] != "old-creds" {
+		t.Errorf("name: got %q, want old-creds", got["name"])
+	}
+	if got["action"] != "deleted" {
+		t.Errorf("action: got %q, want deleted", got["action"])
+	}
+}
+
+func TestRegistryCredsCreate_Scaleway(t *testing.T) {
+	t.Parallel()
+	rec := newRegistryCredsServer(t, nil)
+	f := newTestFactory(t, rec.srv.URL)
+
+	var stdout, stderr bytes.Buffer
+	cmd := NewCmdContainer(f, cmdutil.IOStreams{Out: &stdout, ErrOut: &stderr})
+	cmd.SetArgs([]string{
+		"registry-creds", "create",
+		"--name", "scw-creds",
+		"--type", "scaleway",
+		"--username", "scw-user",
+		"--access-token", "scw-token",
+	})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("registry-creds create failed: %v", err)
+	}
+
+	rec.mu.Lock()
+	body := rec.postBody
+	rec.mu.Unlock()
+	var got map[string]any
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got["type"] != "scaleway" {
+		t.Errorf("type: got %v, want scaleway", got["type"])
+	}
+	if got["username"] != "scw-user" {
+		t.Errorf("username: got %v, want scw-user", got["username"])
+	}
+}
+
+func TestRegistryCredsCreate_GHCR(t *testing.T) {
+	t.Parallel()
+	rec := newRegistryCredsServer(t, nil)
+	f := newTestFactory(t, rec.srv.URL)
+
+	var stdout, stderr bytes.Buffer
+	cmd := NewCmdContainer(f, cmdutil.IOStreams{Out: &stdout, ErrOut: &stderr})
+	cmd.SetArgs([]string{
+		"registry-creds", "create",
+		"--name", "ghcr-creds",
+		"--type", "ghcr",
+		"--username", "ghuser",
+		"--access-token", "ghp_xxx",
+	})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("registry-creds create failed: %v", err)
+	}
+
+	rec.mu.Lock()
+	body := rec.postBody
+	rec.mu.Unlock()
+	var got map[string]any
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got["type"] != "ghcr" {
+		t.Errorf("type: got %v, want ghcr", got["type"])
+	}
+}
+
+func TestRegistryCredsCreate_InvalidType(t *testing.T) {
+	t.Parallel()
+	rec := newRegistryCredsServer(t, nil)
+	f := newTestFactory(t, rec.srv.URL)
+
+	var stdout, stderr bytes.Buffer
+	cmd := NewCmdContainer(f, cmdutil.IOStreams{Out: &stdout, ErrOut: &stderr})
+	cmd.SetArgs([]string{
+		"registry-creds", "create",
+		"--name", "creds",
+		"--type", "invalid-type",
+	})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for invalid type")
+	}
+	if !strings.Contains(err.Error(), "invalid --type") {
+		t.Errorf("error = %v, want 'invalid --type'", err)
+	}
+}
+
+func TestRegistryCredsCreate_AgentMode_MissingNameOnly(t *testing.T) {
+	t.Parallel()
+	f := cmdutil.NewTestFactory(nil)
+	f.AgentModeOverride = true
+
+	var stdout, stderr bytes.Buffer
+	cmd := NewCmdContainer(f, cmdutil.IOStreams{Out: &stdout, ErrOut: &stderr})
+	cmd.SetArgs([]string{"registry-creds", "create", "--type", "dockerhub"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	var agentErr *cmdutil.AgentError
+	if !errors.As(err, &agentErr) {
+		t.Fatalf("expected *AgentError, got %T: %v", err, err)
+	}
+	if agentErr.Code != "MISSING_REQUIRED_FLAGS" {
+		t.Errorf("code = %q, want MISSING_REQUIRED_FLAGS", agentErr.Code)
+	}
+}
+
+func TestRegistryCredsDelete_TableOutput(t *testing.T) {
+	t.Parallel()
+	rec := newRegistryCredsServer(t, nil)
+	f := newTestFactory(t, rec.srv.URL)
+	f.OutputFormatOverride = outputTable
+	f.AgentModeOverride = false
+
+	var stdout, stderr bytes.Buffer
+	cmd := NewCmdContainer(f, cmdutil.IOStreams{Out: &stdout, ErrOut: &stderr})
+	cmd.SetArgs([]string{"registry-creds", "delete", "old-creds", "--yes"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("registry-creds delete failed: %v", err)
+	}
+
+	if !strings.Contains(stdout.String(), "Deleted") {
+		t.Errorf("expected 'Deleted' in output; got:\n%s", stdout.String())
+	}
+}
+
+func TestRegistryCredsCreate_TableOutput(t *testing.T) {
+	t.Parallel()
+	rec := newRegistryCredsServer(t, nil)
+	f := newTestFactory(t, rec.srv.URL)
+	f.OutputFormatOverride = outputTable
+	f.AgentModeOverride = false
+
+	var stdout, stderr bytes.Buffer
+	cmd := NewCmdContainer(f, cmdutil.IOStreams{Out: &stdout, ErrOut: &stderr})
+	cmd.SetArgs([]string{
+		"registry-creds", "create",
+		"--name", "dh",
+		"--type", "dockerhub",
+		"--username", "u",
+		"--access-token", "t",
+	})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("registry-creds create failed: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "Created") {
+		t.Errorf("expected 'Created' in output; got:\n%s", stdout.String())
+	}
+}
+
 func TestRegistryCredsDelete_AgentMode_RequiresYes(t *testing.T) {
 	t.Parallel()
 	rec := newRegistryCredsServer(t, nil)

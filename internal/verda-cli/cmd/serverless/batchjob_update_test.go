@@ -207,7 +207,76 @@ func TestBuildBatchjobUpdateRequest_EmptyContainers(t *testing.T) {
 	}
 }
 
+func TestBuildBatchjobUpdateRequest_ComputeNameOnlyCarriesSize(t *testing.T) {
+	cmd := testBatchjobUpdateCmd()
+	_ = cmd.Flags().Set(flagCompute, "RTX6000Ada")
+	opts := &batchjobUpdateOptions{Compute: "RTX6000Ada"}
+
+	req, err := buildBatchjobUpdateRequest(cmd, opts, baseJobDeployment())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if req.Compute == nil {
+		t.Fatal("Compute should be set")
+	}
+	if req.Compute.Name != "RTX6000Ada" {
+		t.Errorf("Compute.Name: want RTX6000Ada, got %q", req.Compute.Name)
+	}
+	if req.Compute.Size != 1 {
+		t.Errorf("Compute.Size: want 1 (carried from current), got %d", req.Compute.Size)
+	}
+}
+
+func TestBuildBatchjobUpdateRequest_NilCurrentCompute(t *testing.T) {
+	cmd := testBatchjobUpdateCmd()
+	_ = cmd.Flags().Set(flagCompute, "RTX6000Ada")
+	opts := &batchjobUpdateOptions{Compute: "RTX6000Ada"}
+	dep := baseJobDeployment()
+	dep.Compute = nil
+
+	req, err := buildBatchjobUpdateRequest(cmd, opts, dep)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if req.Compute.Name != "RTX6000Ada" {
+		t.Errorf("Compute.Name: want RTX6000Ada, got %q", req.Compute.Name)
+	}
+	if req.Compute.Size != 0 {
+		t.Errorf("Compute.Size: want 0 (nil current), got %d", req.Compute.Size)
+	}
+}
+
+func TestBuildBatchjobUpdateRequest_NilCurrentScaling(t *testing.T) {
+	cmd := testBatchjobUpdateCmd()
+	_ = cmd.Flags().Set(flagMaxReplicas, "5")
+	opts := &batchjobUpdateOptions{MaxReplicas: 5}
+	dep := baseJobDeployment()
+	dep.Scaling = nil
+
+	req, err := buildBatchjobUpdateRequest(cmd, opts, dep)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if req.Scaling == nil {
+		t.Fatal("Scaling should be set")
+	}
+	if req.Scaling.MaxReplicaCount != 5 {
+		t.Errorf("MaxReplicaCount: want 5, got %d", req.Scaling.MaxReplicaCount)
+	}
+}
+
 // -- mergeBatchjobContainerUpdate --
+
+func TestMergeBatchjobContainerUpdate_EnvBadFormat(t *testing.T) {
+	cmd := testBatchjobUpdateCmd()
+	_ = cmd.Flags().Set(flagEnv, "NOSEP")
+	opts := &batchjobUpdateOptions{Env: []string{"NOSEP"}}
+
+	_, err := mergeBatchjobContainerUpdate(cmd, opts, &baseJobDeployment().Containers[0])
+	if err == nil || !strings.Contains(err.Error(), "expected KEY=VALUE") {
+		t.Fatalf("expected env parse error, got %v", err)
+	}
+}
 
 func TestMergeBatchjobContainerUpdate_ImageChange(t *testing.T) {
 	cmd := testBatchjobUpdateCmd()

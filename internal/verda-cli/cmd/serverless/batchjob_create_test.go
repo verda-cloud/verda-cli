@@ -129,6 +129,13 @@ func TestBatchjobRequest_ValidationErrors(t *testing.T) {
 		{"zero compute size", func(o *batchjobCreateOptions) { o.ComputeSize = 0 }, "compute-size"},
 		{"zero max replicas", func(o *batchjobCreateOptions) { o.MaxReplicas = 0 }, "max-replicas"},
 		{"bad port", func(o *batchjobCreateOptions) { o.Port = 99999 }, "port"},
+		{"deadline too short", func(o *batchjobCreateOptions) { o.Deadline = 1 * time.Second }, "between"},
+		{"deadline too long", func(o *batchjobCreateOptions) { o.Deadline = 8 * 24 * time.Hour }, "between"},
+		{"compute size too large", func(o *batchjobCreateOptions) { o.ComputeSize = 999 }, "compute-size"},
+		{"max replicas too large", func(o *batchjobCreateOptions) { o.MaxReplicas = 99999 }, "max-replicas"},
+		{"request ttl too long", func(o *batchjobCreateOptions) { o.RequestTTL = 8 * 24 * time.Hour }, "request-ttl"},
+		{"bad env format", func(o *batchjobCreateOptions) { o.Env = []string{"bad"} }, "KEY=VALUE"},
+		{"bad secret mount", func(o *batchjobCreateOptions) { o.SecretMounts = []string{"no-colon"} }, "SECRET:MOUNT_PATH"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

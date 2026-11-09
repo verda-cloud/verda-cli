@@ -515,6 +515,51 @@ func TestResolveContainerNameFromDeployment(t *testing.T) {
 	}
 }
 
+func TestEnvSet_TableOutput(t *testing.T) {
+	t.Parallel()
+	rec := newEnvRecordingServer(t, []verda.ContainerEnvVar{
+		{Name: "FOO", Type: "plain", ValueOrReferenceToSecret: "old"},
+	})
+	f := newTestFactory(t, rec.srv.URL)
+	f.OutputFormatOverride = outputTable
+	f.AgentModeOverride = false
+
+	var stdout, stderr bytes.Buffer
+	cmd := NewCmdContainer(f, cmdutil.IOStreams{Out: &stdout, ErrOut: &stderr})
+	cmd.SetArgs([]string{"env", "set", "my-endpoint", "--env", "FOO=new", "--env", "NEW=val"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("env set failed: %v\nstderr:\n%s", err, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "Updated environment variables") {
+		t.Errorf("expected 'Updated environment variables' in output; got:\n%s", out)
+	}
+	if !strings.Contains(out, "1 added") {
+		t.Errorf("expected '1 added' in output; got:\n%s", out)
+	}
+	if !strings.Contains(out, "1 updated") {
+		t.Errorf("expected '1 updated' in output; got:\n%s", out)
+	}
+}
+
+func TestEnvUnset_TableOutput(t *testing.T) {
+	t.Parallel()
+	rec := newEnvRecordingServer(t, nil)
+	f := newTestFactory(t, rec.srv.URL)
+	f.OutputFormatOverride = outputTable
+	f.AgentModeOverride = false
+
+	var stdout, stderr bytes.Buffer
+	cmd := NewCmdContainer(f, cmdutil.IOStreams{Out: &stdout, ErrOut: &stderr})
+	cmd.SetArgs([]string{"env", "unset", "HF_HOME", "--deployment", "my-endpoint", "--yes"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("env unset failed: %v\nstderr:\n%s", err, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Removed 1 environment variable") {
+		t.Errorf("expected 'Removed 1 environment variable' in output; got:\n%s", stdout.String())
+	}
+}
+
 func TestEnvUnset_AgentMode_RequiresDeployment(t *testing.T) {
 	t.Parallel()
 	f := cmdutil.NewTestFactory(nil)

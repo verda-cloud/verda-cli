@@ -21,6 +21,8 @@ import (
 	"time"
 
 	"charm.land/lipgloss/v2"
+
+	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
 
 func TestValidateDeploymentName(t *testing.T) {
@@ -221,4 +223,108 @@ func colorEqual(a, b color.Color) bool {
 	r1, g1, b1, a1 := a.RGBA()
 	r2, g2, b2, a2 := b.RGBA()
 	return r1 == r2 && g1 == g2 && b1 == b2 && a1 == a2
+}
+
+func TestCheckMax(t *testing.T) {
+	t.Parallel()
+	if err := checkMax("replicas", 5, 10); err != nil {
+		t.Fatalf("5 <= 10 should pass, got %v", err)
+	}
+	if err := checkMax("replicas", 10, 10); err != nil {
+		t.Fatalf("10 <= 10 should pass, got %v", err)
+	}
+	err := checkMax("replicas", 11, 10)
+	if err == nil {
+		t.Fatal("11 > 10 should fail")
+	}
+	if !strings.Contains(err.Error(), "must be <= 10") {
+		t.Errorf("error = %v, want 'must be <= 10'", err)
+	}
+}
+
+func TestCheckDurationRange(t *testing.T) {
+	t.Parallel()
+	if err := checkDurationRange("delay", 30*time.Second, time.Hour); err != nil {
+		t.Fatalf("30s in 0..1h should pass, got %v", err)
+	}
+	if err := checkDurationRange("delay", 0, time.Hour); err != nil {
+		t.Fatalf("0 should pass, got %v", err)
+	}
+	err := checkDurationRange("delay", -1*time.Second, time.Hour)
+	if err == nil {
+		t.Fatal("negative should fail")
+	}
+	if !strings.Contains(err.Error(), "must be between 0s") {
+		t.Errorf("error = %v, want 'must be between 0s'", err)
+	}
+	err = checkDurationRange("delay", 2*time.Hour, time.Hour)
+	if err == nil {
+		t.Fatal("over max should fail")
+	}
+}
+
+func TestCheckUtilThreshold(t *testing.T) {
+	t.Parallel()
+	if err := checkUtilThreshold("cpu-util", 0); err != nil {
+		t.Fatalf("0 (off) should pass, got %v", err)
+	}
+	if err := checkUtilThreshold("cpu-util", 50); err != nil {
+		t.Fatalf("50 should pass, got %v", err)
+	}
+	err := checkUtilThreshold("cpu-util", 3)
+	if err == nil {
+		t.Fatal("3 (below minUtilThreshold) should fail")
+	}
+	if !strings.Contains(err.Error(), "must be 0 (off)") {
+		t.Errorf("error = %v, want 'must be 0 (off)'", err)
+	}
+}
+
+func TestShortDuration(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		d    time.Duration
+		want string
+	}{
+		{time.Hour, "1h"},
+		{30 * time.Minute, "30m"},
+		{90 * time.Second, "1m30s"},
+		{5 * time.Second, "5s"},
+		{2*time.Hour + 30*time.Minute, "2h30m"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.want, func(t *testing.T) {
+			t.Parallel()
+			if got := shortDuration(tt.d); got != tt.want {
+				t.Errorf("shortDuration(%v) = %q, want %q", tt.d, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestInteractiveTTY(t *testing.T) {
+	orig := isInteractiveTerminal
+	t.Cleanup(func() { isInteractiveTerminal = orig })
+
+	isInteractiveTerminal = func() bool { return true }
+	f := &cmdutil.TestFactory{OutputFormatOverride: "table"}
+	if !interactiveTTY(f) {
+		t.Error("expected true for terminal+table+non-agent")
+	}
+
+	f2 := &cmdutil.TestFactory{AgentModeOverride: true, OutputFormatOverride: "table"}
+	if interactiveTTY(f2) {
+		t.Error("expected false for agent mode")
+	}
+
+	f3 := &cmdutil.TestFactory{OutputFormatOverride: "json"}
+	if interactiveTTY(f3) {
+		t.Error("expected false for json output")
+	}
+
+	isInteractiveTerminal = func() bool { return false }
+	f4 := &cmdutil.TestFactory{OutputFormatOverride: "table"}
+	if interactiveTTY(f4) {
+		t.Error("expected false for non-terminal")
+	}
 }

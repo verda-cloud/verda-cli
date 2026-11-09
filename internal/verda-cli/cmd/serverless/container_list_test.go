@@ -23,6 +23,9 @@ import (
 	"time"
 
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
+
+	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
+	"github.com/verda-cloud/verda-cli/tests/contract/mockapi"
 )
 
 func TestContainerList_StatusFilterIsExact(t *testing.T) {
@@ -190,5 +193,87 @@ func TestPrintContainerTable(t *testing.T) {
 	}
 	if !strings.Contains(out, "error") {
 		t.Errorf("expected error status, got:\n%s", out)
+	}
+}
+
+func TestContainerList_TableOutput(t *testing.T) {
+	t.Parallel()
+	mock, client := newContainerMock(t)
+	mock.SetContainerStatus(testDeployment, "healthy")
+	f := &cmdutil.TestFactory{ClientOverride: client, OutputFormatOverride: outputTable}
+
+	stdout, _, err := runContainer(t, f, "list")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	for _, want := range []string{"NAME", "STATUS", "COMPUTE", testDeployment, "healthy"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("table output lacks %q:\n%s", want, stdout)
+		}
+	}
+}
+
+func TestContainerList_Empty(t *testing.T) {
+	t.Parallel()
+	mock := mockapi.New()
+	t.Cleanup(mock.Close)
+	client, err := verda.NewClient(
+		verda.WithBaseURL(mock.URL()),
+		verda.WithClientID("test-id"),
+		verda.WithClientSecret("test-secret"),
+	)
+	if err != nil {
+		t.Fatalf("verda.NewClient: %v", err)
+	}
+	f := &cmdutil.TestFactory{ClientOverride: client, OutputFormatOverride: outputTable}
+
+	stdout, _, err := runContainer(t, f, "list")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if !strings.Contains(stdout, "No container deployments found.") {
+		t.Errorf("expected empty message; got:\n%s", stdout)
+	}
+}
+
+func TestContainerList_JSONWithStatus(t *testing.T) {
+	t.Parallel()
+	mock, client := newContainerMock(t)
+	mock.SetContainerStatus(testDeployment, "running")
+	f := agentFactory(client)
+
+	stdout, _, err := runContainer(t, f, "list")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	var rows []struct {
+		Name   string `json:"name"`
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &rows); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, stdout)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(rows))
+	}
+	if rows[0].Name != testDeployment {
+		t.Errorf("name = %q, want %q", rows[0].Name, testDeployment)
+	}
+	if rows[0].Status != "running" {
+		t.Errorf("status = %q, want running", rows[0].Status)
+	}
+}
+
+func TestContainerList_StatusFilterNoMatch(t *testing.T) {
+	t.Parallel()
+	_, client := newContainerMock(t)
+	f := &cmdutil.TestFactory{ClientOverride: client, OutputFormatOverride: outputTable}
+
+	stdout, _, err := runContainer(t, f, "list", "--status", "nonexistent")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if !strings.Contains(stdout, "No container deployments found.") {
+		t.Errorf("expected empty message for no matching status; got:\n%s", stdout)
 	}
 }
