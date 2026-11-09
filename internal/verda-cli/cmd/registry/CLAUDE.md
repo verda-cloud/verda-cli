@@ -205,12 +205,12 @@ Harbor's top-level `/repositories` endpoint has *two* filter syntaxes that look 
 
 `harborClient` returns `*cmdutil.AgentError` directly (via `translateHarborError`) rather than bubbling raw transport errors. `translateError` / `translateErrorWithExpiry` in `errors.go` detect a pre-translated AgentError and pass it through unchanged — without this guard, harbor's structured `registry_access_denied` would get re-wrapped as `registry_internal_error` by the ggcr-shaped fallback. Any future non-ggcr client added to this package should follow the same contract: emit a fully-populated AgentError and let the helpers pass it through.
 
-### Interactive drill-down (TTY only)
+### Interactive action menu (TTY only)
 
 `runLs` forks three ways:
 
 1. `-o json|yaml` → `WriteStructured` → return. The picker never runs; scripts always get a deterministic document.
-2. `!isTerminalFn(ioStreams.Out)` → `renderLsHuman` → return. Same table the pre-drill-down `ls` used to produce. Piping to `less` / `jq` / CI logs hits this path.
+2. `!isTerminalFn(ioStreams.Out)` → `renderLsHuman` → return. Same table `ls` printed before the interactive picker existed. Piping to `less` / `jq` / CI logs hits this path.
 3. TTY → `runLsInteractive` loops the repo picker (`prompter.Select`). Selecting a repo calls `ListArtifacts` then `runRepoActions` — a per-repo **action menu** (`prompter.Select`): **Get pull URL** → `runTagPicker`; **Delete image(s)…** → `runDeleteImagesInteractive` (the *same* multi-select + red-warning confirm flow `verda registry delete` uses — one destructive code path, not a copy); **← Back**. Selecting "Exit" on the repo picker or a prompter cancel returns nil cleanly, same contract as `cmd/vm/list.go`. `runLsInteractive` takes `*options.RegistryCredentials` (not just the host string) so it can hand creds to the delete flow. After a delete, `runRepoActions` re-fetches artifacts so a subsequent pull-URL pick reflects the change (the repo-picker counts are built once and may be stale — acceptable for v1).
 
    `runTagPicker` lists the repo's tags newest-first (`buildTagEntries` sorts artifacts by `PushTime` desc, one row per tag, `<untagged>` rows for tagless artifacts), `prompter.Select`'s type-to-filter handles filtering, and selecting a row prints that tag's full pull reference (`repoPullBase + ":" + tag`, or `@digest` for untagged) to **stdout** so it's clean to copy, then **quits** — getting the URL is the goal, so a positive selection is the terminal action (`runTagPicker` returns quit=true). Esc / "Back" returns to the action menu; Ctrl+C quits.
@@ -219,7 +219,7 @@ Harbor's top-level `/repositories` endpoint has *two* filter syntaxes that look 
 
 `ListArtifacts` percent-encodes the repo name (`url.PathEscape`) because Harbor routes the path; the regression test `TestHarbor_ListArtifacts_URLEscapesRepoSlash` asserts the encoded form reaches the server. Unlike the repository-listing endpoint, the project-scoped `/repositories/{r}/artifacts` endpoint *does* work for the robot accounts VCR mints today (confirmed against staging, Apr 2026). If that changes, `translateHarborError` already maps 401/403 to the appropriate `registry_*` AgentError.
 
-The repo-picker per-row label is built by `formatRepoRow` (repo name padded to 48 cols + right-aligned artifact/pull counts + short-form "UPDATED" date). The interactive drill-down does **not** render the old `DIGEST`/`TAGS`/`SIZE`/`PUSHED`/`PULLED` table — that detailed, non-interactive view now lives only in `verda registry tags <repo>`; the `ls` drill-down is the action menu + tag picker described above. `repoPullBase` (used for both the tag picker and the access-denied path) prefers Harbor's `FullName` (already `<project>/<repo>`) and falls back to `project + "/" + Name`, defaulting the host to `defaultRegistryEndpoint`.
+The repo-picker per-row label is built by `formatRepoRow` (repo name padded to 48 cols + right-aligned artifact/pull counts + short-form "UPDATED" date). The interactive flow does **not** render the old `DIGEST`/`TAGS`/`SIZE`/`PUSHED`/`PULLED` table — that detailed, non-interactive view now lives only in `verda registry tags <repo>`; interactive `ls` is the action menu + tag picker described above. `repoPullBase` (used for both the tag picker and the access-denied path) prefers Harbor's `FullName` (already `<project>/<repo>`) and falls back to `project + "/" + Name`, defaulting the host to `defaultRegistryEndpoint`.
 
 ## Delete (`delete` / aliases `del`, `rm`)
 

@@ -291,14 +291,13 @@ func sampleArtifacts() []ArtifactInfo {
 	}
 }
 
-// TestLs_Interactive_DrillsIntoArtifacts exercises the full TTY path:
-// picker selects the first repo, ls fetches artifacts, renders the
-// detail card, then the picker loops and the user picks Exit.
+// TestLs_Interactive_PicksPullURL exercises the full TTY path: repo picker →
+// ListArtifacts → action menu "Get pull URL" → tag picker → pull ref on stdout.
 //
 // This is the headline test for the feature — if the wiring between
-// prompter.Select, ListArtifacts, and the renderer regresses, this is
+// prompter.Select, ListArtifacts, and the tag picker regresses, this is
 // the assertion that catches it.
-func TestLs_Interactive_DrillsIntoArtifacts(t *testing.T) {
+func TestLs_Interactive_PicksPullURL(t *testing.T) {
 	writeLsCredsFile(t, validLsCredsBody("vccr.io", "abc"))
 	lister := &fakeLister{
 		repos: sampleRepos(),
