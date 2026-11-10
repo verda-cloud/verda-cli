@@ -6,6 +6,7 @@
 - [`6b9ddfd`] Docs: correct wrong help text and state the real auth precedence
 - [`66960cf`] Docs: generate the command reference from the cobra tree
 - [`29fa441`] Feat/serverless containers missing features
+- [`595510f`] Fix: removed empty file
 
 ## [v1.10.0] - 2026-11-06
 - [`2a464bc`] Chore(deps): update verdacloud-sdk-go to v1.7.0 and add go fix check
