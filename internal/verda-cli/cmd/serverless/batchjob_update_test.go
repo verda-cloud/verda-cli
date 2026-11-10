@@ -16,12 +16,15 @@ package serverless
 
 import (
 	"bytes"
+	"errors"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
+
+	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
 
 func testBatchjobUpdateCmd() *cobra.Command {
@@ -651,5 +654,33 @@ func TestRenderBatchjobUpdateSummary_EnvCounts(t *testing.T) {
 	out := buf.String()
 	if !strings.Contains(out, "Env") || !strings.Contains(out, "Secret") {
 		t.Errorf("expected env/secret labels in output; got:\n%s", out)
+	}
+}
+
+// -- agent-mode confirmation --
+
+func TestBatchjobUpdate_AgentMode_RequiresYes(t *testing.T) {
+	t.Parallel()
+	rec := newRecordingServer(t)
+	f := newTestFactory(t, rec.srv.URL)
+
+	_, _, err := runBatchjob(t, f, "update", "cli-test-job", "--max-replicas", "5")
+	var agentErr *cmdutil.AgentError
+	if !errors.As(err, &agentErr) {
+		t.Fatalf("expected *AgentError, got %T: %v", err, err)
+	}
+	if agentErr.Code != "CONFIRMATION_REQUIRED" {
+		t.Errorf("code = %q, want CONFIRMATION_REQUIRED", agentErr.Code)
+	}
+}
+
+func TestBatchjobUpdate_AgentMode_WithYes(t *testing.T) {
+	t.Parallel()
+	rec := newRecordingServer(t)
+	f := newTestFactory(t, rec.srv.URL)
+
+	_, _, err := runBatchjob(t, f, "update", "cli-test-job", "--max-replicas", "5", "--yes")
+	if err != nil {
+		t.Fatalf("update with --yes: %v", err)
 	}
 }

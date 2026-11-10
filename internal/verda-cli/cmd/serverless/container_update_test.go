@@ -16,12 +16,15 @@ package serverless
 
 import (
 	"bytes"
+	"errors"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
+
+	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
 
 // testContainerUpdateCmd creates a cobra command with all container-update
@@ -1089,5 +1092,109 @@ func TestRenderContainerUpdateSummary_RegistryCreds(t *testing.T) {
 	renderContainerUpdateSummary(&buf, "ep", cmd, opts, baseContainerDeployment())
 	if !strings.Contains(buf.String(), "my-ghcr") {
 		t.Errorf("expected creds name in output; got:\n%s", buf.String())
+	}
+}
+
+// -- mergeScalingPolicies --
+
+func TestMergeScalingPolicies_ScaleUpDelayNegative(t *testing.T) {
+	cmd := testContainerUpdateCmd()
+	_ = cmd.Flags().Set(flagScaleUpDelay, "-1s")
+	opts := &containerUpdateOptions{ScaleUpDelay: -1 * time.Second}
+	req := &verda.UpdateScalingOptionsRequest{}
+
+	err := mergeScalingPolicies(cmd, opts, req)
+	if err == nil || !strings.Contains(err.Error(), "--scale-up-delay") {
+		t.Fatalf("expected scale-up-delay error, got %v", err)
+	}
+}
+
+func TestMergeScalingPolicies_ScaleDownDelayOutOfRange(t *testing.T) {
+	cmd := testContainerUpdateCmd()
+	_ = cmd.Flags().Set(flagScaleDownDelay, "2h")
+	opts := &containerUpdateOptions{ScaleDownDelay: 2 * time.Hour}
+	req := &verda.UpdateScalingOptionsRequest{}
+
+	err := mergeScalingPolicies(cmd, opts, req)
+	if err == nil || !strings.Contains(err.Error(), "--scale-down-delay") {
+		t.Fatalf("expected scale-down-delay error, got %v", err)
+	}
+}
+
+func TestMergeScalingPolicies_RequestTTLNegative(t *testing.T) {
+	cmd := testContainerUpdateCmd()
+	_ = cmd.Flags().Set(flagRequestTTL, "-5s")
+	opts := &containerUpdateOptions{RequestTTL: -5 * time.Second}
+	req := &verda.UpdateScalingOptionsRequest{}
+
+	err := mergeScalingPolicies(cmd, opts, req)
+	if err == nil || !strings.Contains(err.Error(), "--request-ttl") {
+		t.Fatalf("expected request-ttl error, got %v", err)
+	}
+}
+
+func TestMergeScalingPolicies_RequestTTLOutOfRange(t *testing.T) {
+	cmd := testContainerUpdateCmd()
+	_ = cmd.Flags().Set(flagRequestTTL, "48h")
+	opts := &containerUpdateOptions{RequestTTL: 48 * time.Hour}
+	req := &verda.UpdateScalingOptionsRequest{}
+
+	err := mergeScalingPolicies(cmd, opts, req)
+	if err == nil || !strings.Contains(err.Error(), "--request-ttl") {
+		t.Fatalf("expected request-ttl error, got %v", err)
+	}
+}
+
+func TestMergeScalingPolicies_ValidValues(t *testing.T) {
+	cmd := testContainerUpdateCmd()
+	_ = cmd.Flags().Set(flagScaleUpDelay, "30s")
+	_ = cmd.Flags().Set(flagScaleDownDelay, "1m")
+	_ = cmd.Flags().Set(flagRequestTTL, "10m")
+	opts := &containerUpdateOptions{
+		ScaleUpDelay:   30 * time.Second,
+		ScaleDownDelay: 1 * time.Minute,
+		RequestTTL:     10 * time.Minute,
+	}
+	req := &verda.UpdateScalingOptionsRequest{}
+
+	if err := mergeScalingPolicies(cmd, opts, req); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if req.ScaleUpPolicy == nil || req.ScaleUpPolicy.DelaySeconds != 30 {
+		t.Errorf("ScaleUpPolicy: want 30s, got %+v", req.ScaleUpPolicy)
+	}
+	if req.ScaleDownPolicy == nil || req.ScaleDownPolicy.DelaySeconds != 60 {
+		t.Errorf("ScaleDownPolicy: want 60s, got %+v", req.ScaleDownPolicy)
+	}
+	if req.QueueMessageTTLSeconds == nil || *req.QueueMessageTTLSeconds != 600 {
+		t.Errorf("QueueMessageTTLSeconds: want 600, got %v", req.QueueMessageTTLSeconds)
+	}
+}
+
+// -- agent-mode confirmation --
+
+func TestContainerUpdate_AgentMode_RequiresYes(t *testing.T) {
+	t.Parallel()
+	_, client := newContainerMock(t)
+	f := agentFactory(client)
+
+	_, _, err := runContainer(t, f, "update", testDeployment, "--image", "ghcr.io/org/app:v2")
+	var agentErr *cmdutil.AgentError
+	if !errors.As(err, &agentErr) {
+		t.Fatalf("expected *AgentError, got %T: %v", err, err)
+	}
+	if agentErr.Code != "CONFIRMATION_REQUIRED" {
+		t.Errorf("code = %q, want CONFIRMATION_REQUIRED", agentErr.Code)
+	}
+}
+
+func TestContainerUpdate_AgentMode_WithYes(t *testing.T) {
+	t.Parallel()
+	rec := newRecordingServer(t)
+	f := newTestFactory(t, rec.srv.URL)
+
+	_, _, err := runContainer(t, f, "update", "cli-test", "--image", "ghcr.io/org/app:v2", "--yes")
+	if err != nil {
+		t.Fatalf("update with --yes: %v", err)
 	}
 }
