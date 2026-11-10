@@ -79,7 +79,7 @@ docs: ## Generate docs/commands.md and docs/reference/ for a release (requires V
 ifndef VERSION
 	$(error VERSION is required. Usage: make docs VERSION=v1.0.0)
 endif
-	@go run ./cmd/gen-docs -out docs -version $(VERSION)
+	@go run ./cmd/gen-docs -version $(VERSION)
 
 ## Git Hooks ---------------------------------------------------------------
 

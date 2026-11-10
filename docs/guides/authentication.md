@@ -6,8 +6,9 @@ How the Verda CLI finds API credentials. For the `verda auth` commands themselve
 ## Credential Resolution Order
 
 Flags, environment variables, `~/.verda/config.yaml` and the credentials file are checked in a fixed order for each
-credential, the credentials file path and the profile. `verda auth --help` lists that order. The
-[auth reference](../reference/auth.md) shows the same text.
+credential, the credentials file path and the profile. `verda auth --help` and the
+[auth reference](../reference/auth.md) list that order for releases after v1.10.0; up to v1.10.0 they print a
+shorter list that leaves out `config.yaml`.
 
 ## Environment Variables
 

@@ -32,10 +32,9 @@ import (
 )
 
 func main() {
-	out := flag.String("out", "docs", "Docs directory to write commands.md and reference/ into")
 	version := flag.String("version", "", "Release the docs describe, e.g. v1.2.3 (required)")
 	flag.Parse()
-	if err := run(*out, *version); err != nil {
+	if err := run("docs", *version); err != nil {
 		fmt.Fprintln(os.Stderr, "gen-docs:", err)
 		os.Exit(1)
 	}

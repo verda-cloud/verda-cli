@@ -1,7 +1,8 @@
 # Scripting and Agent Mode
 
 How to drive the Verda CLI from scripts, CI pipelines and AI agents. Every flag mentioned here is listed under
-[Global Flags](../commands.md#global-flags) or on the command's [reference page](../commands.md).
+[Global Flags](../commands.md#global-flags) or on the command's reference page, linked from the
+[command index](../commands.md).
 
 ## Structured Output
 

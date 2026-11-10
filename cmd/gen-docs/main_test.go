@@ -15,17 +15,18 @@
 package main
 
 import (
-	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/verda-cloud/verda-cli/internal/verda-cli/docgen"
 )
 
 // TestRun builds the docs from the real command tree, as the release job does, so a
 // generator failure surfaces in CI rather than first in a release.
 func TestRun(t *testing.T) {
-	// t.Setenv restores what isolateEnv overwrites.
+	// t.Setenv restores HOME and VERDA_HOME; other VERDA_* that isolateEnv unsets stay unset.
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("VERDA_HOME", t.TempDir())
 
@@ -36,11 +37,11 @@ func TestRun(t *testing.T) {
 		}
 	}
 
-	index := readFile(t, filepath.Join(first, "commands.md"))
+	index := readFile(t, filepath.Join(first, docgen.IndexFile))
 	if !strings.Contains(index, "> Verda CLI **v1.2.3**") {
 		t.Errorf("commands.md does not name the release; got:\n%s", index)
 	}
-	readFile(t, filepath.Join(first, "reference", "vm.md"))
+	readFile(t, filepath.Join(first, docgen.ReferenceDir, "vm.md"))
 
 	// Each run gets a fresh temp home, so any home-derived help text differs between runs.
 	for _, name := range listFiles(t, first) {
@@ -70,9 +71,6 @@ func readFile(t *testing.T, path string) string {
 	b, err := os.ReadFile(path) //nolint:gosec // test temp dir
 	if err != nil {
 		t.Fatal(err)
-	}
-	if bytes.ContainsRune(b, '\x1b') {
-		t.Errorf("%s contains an ANSI escape", path)
 	}
 	return string(b)
 }

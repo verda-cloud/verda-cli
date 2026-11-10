@@ -15,7 +15,6 @@
 package docgen
 
 import (
-	"bytes"
 	"maps"
 	"slices"
 	"strings"
@@ -60,9 +59,9 @@ func newTestRoot() *cobra.Command {
 
 const testVersion = "v1.2.3"
 
-func generate(t *testing.T) map[string]string {
+func generate(t *testing.T, root *cobra.Command) map[string]string {
 	t.Helper()
-	files, err := Generate(newTestRoot(), testVersion)
+	files, err := Generate(root, testVersion)
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
@@ -75,8 +74,8 @@ func generate(t *testing.T) map[string]string {
 
 func TestGenerate_Files(t *testing.T) {
 	t.Parallel()
-	got := slices.Sorted(maps.Keys(generate(t)))
-	want := []string{"commands.md", "reference/container.md", "reference/vm.md"}
+	got := slices.Sorted(maps.Keys(generate(t, newTestRoot())))
+	want := []string{IndexFile, "reference/container.md", "reference/vm.md"}
 	if !slices.Equal(got, want) {
 		t.Errorf("files = %v, want %v (hidden commands get no page)", got, want)
 	}
@@ -84,7 +83,7 @@ func TestGenerate_Files(t *testing.T) {
 
 func TestGenerate_Index(t *testing.T) {
 	t.Parallel()
-	index := generate(t)[IndexFile]
+	index := generate(t, newTestRoot())[IndexFile]
 
 	vmAt, serverlessAt := strings.Index(index, "## VM Commands"), strings.Index(index, "## Serverless Commands")
 	if vmAt < 0 || serverlessAt < vmAt {
@@ -111,7 +110,7 @@ func TestGenerate_Index(t *testing.T) {
 func TestGenerate_EveryPageNamesVersion(t *testing.T) {
 	t.Parallel()
 	const want = "> Verda CLI **" + testVersion + "** · [other versions](" + tagsURL + ")"
-	for name, page := range generate(t) {
+	for name, page := range generate(t, newTestRoot()) {
 		lines := strings.SplitN(page, "\n", 6)
 		if len(lines) < 5 || !strings.HasPrefix(lines[2], "# ") || lines[4] != want {
 			t.Errorf("%s: want the version line right under the H1; got:\n%s", name, strings.Join(lines, "\n"))
@@ -140,11 +139,7 @@ func TestGenerate_IndexKeepsDeclarationOrder(t *testing.T) {
 	groups.Add(root)
 	cmdutil.SetUsageTemplate(root, groups)
 
-	files, err := Generate(root, testVersion)
-	if err != nil {
-		t.Fatal(err)
-	}
-	index := string(files[IndexFile])
+	index := generate(t, root)[IndexFile]
 	vmAt, sshAt := strings.Index(index, "[`verda vm`]"), strings.Index(index, "[`verda ssh`]")
 	if vmAt < 0 || sshAt < vmAt {
 		t.Errorf("index should list vm before ssh, as declared; got:\n%s", index)
@@ -153,7 +148,7 @@ func TestGenerate_IndexKeepsDeclarationOrder(t *testing.T) {
 
 func TestGenerate_Page(t *testing.T) {
 	t.Parallel()
-	files := generate(t)
+	files := generate(t, newTestRoot())
 	page := files["reference/vm.md"]
 	for _, want := range []string{
 		"# verda vm\n",
@@ -178,7 +173,7 @@ func TestGenerate_Page(t *testing.T) {
 
 func TestGenerate_LongText(t *testing.T) {
 	t.Parallel()
-	page := generate(t)["reference/container.md"]
+	page := generate(t, newTestRoot())["reference/container.md"]
 	for _, want := range []string{
 		"# verda container (beta)",
 		`Deploy a &lt;name&gt; with \*.csv input.`,
@@ -190,34 +185,15 @@ func TestGenerate_LongText(t *testing.T) {
 	}
 }
 
+// Rendering resolves (and so mutates) flag state, so a rerun on the same root is checked too.
 func TestGenerate_Deterministic(t *testing.T) {
 	t.Parallel()
-	first, err := Generate(newTestRoot(), testVersion)
-	if err != nil {
-		t.Fatal(err)
-	}
-	second, err := Generate(newTestRoot(), testVersion)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !maps.EqualFunc(first, second, bytes.Equal) {
+	root := newTestRoot()
+	first := generate(t, root)
+	if !maps.Equal(first, generate(t, newTestRoot())) {
 		t.Error("two runs over equal trees must produce identical output")
 	}
-}
-
-// Rendering resolves (and so mutates) flag state; a rerun on the same tree must not differ.
-func TestGenerate_IdempotentOnSameRoot(t *testing.T) {
-	t.Parallel()
-	root := newTestRoot()
-	first, err := Generate(root, testVersion)
-	if err != nil {
-		t.Fatal(err)
-	}
-	second, err := Generate(root, testVersion)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !maps.EqualFunc(first, second, bytes.Equal) {
+	if !maps.Equal(first, generate(t, root)) {
 		t.Error("a second run over the same root must produce identical output")
 	}
 }
@@ -227,11 +203,7 @@ func TestGenerate_UsageShowsInheritedFlags(t *testing.T) {
 	root := &cobra.Command{Use: "verda"}
 	root.PersistentFlags().String("output", "table", "Output format")
 	root.AddCommand(&cobra.Command{Use: "locations", Short: "List locations", Run: func(*cobra.Command, []string) {}})
-	files, err := Generate(root, testVersion)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if page := string(files["reference/locations.md"]); !strings.Contains(page, "verda locations [flags]") {
+	if page := generate(t, root)["reference/locations.md"]; !strings.Contains(page, "verda locations [flags]") {
 		t.Errorf("usage should include [flags] from global flags, as --help does; got:\n%s", page)
 	}
 }
@@ -249,11 +221,7 @@ func registryLsSection(t *testing.T, addFlags func(*pflag.FlagSet)) string {
 	registry.AddCommand(ls)
 	root.AddCommand(registry)
 
-	files, err := Generate(root, testVersion)
-	if err != nil {
-		t.Fatal(err)
-	}
-	page := string(files["reference/registry.md"])
+	page := generate(t, root)["reference/registry.md"]
 	_, section, ok := strings.Cut(page, "## verda registry ls\n")
 	if !ok {
 		t.Fatalf("page has no registry ls section; got:\n%s", page)
