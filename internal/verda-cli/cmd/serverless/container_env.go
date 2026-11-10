@@ -177,10 +177,8 @@ func newCmdEnvSet(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 				}
 			}
 
-			containerName := resolveContainerNameFromDeployment(name)
-
 			if len(toAdd) > 0 {
-				req := &verda.ContainerEnvVarsRequest{ContainerName: containerName, Env: toAdd}
+				req := &verda.ContainerEnvVarsRequest{ContainerName: name, Env: toAdd}
 				cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), "Add env vars:", req)
 				if err := cmdutil.RunWithSpinner(ctx, f.Status(), "Adding environment variables...", func(ctx context.Context) error {
 					return client.ContainerDeployments.AddEnvironmentVariables(ctx, name, req)
@@ -189,7 +187,7 @@ func newCmdEnvSet(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 				}
 			}
 			if len(toUpdate) > 0 {
-				req := &verda.ContainerEnvVarsRequest{ContainerName: containerName, Env: toUpdate}
+				req := &verda.ContainerEnvVarsRequest{ContainerName: name, Env: toUpdate}
 				cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), "Update env vars:", req)
 				if err := cmdutil.RunWithSpinner(ctx, f.Status(), "Updating environment variables...", func(ctx context.Context) error {
 					return client.ContainerDeployments.UpdateEnvironmentVariables(ctx, name, req)
@@ -211,13 +209,6 @@ func newCmdEnvSet(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 	cmd.Flags().StringArrayVar(&envPlain, flagEnv, nil, "Plain environment variable KEY=VALUE; repeat for multiple")
 	cmd.Flags().StringArrayVar(&envSecret, flagEnvSecret, nil, "Secret-backed env KEY=SECRET_NAME; repeat for multiple")
 	return cmd
-}
-
-// resolveContainerNameFromDeployment returns the container name for env var
-// operations. Serverless deployments have a single container whose name
-// matches the deployment name.
-func resolveContainerNameFromDeployment(deploymentName string) string {
-	return deploymentName
 }
 
 // --- unset ---
@@ -275,9 +266,8 @@ func newCmdEnvUnset(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Comma
 			ctx, cancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
 			defer cancel()
 
-			containerName := resolveContainerNameFromDeployment(deployment)
 			req := &verda.DeleteContainerEnvVarsRequest{
-				ContainerName: containerName,
+				ContainerName: deployment,
 				Env:           args,
 			}
 			cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), "Delete env vars:", req)

@@ -505,16 +505,6 @@ func TestEnvUnset_JSONOutput(t *testing.T) {
 	}
 }
 
-func TestResolveContainerNameFromDeployment(t *testing.T) {
-	t.Parallel()
-	if got := resolveContainerNameFromDeployment("my-deploy"); got != "my-deploy" {
-		t.Errorf("expected my-deploy, got %q", got)
-	}
-	if got := resolveContainerNameFromDeployment(""); got != "" {
-		t.Errorf("expected empty string, got %q", got)
-	}
-}
-
 func TestEnvSet_TableOutput(t *testing.T) {
 	t.Parallel()
 	rec := newEnvRecordingServer(t, []verda.ContainerEnvVar{
