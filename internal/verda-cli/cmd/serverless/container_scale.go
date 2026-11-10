@@ -35,8 +35,8 @@ import (
 )
 
 const (
-	scaleStatusAccepted  = "accepted"
-	scaleStatusCompleted = "completed"
+	scaleStatusAccepted  = statusAccepted
+	scaleStatusCompleted = statusCompleted
 
 	defaultScaleWaitTimeout = 60 * time.Second
 

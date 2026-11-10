@@ -32,12 +32,15 @@ import (
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
 
-// recordingServer stores POST bodies from create endpoints for JSON assertions.
+// recordingServer stores POST/PATCH bodies from create/update endpoints.
 type recordingServer struct {
-	mu          sync.Mutex
-	containerOK []byte
-	jobOK       []byte
-	srv         *httptest.Server
+	mu                      sync.Mutex
+	containerOK             []byte
+	containerPatchOK        []byte
+	containerScalingPatchOK []byte
+	jobOK                   []byte
+	jobPatchOK              []byte
+	srv                     *httptest.Server
 }
 
 func newRecordingServer(t *testing.T) *recordingServer {
@@ -82,6 +85,101 @@ func newRecordingServer(t *testing.T) *recordingServer {
 		_ = json.NewEncoder(w).Encode(verda.JobDeployment{Name: "cli-test-job"})
 	})
 
+	// -- Update (GET + PATCH) endpoints --
+
+	mux.HandleFunc("GET /container-deployments/{name}", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(verda.ContainerDeployment{
+			Name: r.PathValue("name"),
+			Containers: []verda.DeploymentContainer{{
+				Name:        "main",
+				Image:       verda.ContainerImage{Image: "ghcr.io/org/app:v1.0"},
+				ExposedPort: 8080,
+				Healthcheck: &verda.ContainerHealthcheck{Enabled: true, Port: 8080, Path: "/health"},
+				Env: []verda.ContainerEnvVar{
+					{Name: "FOO", ValueOrReferenceToSecret: "bar", Type: "plain"},
+					{Name: "SECRET_KEY", ValueOrReferenceToSecret: "my-secret", Type: "secret"},
+				},
+			}},
+			Compute: &verda.ContainerCompute{Name: "RTX4500Ada", Size: 1},
+		})
+	})
+
+	mux.HandleFunc("GET /container-deployments/{name}/scaling", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(verda.ContainerScalingOptions{
+			MinReplicaCount:              1,
+			MaxReplicaCount:              3,
+			ConcurrentRequestsPerReplica: 1,
+			QueueMessageTTLSeconds:       300,
+			ScalingTriggers: &verda.ScalingTriggers{
+				QueueLoad: &verda.QueueLoadTrigger{Threshold: 3},
+			},
+		})
+	})
+
+	mux.HandleFunc("PATCH /container-deployments/{name}/scaling", func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		rec.mu.Lock()
+		rec.containerScalingPatchOK = body
+		rec.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(verda.ContainerScalingOptions{
+			MinReplicaCount: 0, MaxReplicaCount: 10,
+		})
+	})
+
+	mux.HandleFunc("PATCH /container-deployments/{name}", func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		rec.mu.Lock()
+		rec.containerPatchOK = body
+		rec.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(verda.ContainerDeployment{Name: r.PathValue("name")})
+	})
+
+	mux.HandleFunc("GET /job-deployments/{name}", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(verda.JobDeployment{
+			Name: r.PathValue("name"),
+			Containers: []verda.DeploymentContainer{{
+				Name:        "worker",
+				Image:       verda.ContainerImage{Image: "ghcr.io/org/embedder:v1"},
+				ExposedPort: 8080,
+				Env: []verda.ContainerEnvVar{
+					{Name: "FOO", ValueOrReferenceToSecret: "bar", Type: "plain"},
+				},
+			}},
+			Compute: &verda.ContainerCompute{Name: "RTX4500Ada", Size: 1},
+			Scaling: &verda.JobScalingOptions{
+				MaxReplicaCount:        3,
+				DeadlineSeconds:        1800,
+				QueueMessageTTLSeconds: 300,
+			},
+		})
+	})
+
+	mux.HandleFunc("PATCH /job-deployments/{name}", func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		rec.mu.Lock()
+		rec.jobPatchOK = body
+		rec.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(verda.JobDeployment{Name: r.PathValue("name")})
+	})
+
 	rec.srv = httptest.NewServer(mux)
 	t.Cleanup(rec.srv.Close)
 	return rec
@@ -97,6 +195,24 @@ func (r *recordingServer) jobBody() []byte {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.jobOK
+}
+
+func (r *recordingServer) containerPatchBody() []byte {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.containerPatchOK
+}
+
+func (r *recordingServer) containerScalingPatchBody() []byte {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.containerScalingPatchOK
+}
+
+func (r *recordingServer) jobPatchBody() []byte {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.jobPatchOK
 }
 
 func newTestFactory(t *testing.T, baseURL string) *cmdutil.TestFactory {
@@ -364,5 +480,623 @@ func TestContainerCreate_QueuePresetWireFormat(t *testing.T) {
 				t.Errorf("queue_load.threshold = %v, want %v; body=%s", th, tt.want, body)
 			}
 		})
+	}
+}
+
+// TestContainerUpdate_WireFormat asserts that updating image + spot sends the
+// correct PATCH body: is_spot set, containers merged from current state, and
+// no compute/scaling fields (they weren't changed).
+func TestContainerUpdate_WireFormat(t *testing.T) {
+	t.Parallel()
+	rec := newRecordingServer(t)
+	f := newTestFactory(t, rec.srv.URL)
+
+	var stdout, stderr bytes.Buffer
+	cmd := NewCmdContainer(f, cmdutil.IOStreams{Out: &stdout, ErrOut: &stderr})
+	cmd.SetArgs([]string{
+		"update", "cli-test",
+		"--image", "ghcr.io/org/app:v2.0",
+		"--spot",
+		"--yes",
+	})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("container update failed: %v\nstderr:\n%s", err, stderr.String())
+	}
+
+	body := rec.containerPatchBody()
+	if body == nil {
+		t.Fatalf("server did not receive PATCH /container-deployments/cli-test\nstderr:\n%s", stderr.String())
+	}
+
+	var raw map[string]any
+	if err := json.Unmarshal(body, &raw); err != nil {
+		t.Fatalf("unmarshal: %v\nbody: %s", err, body)
+	}
+
+	// is_spot must be present and true.
+	isSpot, ok := raw["is_spot"]
+	if !ok {
+		t.Errorf("is_spot missing from PATCH body; body: %s", body)
+	} else if isSpot != true {
+		t.Errorf("is_spot: got %v, want true", isSpot)
+	}
+
+	// compute and scaling must NOT be present (unchanged).
+	if _, present := raw["compute"]; present {
+		t.Errorf("compute should be omitted (not changed); body: %s", body)
+	}
+	if _, present := raw["scaling"]; present {
+		t.Errorf("scaling should be omitted (not changed); body: %s", body)
+	}
+
+	var got struct {
+		Containers []struct {
+			Name        string `json:"name"`
+			Image       string `json:"image"`
+			ExposedPort int    `json:"exposed_port"`
+			Healthcheck *struct {
+				Enabled bool   `json:"enabled"`
+				Port    int    `json:"port"`
+				Path    string `json:"path"`
+			} `json:"healthcheck"`
+			Env []struct {
+				Name string `json:"name"`
+				Type string `json:"type"`
+			} `json:"env"`
+		} `json:"containers"`
+	}
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("unmarshal typed: %v\nbody: %s", err, body)
+	}
+
+	if len(got.Containers) != 1 {
+		t.Fatalf("containers: got %d, want 1", len(got.Containers))
+	}
+	c := got.Containers[0]
+	if c.Name != "main" {
+		t.Errorf("name: got %q, want main (carried from current)", c.Name)
+	}
+	if c.Image != "ghcr.io/org/app:v2.0" {
+		t.Errorf("image: got %q, want ghcr.io/org/app:v2.0", c.Image)
+	}
+	if c.ExposedPort != 8080 {
+		t.Errorf("exposed_port: got %d, want 8080 (carried)", c.ExposedPort)
+	}
+	if c.Healthcheck == nil || !c.Healthcheck.Enabled || c.Healthcheck.Port != 8080 || c.Healthcheck.Path != "/health" {
+		t.Errorf("healthcheck should be carried from current; got %+v", c.Healthcheck)
+	}
+	if len(c.Env) != 2 {
+		t.Errorf("env: got %d entries, want 2 (carried from current); body: %s", len(c.Env), body)
+	}
+
+	if !strings.Contains(stdout.String(), "cli-test") {
+		t.Errorf("stdout should contain deployment name; got:\n%s", stdout.String())
+	}
+}
+
+// TestContainerUpdate_EnvMergeWireFormat verifies that setting --env replaces
+// only plain env vars; secret vars from the current deployment are carried over.
+func TestContainerUpdate_EnvMergeWireFormat(t *testing.T) {
+	t.Parallel()
+	rec := newRecordingServer(t)
+	f := newTestFactory(t, rec.srv.URL)
+
+	var stdout, stderr bytes.Buffer
+	cmd := NewCmdContainer(f, cmdutil.IOStreams{Out: &stdout, ErrOut: &stderr})
+	cmd.SetArgs([]string{
+		"update", "cli-test",
+		"--env", "NEW=val",
+		"--yes",
+	})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("container update failed: %v\nstderr:\n%s", err, stderr.String())
+	}
+
+	body := rec.containerPatchBody()
+	if body == nil {
+		t.Fatalf("no PATCH body received")
+	}
+
+	var got struct {
+		Containers []struct {
+			Env []struct {
+				Name                     string `json:"name"`
+				ValueOrReferenceToSecret string `json:"value_or_reference_to_secret"`
+				Type                     string `json:"type"`
+			} `json:"env"`
+		} `json:"containers"`
+	}
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("unmarshal: %v\nbody: %s", err, body)
+	}
+	if len(got.Containers) != 1 {
+		t.Fatalf("containers: got %d, want 1", len(got.Containers))
+	}
+
+	envs := got.Containers[0].Env
+	// --env replaces all plain vars; secret vars are carried from current.
+	// Current had: FOO=bar (plain), SECRET_KEY=my-secret (secret).
+	// After: NEW=val (plain from flag), SECRET_KEY=my-secret (carried secret).
+	if len(envs) != 2 {
+		t.Fatalf("env: got %d entries, want 2 (1 new plain + 1 carried secret); body: %s", len(envs), body)
+	}
+
+	foundNew, foundSecret := false, false
+	for _, e := range envs {
+		if e.Name == "NEW" && e.ValueOrReferenceToSecret == "val" && e.Type == "plain" {
+			foundNew = true
+		}
+		if e.Name == "SECRET_KEY" && e.ValueOrReferenceToSecret == "my-secret" && e.Type == "secret" {
+			foundSecret = true
+		}
+	}
+	if !foundNew {
+		t.Errorf("expected NEW=val (plain) in env; body: %s", body)
+	}
+	if !foundSecret {
+		t.Errorf("expected SECRET_KEY=my-secret (secret) carried from current; body: %s", body)
+	}
+	// FOO must NOT be present (it was plain and --env replaces all plain vars).
+	for _, e := range envs {
+		if e.Name == "FOO" {
+			t.Errorf("FOO should be replaced by --env flag, but found in env; body: %s", body)
+		}
+	}
+}
+
+// TestContainerUpdate_ScalingWireFormat asserts that updating scaling flags sends
+// a PATCH to /container-deployments/{name}/scaling (not the main deployment PATCH),
+// and the deployment PATCH is NOT sent when only scaling flags are set.
+func TestContainerUpdate_ScalingWireFormat(t *testing.T) {
+	t.Parallel()
+	rec := newRecordingServer(t)
+	f := newTestFactory(t, rec.srv.URL)
+
+	var stdout, stderr bytes.Buffer
+	cmd := NewCmdContainer(f, cmdutil.IOStreams{Out: &stdout, ErrOut: &stderr})
+	cmd.SetArgs([]string{
+		"update", "cli-test",
+		"--min-replicas", "0",
+		"--max-replicas", "10",
+		"--yes",
+	})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("container update failed: %v\nstderr:\n%s", err, stderr.String())
+	}
+
+	// Scaling PATCH must have been sent.
+	scalingBody := rec.containerScalingPatchBody()
+	if scalingBody == nil {
+		t.Fatalf("server did not receive PATCH /container-deployments/cli-test/scaling\nstderr:\n%s", stderr.String())
+	}
+
+	var got struct {
+		MinReplicaCount *int `json:"min_replica_count"`
+		MaxReplicaCount *int `json:"max_replica_count"`
+	}
+	if err := json.Unmarshal(scalingBody, &got); err != nil {
+		t.Fatalf("unmarshal scaling body: %v\nbody: %s", err, scalingBody)
+	}
+	if got.MinReplicaCount == nil || *got.MinReplicaCount != 0 {
+		t.Errorf("min_replica_count: want 0, got %v", got.MinReplicaCount)
+	}
+	if got.MaxReplicaCount == nil || *got.MaxReplicaCount != 10 {
+		t.Errorf("max_replica_count: want 10, got %v", got.MaxReplicaCount)
+	}
+
+	// Deployment PATCH must NOT have been sent (only scaling changed).
+	if rec.containerPatchBody() != nil {
+		t.Errorf("deployment PATCH should not be sent when only scaling flags are set; body: %s", rec.containerPatchBody())
+	}
+}
+
+// TestContainerUpdate_CombinedWireFormat asserts that updating both deployment
+// and scaling flags sends two PATCHes: one to /container-deployments/{name} and
+// one to /container-deployments/{name}/scaling.
+func TestContainerUpdate_CombinedWireFormat(t *testing.T) {
+	t.Parallel()
+	rec := newRecordingServer(t)
+	f := newTestFactory(t, rec.srv.URL)
+
+	var stdout, stderr bytes.Buffer
+	cmd := NewCmdContainer(f, cmdutil.IOStreams{Out: &stdout, ErrOut: &stderr})
+	cmd.SetArgs([]string{
+		"update", "cli-test",
+		"--image", "ghcr.io/org/app:v3.0",
+		"--max-replicas", "10",
+		"--yes",
+	})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("container update failed: %v\nstderr:\n%s", err, stderr.String())
+	}
+
+	deployBody := rec.containerPatchBody()
+	if deployBody == nil {
+		t.Fatalf("server did not receive PATCH /container-deployments/cli-test")
+	}
+	scalingBody := rec.containerScalingPatchBody()
+	if scalingBody == nil {
+		t.Fatalf("server did not receive PATCH /container-deployments/cli-test/scaling")
+	}
+
+	var deployGot struct {
+		Containers []struct {
+			Image string `json:"image"`
+		} `json:"containers"`
+	}
+	if err := json.Unmarshal(deployBody, &deployGot); err != nil {
+		t.Fatalf("unmarshal deploy body: %v\nbody: %s", err, deployBody)
+	}
+	if len(deployGot.Containers) != 1 || deployGot.Containers[0].Image != "ghcr.io/org/app:v3.0" {
+		t.Errorf("deployment PATCH image: got %+v", deployGot.Containers)
+	}
+
+	var rawDeploy map[string]any
+	if err := json.Unmarshal(deployBody, &rawDeploy); err != nil {
+		t.Fatalf("unmarshal raw deploy: %v", err)
+	}
+	if _, present := rawDeploy["scaling"]; present {
+		t.Errorf("deployment PATCH must not contain scaling; body: %s", deployBody)
+	}
+
+	var scalingGot struct {
+		MaxReplicaCount *int `json:"max_replica_count"`
+	}
+	if err := json.Unmarshal(scalingBody, &scalingGot); err != nil {
+		t.Fatalf("unmarshal scaling body: %v\nbody: %s", err, scalingBody)
+	}
+	if scalingGot.MaxReplicaCount == nil || *scalingGot.MaxReplicaCount != 10 {
+		t.Errorf("scaling PATCH max_replica_count: want 10, got %v", scalingGot.MaxReplicaCount)
+	}
+}
+
+// TestBatchjobUpdate_WireFormat asserts that updating scaling sends the correct
+// PATCH body with only the scaling field, no containers (unchanged).
+func TestBatchjobUpdate_WireFormat(t *testing.T) {
+	t.Parallel()
+	rec := newRecordingServer(t)
+	f := newTestFactory(t, rec.srv.URL)
+
+	var stdout, stderr bytes.Buffer
+	cmd := NewCmdBatchjob(f, cmdutil.IOStreams{Out: &stdout, ErrOut: &stderr})
+	cmd.SetArgs([]string{
+		"update", "cli-test-job",
+		"--deadline", "1h",
+		"--max-replicas", "5",
+		"--yes",
+	})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("batchjob update failed: %v\nstderr:\n%s", err, stderr.String())
+	}
+
+	body := rec.jobPatchBody()
+	if body == nil {
+		t.Fatalf("server did not receive PATCH /job-deployments/cli-test-job\nstderr:\n%s", stderr.String())
+	}
+
+	var raw map[string]any
+	if err := json.Unmarshal(body, &raw); err != nil {
+		t.Fatalf("unmarshal: %v\nbody: %s", err, body)
+	}
+
+	// containers and compute must NOT be present (unchanged).
+	if _, present := raw["containers"]; present {
+		t.Errorf("containers should be omitted (not changed); body: %s", body)
+	}
+	if _, present := raw["compute"]; present {
+		t.Errorf("compute should be omitted (not changed); body: %s", body)
+	}
+
+	var got struct {
+		Scaling *struct {
+			MaxReplicaCount        int `json:"max_replica_count"`
+			DeadlineSeconds        int `json:"deadline_seconds"`
+			QueueMessageTTLSeconds int `json:"queue_message_ttl_seconds"`
+		} `json:"scaling"`
+	}
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("unmarshal typed: %v\nbody: %s", err, body)
+	}
+
+	if got.Scaling == nil {
+		t.Fatalf("scaling missing from PATCH body")
+	}
+	if got.Scaling.DeadlineSeconds != 3600 {
+		t.Errorf("deadline_seconds: got %d, want 3600", got.Scaling.DeadlineSeconds)
+	}
+	if got.Scaling.MaxReplicaCount != 5 {
+		t.Errorf("max_replica_count: got %d, want 5", got.Scaling.MaxReplicaCount)
+	}
+	// queue_message_ttl_seconds should be carried from current (300).
+	if got.Scaling.QueueMessageTTLSeconds != 300 {
+		t.Errorf("queue_message_ttl_seconds: got %d, want 300 (carried from current)", got.Scaling.QueueMessageTTLSeconds)
+	}
+}
+
+// TestContainerUpdate_SecretMountMergeWireFormat asserts that --secret-mount
+// replaces only secret mounts; scratch is carried from current.
+func TestContainerUpdate_SecretMountMergeWireFormat(t *testing.T) {
+	t.Parallel()
+	rec := newRecordingServer(t)
+	f := newTestFactory(t, rec.srv.URL)
+
+	var stdout, stderr bytes.Buffer
+	cmd := NewCmdContainer(f, cmdutil.IOStreams{Out: &stdout, ErrOut: &stderr})
+	cmd.SetArgs([]string{
+		"update", "cli-test",
+		"--secret-mount", "api-key:/etc/creds/key",
+		"--yes",
+	})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("container update failed: %v\nstderr:\n%s", err, stderr.String())
+	}
+
+	body := rec.containerPatchBody()
+	if body == nil {
+		t.Fatalf("no PATCH body received")
+	}
+
+	var got struct {
+		Containers []struct {
+			VolumeMounts []struct {
+				Type       string `json:"type"`
+				MountPath  string `json:"mount_path"`
+				SecretName string `json:"secret_name"`
+			} `json:"volume_mounts"`
+		} `json:"containers"`
+	}
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("unmarshal: %v\nbody: %s", err, body)
+	}
+	if len(got.Containers) != 1 {
+		t.Fatalf("containers: got %d, want 1", len(got.Containers))
+	}
+	// The recording server's GET response has no volume mounts,
+	// so the result should just have the new secret mount.
+	mounts := got.Containers[0].VolumeMounts
+	found := false
+	for _, m := range mounts {
+		if m.Type == "secret" && m.SecretName == "api-key" && m.MountPath == "/etc/creds/key" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected secret mount api-key:/etc/creds/key; got %+v\nbody: %s", mounts, body)
+	}
+}
+
+// TestContainerUpdate_EntrypointWireFormat asserts that --entrypoint and --cmd
+// are sent as entrypoint_overrides in the PATCH body.
+func TestContainerUpdate_EntrypointWireFormat(t *testing.T) {
+	t.Parallel()
+	rec := newRecordingServer(t)
+	f := newTestFactory(t, rec.srv.URL)
+
+	var stdout, stderr bytes.Buffer
+	cmd := NewCmdContainer(f, cmdutil.IOStreams{Out: &stdout, ErrOut: &stderr})
+	cmd.SetArgs([]string{
+		"update", "cli-test",
+		"--entrypoint", "/bin/sh",
+		"--cmd", "-c",
+		"--cmd", "echo hello",
+		"--yes",
+	})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("container update failed: %v\nstderr:\n%s", err, stderr.String())
+	}
+
+	body := rec.containerPatchBody()
+	if body == nil {
+		t.Fatalf("no PATCH body received")
+	}
+
+	var got struct {
+		Containers []struct {
+			EntrypointOverrides *struct {
+				Enabled    bool     `json:"enabled"`
+				Entrypoint []string `json:"entrypoint"`
+				Cmd        []string `json:"cmd"`
+			} `json:"entrypoint_overrides"`
+		} `json:"containers"`
+	}
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("unmarshal: %v\nbody: %s", err, body)
+	}
+	if len(got.Containers) != 1 {
+		t.Fatalf("containers: got %d, want 1", len(got.Containers))
+	}
+	ep := got.Containers[0].EntrypointOverrides
+	if ep == nil {
+		t.Fatalf("entrypoint_overrides missing from PATCH body; body: %s", body)
+	}
+	if !ep.Enabled {
+		t.Error("entrypoint_overrides.enabled: want true")
+	}
+	if len(ep.Entrypoint) != 1 || ep.Entrypoint[0] != "/bin/sh" {
+		t.Errorf("entrypoint: got %v, want [/bin/sh]", ep.Entrypoint)
+	}
+	if len(ep.Cmd) != 2 || ep.Cmd[0] != "-c" || ep.Cmd[1] != "echo hello" {
+		t.Errorf("cmd: got %v, want [-c echo hello]", ep.Cmd)
+	}
+}
+
+// TestContainerUpdate_HealthcheckOffWireFormat asserts that --healthcheck-off
+// sends null healthcheck in the PATCH body.
+func TestContainerUpdate_HealthcheckOffWireFormat(t *testing.T) {
+	t.Parallel()
+	rec := newRecordingServer(t)
+	f := newTestFactory(t, rec.srv.URL)
+
+	var stdout, stderr bytes.Buffer
+	cmd := NewCmdContainer(f, cmdutil.IOStreams{Out: &stdout, ErrOut: &stderr})
+	cmd.SetArgs([]string{
+		"update", "cli-test",
+		"--healthcheck-off",
+		"--yes",
+	})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("container update failed: %v\nstderr:\n%s", err, stderr.String())
+	}
+
+	body := rec.containerPatchBody()
+	if body == nil {
+		t.Fatalf("no PATCH body received")
+	}
+
+	var got struct {
+		Containers []struct {
+			Healthcheck *struct {
+				Enabled bool `json:"enabled"`
+			} `json:"healthcheck"`
+		} `json:"containers"`
+	}
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("unmarshal: %v\nbody: %s", err, body)
+	}
+	if len(got.Containers) != 1 {
+		t.Fatalf("containers: got %d, want 1", len(got.Containers))
+	}
+	hc := got.Containers[0].Healthcheck
+	if hc != nil {
+		t.Errorf("healthcheck: want nil/absent (disabled), got %+v; body: %s", hc, body)
+	}
+}
+
+// TestBatchjobUpdate_EnvMergeWireFormat verifies env merge semantics on
+// batchjob update: --env replaces plain vars, carries secrets.
+func TestBatchjobUpdate_EnvMergeWireFormat(t *testing.T) {
+	t.Parallel()
+	rec := newRecordingServer(t)
+	f := newTestFactory(t, rec.srv.URL)
+
+	var stdout, stderr bytes.Buffer
+	cmd := NewCmdBatchjob(f, cmdutil.IOStreams{Out: &stdout, ErrOut: &stderr})
+	cmd.SetArgs([]string{
+		"update", "cli-test-job",
+		"--env", "BATCH_ID=42",
+		"--yes",
+	})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("batchjob update failed: %v\nstderr:\n%s", err, stderr.String())
+	}
+
+	body := rec.jobPatchBody()
+	if body == nil {
+		t.Fatalf("no PATCH body received")
+	}
+
+	var got struct {
+		Containers []struct {
+			Env []struct {
+				Name                     string `json:"name"`
+				ValueOrReferenceToSecret string `json:"value_or_reference_to_secret"`
+				Type                     string `json:"type"`
+			} `json:"env"`
+		} `json:"containers"`
+	}
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("unmarshal: %v\nbody: %s", err, body)
+	}
+	if len(got.Containers) != 1 {
+		t.Fatalf("containers: got %d, want 1", len(got.Containers))
+	}
+
+	envs := got.Containers[0].Env
+	if len(envs) != 1 {
+		t.Fatalf("env: got %d entries, want 1 (new plain only; job has no secret env); body: %s", len(envs), body)
+	}
+	if envs[0].Name != "BATCH_ID" || envs[0].ValueOrReferenceToSecret != "42" || envs[0].Type != "plain" {
+		t.Errorf("env[0]: got %+v, want BATCH_ID=42 (plain)", envs[0])
+	}
+	for _, e := range envs {
+		if e.Name == "FOO" {
+			t.Errorf("FOO should be replaced by --env flag; body: %s", body)
+		}
+	}
+}
+
+// TestContainerUpdate_NoFlagsError asserts that running container update
+// without any update flags produces a usage error.
+func TestContainerUpdate_NoFlagsError(t *testing.T) {
+	t.Parallel()
+	rec := newRecordingServer(t)
+	f := newTestFactory(t, rec.srv.URL)
+
+	var stdout, stderr bytes.Buffer
+	cmd := NewCmdContainer(f, cmdutil.IOStreams{Out: &stdout, ErrOut: &stderr})
+	cmd.SetArgs([]string{"update", "cli-test", "--yes"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when no update flags set")
+	}
+	if !strings.Contains(err.Error(), "at least one update flag") {
+		t.Errorf("error = %v, want 'at least one update flag'", err)
+	}
+}
+
+// TestBatchjobUpdate_NoFlagsError asserts that running batchjob update
+// without any update flags produces a usage error.
+func TestBatchjobUpdate_NoFlagsError(t *testing.T) {
+	t.Parallel()
+	rec := newRecordingServer(t)
+	f := newTestFactory(t, rec.srv.URL)
+
+	var stdout, stderr bytes.Buffer
+	cmd := NewCmdBatchjob(f, cmdutil.IOStreams{Out: &stdout, ErrOut: &stderr})
+	cmd.SetArgs([]string{"update", "cli-test-job", "--yes"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when no update flags set")
+	}
+	if !strings.Contains(err.Error(), "at least one update flag") {
+		t.Errorf("error = %v, want 'at least one update flag'", err)
+	}
+}
+
+// TestBatchjobUpdate_ImageWireFormat asserts that updating only the image
+// sends containers in the PATCH and does not touch scaling.
+func TestBatchjobUpdate_ImageWireFormat(t *testing.T) {
+	t.Parallel()
+	rec := newRecordingServer(t)
+	f := newTestFactory(t, rec.srv.URL)
+
+	var stdout, stderr bytes.Buffer
+	cmd := NewCmdBatchjob(f, cmdutil.IOStreams{Out: &stdout, ErrOut: &stderr})
+	cmd.SetArgs([]string{
+		"update", "cli-test-job",
+		"--image", "ghcr.io/org/embedder:v2",
+		"--yes",
+	})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("batchjob update failed: %v\nstderr:\n%s", err, stderr.String())
+	}
+
+	body := rec.jobPatchBody()
+	if body == nil {
+		t.Fatalf("no PATCH body received")
+	}
+
+	var raw map[string]any
+	if err := json.Unmarshal(body, &raw); err != nil {
+		t.Fatalf("unmarshal: %v\nbody: %s", err, body)
+	}
+
+	if _, present := raw["scaling"]; present {
+		t.Errorf("scaling should be omitted (not changed); body: %s", body)
+	}
+	if _, present := raw["compute"]; present {
+		t.Errorf("compute should be omitted (not changed); body: %s", body)
+	}
+
+	var got struct {
+		Containers []struct {
+			Image string `json:"image"`
+		} `json:"containers"`
+	}
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("unmarshal typed: %v\nbody: %s", err, body)
+	}
+	if len(got.Containers) != 1 || got.Containers[0].Image != "ghcr.io/org/embedder:v2" {
+		t.Errorf("containers image: got %+v", got.Containers)
 	}
 }

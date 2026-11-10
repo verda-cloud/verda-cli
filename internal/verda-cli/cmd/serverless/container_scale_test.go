@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"reflect"
@@ -502,6 +503,206 @@ func TestRunScaleWizard_SendsPicksEqualToStaleRead(t *testing.T) {
 	}
 	if c := req.ScalingTriggers.CPUUtilization; c == nil || c.Enabled {
 		t.Errorf("request CPU trigger = %+v, want {enabled:false}", c)
+	}
+}
+
+func TestWholeSeconds(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		d       time.Duration
+		maxD    time.Duration
+		want    int
+		wantErr string
+	}{
+		{"30s", 30 * time.Second, 10 * time.Minute, 30, ""},
+		{"0", 0, 10 * time.Minute, 0, ""},
+		{"max boundary", 10 * time.Minute, 10 * time.Minute, 600, ""},
+		{"fractional", 1500 * time.Millisecond, 10 * time.Minute, 0, "whole seconds"},
+		{"negative", -1 * time.Second, 10 * time.Minute, 0, "must be between 0s"},
+		{"over max", 11 * time.Minute, 10 * time.Minute, 0, "must be between 0s"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := wholeSeconds(tt.d, tt.maxD)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("wholeSeconds(%s, %s) error = %v, want %q", tt.d, tt.maxD, err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("wholeSeconds(%s, %s) unexpected error: %v", tt.d, tt.maxD, err)
+			}
+			if got != tt.want {
+				t.Errorf("wholeSeconds(%s, %s) = %d, want %d", tt.d, tt.maxD, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestScalingDiff_WithTriggers(t *testing.T) {
+	t.Parallel()
+	cur := &verda.ContainerScalingOptions{
+		MinReplicaCount:              0,
+		MaxReplicaCount:              3,
+		ConcurrentRequestsPerReplica: 1,
+		ScalingTriggers: &verda.ScalingTriggers{
+			QueueLoad:      &verda.QueueLoadTrigger{Threshold: 3},
+			CPUUtilization: &verda.UtilizationTrigger{Enabled: true, Threshold: 70},
+			GPUUtilization: &verda.UtilizationTrigger{Enabled: false, Threshold: 0},
+		},
+	}
+	req := &verda.UpdateScalingOptionsRequest{
+		ScalingTriggers: &verda.ScalingTriggers{
+			QueueLoad:      &verda.QueueLoadTrigger{Threshold: 6},
+			CPUUtilization: &verda.UtilizationTrigger{Enabled: false, Threshold: 0},
+			GPUUtilization: &verda.UtilizationTrigger{Enabled: true, Threshold: 80},
+		},
+	}
+	rows := scalingDiff(cur, req)
+	labels := make(map[string]bool)
+	for _, r := range rows {
+		labels[r.label] = true
+	}
+	for _, want := range []string{"Queue load", "CPU trigger", "GPU trigger"} {
+		if !labels[want] {
+			t.Errorf("expected row %q in diff, got labels: %v", want, labels)
+		}
+	}
+}
+
+func TestScalingDiff_ReplicasAndConcurrency(t *testing.T) {
+	t.Parallel()
+	cur := &verda.ContainerScalingOptions{
+		MinReplicaCount:              0,
+		MaxReplicaCount:              3,
+		ConcurrentRequestsPerReplica: 1,
+	}
+	req := &verda.UpdateScalingOptionsRequest{
+		MinReplicaCount:              new(2),
+		MaxReplicaCount:              new(10),
+		ConcurrentRequestsPerReplica: new(4),
+	}
+	rows := scalingDiff(cur, req)
+	labels := make(map[string]bool)
+	for _, r := range rows {
+		labels[r.label] = true
+	}
+	for _, want := range []string{"Min replicas", "Max replicas", "Concurrency"} {
+		if !labels[want] {
+			t.Errorf("expected row %q in diff", want)
+		}
+	}
+}
+
+func TestRenderScaleResult(t *testing.T) {
+	t.Parallel()
+	t.Run("completed", func(t *testing.T) {
+		t.Parallel()
+		var buf bytes.Buffer
+		renderScaleResult(&buf, &containerScaleResult{Name: "my-api", Status: scaleStatusCompleted})
+		if !strings.Contains(buf.String(), "completed") {
+			t.Errorf("expected 'completed' in output; got:\n%s", buf.String())
+		}
+	})
+	t.Run("accepted", func(t *testing.T) {
+		t.Parallel()
+		var buf bytes.Buffer
+		renderScaleResult(&buf, &containerScaleResult{Name: "my-api", Status: scaleStatusAccepted})
+		if !strings.Contains(buf.String(), "accepted") {
+			t.Errorf("expected 'accepted' in output; got:\n%s", buf.String())
+		}
+	})
+}
+
+func TestParseUtilFlag(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		input   string
+		want    int
+		wantErr bool
+	}{
+		{"number", "50", 50, false},
+		{"off string", "off", 0, false},
+		{"OFF caps", "OFF", 0, false},
+		{"invalid", "abc", 0, true},
+		{"float", "3.5", 0, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := parseUtilFlag("--cpu-util", tt.input)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if *got != tt.want {
+				t.Errorf("parseUtilFlag(%q) = %d, want %d", tt.input, *got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRenderScalingCard(t *testing.T) {
+	t.Parallel()
+	sc := &verda.ContainerScalingOptions{
+		MinReplicaCount:              0,
+		MaxReplicaCount:              5,
+		ConcurrentRequestsPerReplica: 2,
+		ScalingTriggers: &verda.ScalingTriggers{
+			QueueLoad: &verda.QueueLoadTrigger{Threshold: 3},
+		},
+	}
+	var buf bytes.Buffer
+	renderScalingCard(&buf, "my-api", sc)
+	out := buf.String()
+	for _, want := range []string{"Current scaling for my-api", "0..5", "Concurrency", "Queue load"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected %q in output; got:\n%s", want, out)
+		}
+	}
+}
+
+func TestContainerScale_TableOutput(t *testing.T) {
+	withTerminal(t)
+	_, client := newContainerMock(t)
+	f := &cmdutil.TestFactory{ClientOverride: client, OutputFormatOverride: outputTable}
+
+	stdout, stderr, err := runContainer(t, f, "scale", testDeployment, "--max-replicas", "5", "--yes")
+	if err != nil {
+		t.Fatalf("scale: %v", err)
+	}
+	if !strings.Contains(stderr, "Max replicas") {
+		t.Errorf("stderr lacks scaling diff:\n%s", stderr)
+	}
+	if !strings.Contains(stdout, "accepted") || !strings.Contains(stdout, "replicas") {
+		t.Errorf("stdout lacks result message:\n%s", stdout)
+	}
+}
+
+func TestFlagError(t *testing.T) {
+	t.Parallel()
+	fe := &scaling.FieldError{Field: "min-replicas", Message: "must be >= 0"}
+	wrapped := fmt.Errorf("validation: %w", fe)
+	got := flagError(wrapped)
+	if got == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(got.Error(), "--min-replicas") {
+		t.Errorf("expected --min-replicas in error; got: %v", got)
+	}
+
+	plain := errors.New("some other error")
+	if !errors.Is(flagError(plain), plain) {
+		t.Error("expected plain error to pass through")
 	}
 }
 

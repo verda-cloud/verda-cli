@@ -15,10 +15,16 @@
 package serverless
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
 
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
@@ -88,4 +94,100 @@ func TestContainerDescribe_Scaling(t *testing.T) {
 			t.Errorf("table lacks the scaling note:\n%s", stdout)
 		}
 	})
+}
+
+func TestContainerDescribe_AgentRequiresName(t *testing.T) {
+	t.Parallel()
+	f := cmdutil.NewTestFactory(nil)
+	f.AgentModeOverride = true
+
+	_, _, err := runContainer(t, f, "describe")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	var agentErr *cmdutil.AgentError
+	if !errors.As(err, &agentErr) {
+		t.Fatalf("expected *AgentError, got %T: %v", err, err)
+	}
+	if agentErr.Code != "MISSING_REQUIRED_FLAGS" {
+		t.Errorf("code = %q, want MISSING_REQUIRED_FLAGS", agentErr.Code)
+	}
+}
+
+func TestContainerDescribe_CardWithHealthcheck(t *testing.T) {
+	t.Parallel()
+	srv := newContainerDescribeHTTPServer(t, &verda.ContainerDeployment{
+		Name:            "hc-deploy",
+		EndpointBaseURL: "https://hc-deploy.run.verda.cloud",
+		CreatedAt:       time.Date(2026, 8, 1, 10, 0, 0, 0, time.UTC),
+		Compute:         &verda.ContainerCompute{Name: "H100", Size: 1},
+		Containers: []verda.DeploymentContainer{{
+			Name:        "hc-deploy-0",
+			Image:       verda.ContainerImage{Image: "myimg:v1"},
+			ExposedPort: 8080,
+			Healthcheck: &verda.ContainerHealthcheck{Enabled: true, Path: "/health", Port: 8080},
+			Env: []verda.ContainerEnvVar{
+				{Type: "plain", Name: "FOO", ValueOrReferenceToSecret: "bar"},
+			},
+			VolumeMounts: []verda.ContainerVolumeMount{
+				{Type: "scratch", MountPath: "/data"},
+			},
+		}},
+		ContainerRegistrySettings: &verda.ContainerRegistrySettings{
+			IsPrivate:   true,
+			Credentials: &verda.RegistryCredentialsRef{Name: "my-registry"},
+		},
+	}, "running")
+
+	f := newTestFactory(t, srv.URL)
+	f.OutputFormatOverride = outputTable
+	f.AgentModeOverride = false
+
+	var stdout, stderr bytes.Buffer
+	cmd := NewCmdContainer(f, cmdutil.IOStreams{Out: &stdout, ErrOut: &stderr})
+	cmd.SetArgs([]string{"describe", "hc-deploy"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("describe: %v\nstderr: %s", err, stderr.String())
+	}
+
+	out := stdout.String()
+	for _, want := range []string{"Healthcheck", "/health", "Env", "FOO", "Mounts", "scratch:/data", "Registry", "my-registry"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+}
+
+func newContainerDescribeHTTPServer(t *testing.T, deploy *verda.ContainerDeployment, status string) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("POST /oauth2/token", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"access_token": "test-token", "token_type": "Bearer",
+		})
+	})
+
+	mux.HandleFunc("GET /container-deployments/{name}", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(deploy)
+	})
+
+	mux.HandleFunc("GET /container-deployments/{name}/status", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(verda.ContainerDeploymentStatus{Status: status})
+	})
+
+	mux.HandleFunc("GET /container-deployments/{name}/scaling", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(&verda.ContainerScalingOptions{
+			MinReplicaCount: 0,
+			MaxReplicaCount: 3,
+		})
+	})
+
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	return srv
 }

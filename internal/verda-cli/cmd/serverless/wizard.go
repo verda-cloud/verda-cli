@@ -17,7 +17,6 @@ package serverless
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -147,7 +146,7 @@ func stepContainerHealthcheck(off *bool) wizard.Step {
 
 func stepContainerHealthcheckPath(path *string) wizard.Step {
 	return wizard.Step{
-		Name:        "healthcheck-path",
+		Name:        flagHealthcheckPath,
 		Description: "Healthcheck path",
 		Prompt:      wizard.TextInputPrompt,
 		Required:    false,
@@ -167,7 +166,7 @@ func stepContainerHealthcheckPath(path *string) wizard.Step {
 
 func stepContainerMinReplicas(target *int) wizard.Step {
 	return wizard.Step{
-		Name:        "min-replicas",
+		Name:        flagMinReplicas,
 		Description: "Min replicas (0 = scale-to-zero)",
 		Prompt:      wizard.TextInputPrompt,
 		Required:    false,
@@ -187,7 +186,7 @@ func stepContainerMinReplicas(target *int) wizard.Step {
 
 func stepContainerConcurrency(target *int) wizard.Step {
 	return wizard.Step{
-		Name:        "concurrency",
+		Name:        flagConcurrency,
 		Description: "Concurrent requests per replica (1 for image-gen, higher for LLMs)",
 		Prompt:      wizard.TextInputPrompt,
 		Required:    true,
@@ -220,7 +219,7 @@ func queuePresetChoices(withThreshold bool, customDesc string) []wizard.Choice {
 
 func stepContainerQueuePreset(target *string) wizard.Step {
 	return wizard.Step{
-		Name:        "queue-preset",
+		Name:        flagQueuePreset,
 		Description: "Queue-load preset",
 		Prompt:      wizard.SelectPrompt,
 		Required:    true,
@@ -239,9 +238,9 @@ func stepContainerQueueLoadCustom(target *int) wizard.Step {
 		Description: "Custom queue-load threshold (1..1000)",
 		Prompt:      wizard.TextInputPrompt,
 		Required:    true,
-		DependsOn:   []string{"queue-preset"},
+		DependsOn:   []string{flagQueuePreset},
 		ShouldSkip: func(c map[string]any) bool {
-			return c["queue-preset"] != presetCustom
+			return c[flagQueuePreset] != presetCustom
 		},
 		Default: func(_ map[string]any) any {
 			if *target > 0 {
@@ -269,20 +268,20 @@ func stepContainerQueueLoadCustom(target *int) wizard.Step {
 // --- Utilization triggers (CPU/GPU) ---
 
 func stepContainerCPUUtil(target *int) wizard.Step {
-	return utilThresholdStep("cpu-util", "CPU utilization trigger", target)
+	return utilThresholdStep(flagCPUUtil, "CPU utilization trigger", target)
 }
 
 func stepContainerGPUUtil(target *int) wizard.Step {
-	return utilThresholdStep("gpu-util", "GPU utilization trigger", target)
+	return utilThresholdStep(flagGPUUtil, "GPU utilization trigger", target)
 }
 
 // utilThresholdStep builds a step that asks "off | <threshold>" as a text
-// input. An empty value or "off" maps to 0; any integer in minUtilThreshold..maxUtilThreshold enables
+// input. An empty value or "off" maps to 0; any integer in 1..100 enables
 // the trigger at that threshold. Shared by CPU and GPU util steps.
 func utilThresholdStep(name, desc string, target *int) wizard.Step {
 	return wizard.Step{
 		Name:        name,
-		Description: fmt.Sprintf("%s (blank = off; else %d..%d)", desc, minUtilThreshold, maxUtilThreshold),
+		Description: desc + " (blank = off; else 1..100)",
 		Prompt:      wizard.TextInputPrompt,
 		Required:    false,
 		Default: func(_ map[string]any) any {
@@ -297,8 +296,8 @@ func utilThresholdStep(name, desc string, target *int) wizard.Step {
 				return nil
 			}
 			n, err := strconv.Atoi(s)
-			if err != nil || n < minUtilThreshold || n > maxUtilThreshold {
-				return fmt.Errorf("must be blank, 'off', or an integer in %d..%d", minUtilThreshold, maxUtilThreshold)
+			if err != nil || n < 1 || n > 100 {
+				return errors.New("must be blank, 'off', or an integer in 1..100")
 			}
 			return nil
 		},
@@ -325,9 +324,9 @@ func utilThresholdStep(name, desc string, target *int) wizard.Step {
 // --- Scale-up / scale-down delays ---
 
 func stepContainerScaleUpDelay(target *time.Duration) wizard.Step {
-	return durationStep("scale-up-delay", "Scale-up delay", target, 0, maxScalingDelay)
+	return durationStep(flagScaleUpDelay, "Scale-up delay", target, 0, maxScalingDelay)
 }
 
 func stepContainerScaleDownDelay(target *time.Duration) wizard.Step {
-	return durationStep("scale-down-delay", "Scale-down delay", target, defaultScaleDownDelay, maxScalingDelay)
+	return durationStep(flagScaleDownDelay, "Scale-down delay", target, defaultScaleDownDelay, maxScalingDelay)
 }

@@ -184,14 +184,50 @@ const (
 	envTypeSecret = "secret"
 )
 
+// Flag name constants shared across create, update, and wizard commands.
+const (
+	flagName            = "name"
+	flagImage           = "image"
+	flagSpot            = "spot"
+	flagNoSpot          = "no-spot"
+	flagCompute         = "compute"
+	flagComputeSize     = "compute-size"
+	flagRegistryCreds   = "registry-creds"
+	flagRegistryPublic  = "registry-public"
+	flagPort            = "port"
+	flagHealthcheckOff  = "healthcheck-off"
+	flagHealthcheckPort = "healthcheck-port"
+	flagHealthcheckPath = "healthcheck-path"
+	flagEnv             = "env"
+	flagEnvSecret       = "env-secret"
+	flagEntrypoint      = "entrypoint"
+	flagCmd             = "cmd"
+	flagSecretMount     = "secret-mount"
+	flagMinReplicas     = "min-replicas"
+	flagMaxReplicas     = "max-replicas"
+	flagConcurrency     = "concurrency"
+	flagQueuePreset     = "queue-preset"
+	flagQueueLoad       = "queue-load"
+	flagCPUUtil         = "cpu-util"
+	flagGPUUtil         = "gpu-util"
+	flagScaleUpDelay    = "scale-up-delay"
+	flagScaleDownDelay  = "scale-down-delay"
+	flagRequestTTL      = "request-ttl"
+	flagDeadline        = "deadline"
+	flagYes             = "yes"
+
+	outputTable = "table"
+
+	statusAccepted  = "accepted"
+	statusCompleted = "completed"
+)
+
 // isPromptCancel is a terse package-local alias for cmdutil.IsPromptCancel,
 // kept because the wizard/subflow call sites read better short. The sentinel
 // logic lives in cmdutil — do not reimplement it here.
 func isPromptCancel(err error) bool {
 	return cmdutil.IsPromptCancel(err)
 }
-
-const outputTable = "table"
 
 // isInteractiveTerminal: prompts read stdin and draw on stderr, so all three
 // streams must be terminals. A var so tests can drive the interactive paths.

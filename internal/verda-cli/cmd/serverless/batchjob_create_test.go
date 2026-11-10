@@ -116,3 +116,110 @@ func TestBatchjobCreate_AgentMode_NoCredsReturnsMissingFlags(t *testing.T) {
 		t.Fatalf("auth error leaked through — agent-mode flag check must run before VerdaClient: %v", err)
 	}
 }
+
+func TestBatchjobRequest_ValidationErrors(t *testing.T) {
+	cases := []struct {
+		name    string
+		mutate  func(*batchjobCreateOptions)
+		wantErr string
+	}{
+		{"empty name", func(o *batchjobCreateOptions) { o.Name = "" }, "required"},
+		{"invalid name", func(o *batchjobCreateOptions) { o.Name = "My_Endpoint" }, "lowercase"},
+		{"latest tag", func(o *batchjobCreateOptions) { o.Image = "nginx:latest" }, "latest"},
+		{"zero compute size", func(o *batchjobCreateOptions) { o.ComputeSize = 0 }, "compute-size"},
+		{"zero max replicas", func(o *batchjobCreateOptions) { o.MaxReplicas = 0 }, "max-replicas"},
+		{"bad port", func(o *batchjobCreateOptions) { o.Port = 99999 }, "port"},
+		{"deadline too short", func(o *batchjobCreateOptions) { o.Deadline = 1 * time.Second }, "between"},
+		{"deadline too long", func(o *batchjobCreateOptions) { o.Deadline = 8 * 24 * time.Hour }, "between"},
+		{"compute size too large", func(o *batchjobCreateOptions) { o.ComputeSize = 999 }, "compute-size"},
+		{"max replicas too large", func(o *batchjobCreateOptions) { o.MaxReplicas = 99999 }, "max-replicas"},
+		{"request ttl too long", func(o *batchjobCreateOptions) { o.RequestTTL = 8 * 24 * time.Hour }, "request-ttl"},
+		{"bad env format", func(o *batchjobCreateOptions) { o.Env = []string{"bad"} }, "KEY=VALUE"},
+		{"bad secret mount", func(o *batchjobCreateOptions) { o.SecretMounts = []string{"no-colon"} }, "SECRET:MOUNT_PATH"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			opts := validJobOpts()
+			tc.mutate(opts)
+			_, err := opts.request()
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("expected error containing %q, got %v", tc.wantErr, err)
+			}
+		})
+	}
+}
+
+func TestBatchjobRequest_Entrypoint(t *testing.T) {
+	opts := validJobOpts()
+	opts.Entrypoint = []string{"/bin/sh", "-c"}
+	opts.Cmd = []string{"train"}
+	req, err := opts.request()
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	ep := req.Containers[0].EntrypointOverrides
+	if ep == nil || !ep.Enabled {
+		t.Fatal("expected entrypoint overrides enabled")
+	}
+	if len(ep.Entrypoint) != 2 || ep.Entrypoint[0] != "/bin/sh" {
+		t.Errorf("entrypoint: got %v", ep.Entrypoint)
+	}
+	if len(ep.Cmd) != 1 || ep.Cmd[0] != "train" {
+		t.Errorf("cmd: got %v", ep.Cmd)
+	}
+}
+
+func TestBatchjobRequest_RegistryCreds(t *testing.T) {
+	opts := validJobOpts()
+	opts.RegistryCreds = "my-ghcr"
+	req, err := opts.request()
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	rs := req.ContainerRegistrySettings
+	if rs == nil || !rs.IsPrivate {
+		t.Fatalf("expected IsPrivate=true, got %+v", rs)
+	}
+	if rs.Credentials == nil || rs.Credentials.Name != "my-ghcr" {
+		t.Errorf("creds: got %+v", rs.Credentials)
+	}
+}
+
+func TestBatchjobRequest_EnvMix(t *testing.T) {
+	opts := validJobOpts()
+	opts.Env = []string{"HF_HOME=/data/.hf"}
+	opts.EnvSecret = []string{"TOKEN=my-secret"}
+	req, err := opts.request()
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	env := req.Containers[0].Env
+	if len(env) != 2 {
+		t.Fatalf("env count: got %d, want 2", len(env))
+	}
+	if env[0].Type != envTypePlain {
+		t.Errorf("env[0] type: got %q, want %q", env[0].Type, envTypePlain)
+	}
+	if env[1].Type != envTypeSecret {
+		t.Errorf("env[1] type: got %q, want %q", env[1].Type, envTypeSecret)
+	}
+}
+
+func TestBatchjobRequest_SecretMounts(t *testing.T) {
+	opts := validJobOpts()
+	opts.SecretMounts = []string{"api-key:/etc/secret/key"}
+	req, err := opts.request()
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	mounts := req.Containers[0].VolumeMounts
+	if len(mounts) != 2 {
+		t.Fatalf("expected 2 mounts (scratch + secret), got %d", len(mounts))
+	}
+	if mounts[0].Type != mountTypeScratch {
+		t.Errorf("mount[0]: expected scratch, got %q", mounts[0].Type)
+	}
+	if mounts[1].Type != mountTypeSecret || mounts[1].SecretName != "api-key" {
+		t.Errorf("mount[1]: got %+v", mounts[1])
+	}
+}

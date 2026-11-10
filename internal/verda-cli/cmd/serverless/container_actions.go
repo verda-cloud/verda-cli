@@ -85,7 +85,7 @@ func runContainerAction(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil
 
 	if f.AgentMode() {
 		_, _ = cmdutil.WriteStructured(ioStreams.Out, f.OutputFormat(), map[string]string{
-			"name": name, "action": verb, "status": "accepted",
+			"name": name, "action": verb, "status": statusAccepted,
 		})
 		return nil
 	}
