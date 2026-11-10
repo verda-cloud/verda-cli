@@ -60,7 +60,7 @@ func newTestRoot() *cobra.Command {
 
 func generate(t *testing.T) map[string]string {
 	t.Helper()
-	files, err := Generate(newTestRoot())
+	files, err := Generate(newTestRoot(), "")
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
@@ -106,6 +106,34 @@ func TestGenerate_Index(t *testing.T) {
 	}
 }
 
+func TestGenerate_IndexNamesRelease(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		version, want, unwanted string
+	}{
+		{version: "v1.2.3", want: "This reference matches verda v1.2.3.", unwanted: "matches the latest one"},
+		{version: "", want: "regenerated at each release and matches the latest one", unwanted: "matches verda v"},
+	}
+	for _, tt := range tests {
+		files, err := Generate(newTestRoot(), tt.version)
+		if err != nil {
+			t.Fatalf("Generate(%q): %v", tt.version, err)
+		}
+		index := string(files[IndexFile])
+		for _, want := range []string{tt.want, olderReleases} {
+			if !strings.Contains(index, want) {
+				t.Errorf("version %q: index missing %q; got:\n%s", tt.version, want, index)
+			}
+		}
+		if strings.Contains(index, tt.unwanted) {
+			t.Errorf("version %q: index must not contain %q", tt.version, tt.unwanted)
+		}
+		if strings.Contains(string(files["reference/vm.md"]), "v1.2.3") {
+			t.Errorf("version %q: only the index names the release", tt.version)
+		}
+	}
+}
+
 // verda --help lists a group's commands as declared; the index must match, not sort them.
 func TestGenerate_IndexKeepsDeclarationOrder(t *testing.T) {
 	t.Parallel()
@@ -118,7 +146,7 @@ func TestGenerate_IndexKeepsDeclarationOrder(t *testing.T) {
 	groups.Add(root)
 	cmdutil.SetUsageTemplate(root, groups)
 
-	files, err := Generate(root)
+	files, err := Generate(root, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,11 +198,11 @@ func TestGenerate_LongText(t *testing.T) {
 
 func TestGenerate_Deterministic(t *testing.T) {
 	t.Parallel()
-	first, err := Generate(newTestRoot())
+	first, err := Generate(newTestRoot(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := Generate(newTestRoot())
+	second, err := Generate(newTestRoot(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,11 +215,11 @@ func TestGenerate_Deterministic(t *testing.T) {
 func TestGenerate_IdempotentOnSameRoot(t *testing.T) {
 	t.Parallel()
 	root := newTestRoot()
-	first, err := Generate(root)
+	first, err := Generate(root, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := Generate(root)
+	second, err := Generate(root, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +233,7 @@ func TestGenerate_UsageShowsInheritedFlags(t *testing.T) {
 	root := &cobra.Command{Use: "verda"}
 	root.PersistentFlags().String("output", "table", "Output format")
 	root.AddCommand(&cobra.Command{Use: "locations", Short: "List locations", Run: func(*cobra.Command, []string) {}})
-	files, err := Generate(root)
+	files, err := Generate(root, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -227,7 +255,7 @@ func registryLsSection(t *testing.T, addFlags func(*pflag.FlagSet)) string {
 	registry.AddCommand(ls)
 	root.AddCommand(registry)
 
-	files, err := Generate(root)
+	files, err := Generate(root, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -276,7 +304,7 @@ func TestGenerate_RejectsANSI(t *testing.T) {
 	t.Parallel()
 	root := &cobra.Command{Use: "verda"}
 	root.AddCommand(&cobra.Command{Use: "status", Short: "\x1b[1mStatus\x1b[0m", Run: func(*cobra.Command, []string) {}})
-	if _, err := Generate(root); err == nil {
+	if _, err := Generate(root, ""); err == nil {
 		t.Error("expected an error for ANSI escapes in help text")
 	}
 }

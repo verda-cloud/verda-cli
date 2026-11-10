@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Pre-commit hook — checks generated command docs, then fast checks on staged Go files.
+# Pre-commit hook — fast checks on staged Go files.
 #
 # Install (once per clone):
 #   make hooks.install
@@ -10,18 +10,7 @@
 set -euo pipefail
 
 STAGED_GO=$(git diff --cached --name-only --diff-filter=ACM -- '*.go' || true)
-# Generated docs go stale on any Go change (deletions included) or a hand edit.
-DOCS_TRIGGER=$(git diff --cached --name-only -- '*.go' docs/commands.md docs/reference || true)
-if [ -z "$DOCS_TRIGGER" ]; then
-	exit 0
-fi
-
-printf "pre-commit: checking generated command docs ...\n"
-printf "  make docs.check\n"
-make --no-print-directory docs.check
-
 if [ -z "$STAGED_GO" ]; then
-	printf "pre-commit: ok.\n"
 	exit 0
 fi
 

@@ -13,7 +13,7 @@
 // limitations under the License.
 
 // Command gen-docs writes docs/commands.md and docs/reference/ from the verda
-// command tree. Run it via `make docs`; `make docs.check` fails when stale.
+// command tree. The release job runs it via `make docs VERSION=vX.Y.Z`.
 package main
 
 import (
@@ -23,6 +23,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -31,16 +32,22 @@ import (
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/docgen"
 )
 
+var releaseVersion = regexp.MustCompile(`^v\d+\.\d+\.\d+$`)
+
 func main() {
 	out := flag.String("out", "docs", "Docs directory to write commands.md and reference/ into")
+	version := flag.String("version", "", "Release the docs match, e.g. v1.2.3 (optional)")
 	flag.Parse()
-	if err := run(*out); err != nil {
+	if err := run(*out, *version); err != nil {
 		fmt.Fprintln(os.Stderr, "gen-docs:", err)
 		os.Exit(1)
 	}
 }
 
-func run(out string) error {
+func run(out, version string) error {
+	if version != "" && !releaseVersion.MatchString(version) {
+		return fmt.Errorf("-version %q: want vX.Y.Z", version)
+	}
 	cleanup, err := isolateEnv()
 	if err != nil {
 		return err
@@ -48,7 +55,7 @@ func run(out string) error {
 	defer cleanup()
 	var discard bytes.Buffer
 	root, _ := cmd.NewRootCommand(cmdutil.IOStreams{In: &bytes.Buffer{}, Out: &discard, ErrOut: &discard})
-	files, err := docgen.Generate(root)
+	files, err := docgen.Generate(root, version)
 	if err != nil {
 		return err
 	}
@@ -69,7 +76,7 @@ func run(out string) error {
 }
 
 // isolateEnv: no inherited VERDA_* (batchjob gate off) and a throwaway home, so building
-// the tree can't touch a real config dir; docs.check catches any home-derived help text.
+// the tree can't touch a real config dir; TestRun catches any home-derived help text.
 func isolateEnv() (cleanup func(), err error) {
 	for _, kv := range os.Environ() {
 		if name, _, _ := strings.Cut(kv, "="); strings.HasPrefix(name, "VERDA_") {

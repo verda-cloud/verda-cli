@@ -303,11 +303,11 @@ _, _ = fmt.Fprint(ioStreams.Out, content)
 
 The pager auto-detects: prints directly if content fits terminal, otherwise shows scrollable viewport.
 
-### 13. Regenerate the Command Reference
+### 13. Command Reference Text
 
-`docs/commands.md` and `docs/reference/` are generated from `Use`/`Short`/`Long`/`Example` and flags. Run
-`make docs` after adding or changing a command and commit the result; `make docs.check` (CI and pre-commit)
-fails while they are stale. Never hand-edit those files — put user-facing text in the command definition.
+`docs/commands.md` and `docs/reference/` are generated from `Use`/`Short`/`Long`/`Example` and flags, and the
+release job regenerates and commits them, so the published docs match the released binary. Put user-facing text
+in the command definition. `make docs` previews the output locally; leave the generated files out of your PR.
 
 ## Dependencies
 
