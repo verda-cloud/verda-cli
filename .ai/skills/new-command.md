@@ -307,7 +307,8 @@ The pager auto-detects: prints directly if content fits terminal, otherwise show
 
 `docs/commands.md` and `docs/reference/` are generated from `Use`/`Short`/`Long`/`Example` and flags, and the
 release job regenerates and commits them, so the published docs match the released binary. Put user-facing text
-in the command definition. `make docs` previews the output locally; leave the generated files out of your PR.
+in the command definition and leave the generated files out of your PR; `TestRun` in `cmd/gen-docs` checks the
+generator on every `make test`.
 
 ## Dependencies
 

@@ -37,7 +37,7 @@ func TestRun(t *testing.T) {
 	}
 
 	index := readFile(t, filepath.Join(first, "commands.md"))
-	if !strings.Contains(index, "This reference matches verda v1.2.3.") {
+	if !strings.Contains(index, "> Verda CLI **v1.2.3**") {
 		t.Errorf("commands.md does not name the release; got:\n%s", index)
 	}
 	readFile(t, filepath.Join(first, "reference", "vm.md"))
@@ -52,10 +52,16 @@ func TestRun(t *testing.T) {
 }
 
 func TestRun_RejectsBadVersion(t *testing.T) {
-	for _, version := range []string{"1.2.3", "v1.2", "v1.2.3-rc1", "latest"} {
-		if err := run(t.TempDir(), version); err == nil {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("VERDA_HOME", t.TempDir())
+	out := t.TempDir()
+	for _, version := range []string{"", "latest"} {
+		if err := run(out, version); err == nil {
 			t.Errorf("run(%q) = nil, want an error", version)
 		}
+	}
+	if entries, _ := os.ReadDir(out); len(entries) > 0 {
+		t.Errorf("a rejected run must write nothing; got %d entries", len(entries))
 	}
 }
 

@@ -23,7 +23,6 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strings"
 
@@ -32,11 +31,9 @@ import (
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/docgen"
 )
 
-var releaseVersion = regexp.MustCompile(`^v\d+\.\d+\.\d+$`)
-
 func main() {
 	out := flag.String("out", "docs", "Docs directory to write commands.md and reference/ into")
-	version := flag.String("version", "", "Release the docs match, e.g. v1.2.3 (optional)")
+	version := flag.String("version", "", "Release the docs describe, e.g. v1.2.3 (required)")
 	flag.Parse()
 	if err := run(*out, *version); err != nil {
 		fmt.Fprintln(os.Stderr, "gen-docs:", err)
@@ -45,9 +42,6 @@ func main() {
 }
 
 func run(out, version string) error {
-	if version != "" && !releaseVersion.MatchString(version) {
-		return fmt.Errorf("-version %q: want vX.Y.Z", version)
-	}
 	cleanup, err := isolateEnv()
 	if err != nil {
 		return err

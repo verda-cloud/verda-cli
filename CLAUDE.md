@@ -9,7 +9,7 @@ make build        # Build binary to ./bin/verda
 make test         # Run all tests (go test -race)
 make lint         # Lint only (golangci-lint); also run by pre-commit hooks
 make fix          # Apply go fix modernizers; CI runs `make fix.check`
-make docs         # Preview docs/commands.md + docs/reference/; the release job regenerates and commits them
+make docs VERSION=vX.Y.Z  # Release job only: generates docs/commands.md + docs/reference/ for that version
 make pre-commit   # Full pre-commit suite
 ```
 

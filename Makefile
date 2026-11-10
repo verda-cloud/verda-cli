@@ -47,9 +47,6 @@ fix: ## Apply go fix modernizers
 fix.check: ## Fail if go fix has pending modernizations (CI)
 	@$(GOFIX) -diff ./... || { echo "Pending go fix changes. Run 'make fix'"; exit 1; }
 
-docs: ## Regenerate docs/commands.md and docs/reference/ (release job passes VERSION=vX.Y.Z)
-	@go run ./cmd/gen-docs -out docs $(if $(VERSION),-version $(VERSION))
-
 test: ## Run all tests (with race detector)
 	@go test -race -count=1 ./...
 
@@ -77,6 +74,12 @@ endif
 
 changelog.unreleased: ## Regenerate CHANGELOG.md with pending commits under [Unreleased]
 	@git-cliff -o CHANGELOG.md
+
+docs: ## Generate docs/commands.md and docs/reference/ for a release (requires VERSION, e.g. make docs VERSION=v1.0.0)
+ifndef VERSION
+	$(error VERSION is required. Usage: make docs VERSION=v1.0.0)
+endif
+	@go run ./cmd/gen-docs -out docs -version $(VERSION)
 
 ## Git Hooks ---------------------------------------------------------------
 
