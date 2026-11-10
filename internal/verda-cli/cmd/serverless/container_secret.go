@@ -142,7 +142,6 @@ func newCmdSecretCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.C
 			defer cancel()
 
 			req := &verda.CreateSecretRequest{Name: name, Value: value}
-			cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), "Request payload:", req)
 
 			if err := cmdutil.RunWithSpinner(ctx, f.Status(), "Creating secret...", func(ctx context.Context) error {
 				return client.ContainerDeployments.CreateSecret(ctx, req)

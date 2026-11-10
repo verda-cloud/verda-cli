@@ -152,14 +152,14 @@ func TestPrintContainerTable(t *testing.T) {
 	deployments := []verda.ContainerDeployment{
 		{
 			Name:            "my-api",
-			EndpointBaseURL: "https://my-api.run.verda.cloud",
+			EndpointBaseURL: "https://my-api.run.verda.local",
 			IsSpot:          false,
 			Compute:         &verda.ContainerCompute{Name: "RTX4500Ada", Size: 1},
 			CreatedAt:       time.Date(2026, 1, 15, 10, 30, 0, 0, time.UTC),
 		},
 		{
 			Name:            "worker",
-			EndpointBaseURL: "https://worker.run.verda.cloud",
+			EndpointBaseURL: "https://worker.run.verda.local",
 			IsSpot:          true,
 			Compute:         &verda.ContainerCompute{Name: "CPUNode", Size: 4},
 			CreatedAt:       time.Date(2026, 2, 20, 8, 0, 0, 0, time.UTC),

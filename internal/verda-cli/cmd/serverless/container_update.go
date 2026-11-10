@@ -220,7 +220,10 @@ func runContainerUpdate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil
 		cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), "Scaling update request:", scalingReq)
 	}
 
-	if !f.AgentMode() && !opts.Yes {
+	if f.AgentMode() && !opts.Yes {
+		return cmdutil.NewConfirmationRequiredError("update")
+	}
+	if !opts.Yes {
 		renderContainerUpdateSummary(ioStreams.ErrOut, name, cmd, opts, current)
 		confirmed, cerr := f.Prompter().Confirm(cmd.Context(), fmt.Sprintf("Update %s?", name))
 		if cerr != nil && !isPromptCancel(cerr) {
@@ -471,14 +474,23 @@ func buildContainerScalingUpdateRequest(cmd *cobra.Command, opts *containerUpdat
 		req.ScalingTriggers = triggers
 	}
 	if cmd.Flags().Changed(flagScaleUpDelay) {
+		if opts.ScaleUpDelay < 0 || opts.ScaleUpDelay > maxScalingDelay {
+			return nil, fmt.Errorf("--scale-up-delay must be 0s..%s", maxScalingDelay)
+		}
 		delay := int(opts.ScaleUpDelay.Seconds())
 		req.ScaleUpPolicy = &verda.ScalingPolicy{DelaySeconds: delay}
 	}
 	if cmd.Flags().Changed(flagScaleDownDelay) {
+		if opts.ScaleDownDelay < 0 || opts.ScaleDownDelay > maxScalingDelay {
+			return nil, fmt.Errorf("--scale-down-delay must be 0s..%s", maxScalingDelay)
+		}
 		delay := int(opts.ScaleDownDelay.Seconds())
 		req.ScaleDownPolicy = &verda.ScalingPolicy{DelaySeconds: delay}
 	}
 	if cmd.Flags().Changed(flagRequestTTL) {
+		if opts.RequestTTL < 0 || opts.RequestTTL > maxContainerRequestTTL {
+			return nil, fmt.Errorf("--request-ttl must be 0s..%s", maxContainerRequestTTL)
+		}
 		ttl := int(opts.RequestTTL.Seconds())
 		req.QueueMessageTTLSeconds = &ttl
 	}
@@ -506,7 +518,7 @@ func mergeScalingTriggers(cmd *cobra.Command, opts *containerUpdateOptions, curr
 		if opts.CPUUtil > 0 {
 			t.CPUUtilization = &verda.UtilizationTrigger{Enabled: true, Threshold: opts.CPUUtil}
 		} else {
-			t.CPUUtilization = nil
+			t.CPUUtilization = &verda.UtilizationTrigger{}
 		}
 	}
 	if cmd.Flags().Changed(flagGPUUtil) {
@@ -516,7 +528,7 @@ func mergeScalingTriggers(cmd *cobra.Command, opts *containerUpdateOptions, curr
 		if opts.GPUUtil > 0 {
 			t.GPUUtilization = &verda.UtilizationTrigger{Enabled: true, Threshold: opts.GPUUtil}
 		} else {
-			t.GPUUtilization = nil
+			t.GPUUtilization = &verda.UtilizationTrigger{}
 		}
 	}
 

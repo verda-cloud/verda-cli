@@ -156,7 +156,10 @@ func runBatchjobUpdate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.
 
 	cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), "Update request:", req)
 
-	if !f.AgentMode() && !opts.Yes {
+	if f.AgentMode() && !opts.Yes {
+		return cmdutil.NewConfirmationRequiredError("update")
+	}
+	if !opts.Yes {
 		renderBatchjobUpdateSummary(ioStreams.ErrOut, name, cmd, opts, current)
 		confirmed, cerr := f.Prompter().Confirm(cmd.Context(), fmt.Sprintf("Update %s?", name))
 		if cerr != nil && !isPromptCancel(cerr) {

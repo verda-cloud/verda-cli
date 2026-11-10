@@ -598,8 +598,11 @@ func TestMergeScalingTriggers_CPUUtilDisable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got.CPUUtilization != nil {
-		t.Errorf("CPUUtilization: want nil (disabled), got %+v", got.CPUUtilization)
+	if got.CPUUtilization == nil {
+		t.Fatal("CPUUtilization: want {Enabled:false}, got nil")
+	}
+	if got.CPUUtilization.Enabled || got.CPUUtilization.Threshold != 0 {
+		t.Errorf("CPUUtilization: want {Enabled:false, Threshold:0}, got %+v", got.CPUUtilization)
 	}
 }
 
@@ -640,8 +643,11 @@ func TestMergeScalingTriggers_GPUUtilDisable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got.GPUUtilization != nil {
-		t.Errorf("GPUUtilization: want nil (disabled), got %+v", got.GPUUtilization)
+	if got.GPUUtilization == nil {
+		t.Fatal("GPUUtilization: want {Enabled:false}, got nil")
+	}
+	if got.GPUUtilization.Enabled || got.GPUUtilization.Threshold != 0 {
+		t.Errorf("GPUUtilization: want {Enabled:false, Threshold:0}, got %+v", got.GPUUtilization)
 	}
 }
 
