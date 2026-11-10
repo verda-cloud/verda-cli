@@ -194,7 +194,9 @@ Multiple profiles are supported — switch with `verda auth use PROFILE`.
 
 | Doc | Description |
 |-----|-------------|
-| [Command Reference](docs/commands.md) | Full list of commands, flags, and examples |
+| [Command Reference](docs/commands.md) | Full list of commands, flags, and examples (regenerated at each release) |
+| [Authentication](docs/guides/authentication.md) | Credential resolution order and environment variables |
+| [Scripting and Agent Mode](docs/guides/scripting.md) | Structured output, `--wait`, and `--agent` mode |
 | [Agent Error Format](docs/agent-errors.md) | Structured error specification for `--agent` mode |
 
 ## Contributing

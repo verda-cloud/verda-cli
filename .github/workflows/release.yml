@@ -56,16 +56,23 @@ jobs:
           # which is the bug this fixes. --tag labels the unreleased section with VERSION.
           git-cliff --unreleased --tag ${{ github.event.inputs.version }} --strip header -o RELEASE_NOTES.md
 
-      - name: Commit changelog and tag release
+      # Before the commit/tag step: the tag must carry docs that match its code,
+      # and a generator failure must stop the release before anything is pushed.
+      - name: Generate command docs
+        run: make docs VERSION=${{ github.event.inputs.version }}
+
+      - name: Commit changelog and docs, tag release
         run: |
           VERSION="${{ github.event.inputs.version }}"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git remote set-url origin https://x-access-token:${{ secrets.RELEASE_TOKEN }}@github.com/${{ github.repository }}
-          git add CHANGELOG.md
-          # [skip ci]: the changelog already reflects this release; no need to
+          git add CHANGELOG.md docs/commands.md
+          # -A: pages of removed commands are deleted, not left behind.
+          git add -A docs/reference
+          # [skip ci]: changelog and docs already reflect this release; no need to
           # re-trigger the Update Changelog workflow on this push.
-          git commit -m "chore(release): update changelog for ${VERSION} [skip ci]"
+          git commit -m "chore(release): update changelog and command docs for ${VERSION} [skip ci]"
           git tag "${VERSION}"
           git push origin main --tags
 

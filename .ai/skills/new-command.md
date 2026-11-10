@@ -303,6 +303,13 @@ _, _ = fmt.Fprint(ioStreams.Out, content)
 
 The pager auto-detects: prints directly if content fits terminal, otherwise shows scrollable viewport.
 
+### 13. Command Reference Text
+
+`docs/commands.md` and `docs/reference/` are generated from `Use`/`Short`/`Long`/`Example` and flags, and the
+release job regenerates and commits them, so the published docs match the released binary. Put user-facing text
+in the command definition and leave the generated files out of your PR; `TestRun` in `cmd/gen-docs` checks the
+generator on every `make test`.
+
 ## Dependencies
 
 - `cmdutil "github/verda-cloud/verda-cli/internal/verda-cli/cmd/util"` -- Factory, IOStreams, DebugJSON, helpers

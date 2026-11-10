@@ -58,7 +58,7 @@ Run `verda auth --help` for the full order in which flags, environment
 variables, `~/.verda/config.yaml` and the credentials file are checked,
 including how `login`, `use`, registry and object-storage differ. The
 environment variables are listed in
-[docs/commands.md](../../../../docs/commands.md#environment-variables).
+[the authentication guide](../../../../docs/guides/authentication.md#environment-variables).
 
 ### Explicit Profile Selection
 

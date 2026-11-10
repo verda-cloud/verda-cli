@@ -7,7 +7,7 @@ GOLANGCI_LINT := GOTOOLCHAIN=go$(GO_VERSION) go run github.com/golangci/golangci
 # Toolchain pinned because each Go release adds or removes fixers; the integration tag brings tests/integration into scope.
 GOFIX := GOTOOLCHAIN=go$(GO_VERSION) go fix -tags=integration
 
-.PHONY: all build clean run.sandbox lint lint.fix security fix fix.check test test.integration test-s3-integration fmt changelog changelog.unreleased hooks.install pre-commit help
+.PHONY: all build clean run.sandbox lint lint.fix security fix fix.check docs test test.integration test-s3-integration fmt changelog changelog.unreleased hooks.install pre-commit help
 
 ## Build -------------------------------------------------------------------
 
@@ -74,6 +74,12 @@ endif
 
 changelog.unreleased: ## Regenerate CHANGELOG.md with pending commits under [Unreleased]
 	@git-cliff -o CHANGELOG.md
+
+docs: ## Generate docs/commands.md and docs/reference/ for a release (requires VERSION, e.g. make docs VERSION=v1.0.0)
+ifndef VERSION
+	$(error VERSION is required. Usage: make docs VERSION=v1.0.0)
+endif
+	@go run ./cmd/gen-docs -version $(VERSION)
 
 ## Git Hooks ---------------------------------------------------------------
 

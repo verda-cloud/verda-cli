@@ -41,3 +41,40 @@ func TestSetUsageTemplate_TagAnnotation(t *testing.T) {
 		t.Errorf("untagged command must not get a tag; got:\n%s", tmpl)
 	}
 }
+
+func TestTagSuffix(t *testing.T) {
+	t.Parallel()
+	tests := map[string]struct {
+		cmd  *cobra.Command
+		want string
+	}{
+		"tagged":            {&cobra.Command{Use: "s3", Annotations: map[string]string{TagAnnotation: "beta"}}, " (beta)"},
+		"other annotations": {&cobra.Command{Use: "vm", Annotations: map[string]string{"x": "y"}}, ""},
+		"no annotations":    {&cobra.Command{Use: "vm"}, ""},
+	}
+	for name, tc := range tests {
+		if got := TagSuffix(tc.cmd); got != tc.want {
+			t.Errorf("%s: TagSuffix = %q, want %q", name, got, tc.want)
+		}
+	}
+}
+
+func TestCommandGroupsAdd_NativeGroups(t *testing.T) {
+	t.Parallel()
+	auth := &cobra.Command{Use: "auth"}
+	vm := &cobra.Command{Use: "vm"}
+	root := &cobra.Command{Use: "verda"}
+	groups := CommandGroups{
+		{Message: "Auth Commands:", Commands: []*cobra.Command{auth}},
+		{Message: "VM Commands:", Commands: []*cobra.Command{vm}},
+	}
+	groups.Add(root)
+
+	got := root.Groups()
+	if len(got) != 2 || got[0].Title != "Auth Commands:" || got[1].Title != "VM Commands:" {
+		t.Fatalf("groups should keep declared order; got %+v", got)
+	}
+	if auth.GroupID != got[0].ID || vm.GroupID != got[1].ID {
+		t.Errorf("commands should carry their group ID; auth=%q vm=%q", auth.GroupID, vm.GroupID)
+	}
+}
