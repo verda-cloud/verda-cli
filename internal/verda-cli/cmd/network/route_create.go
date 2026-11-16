@@ -198,9 +198,9 @@ func chooseGateway(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOS
 		}
 	}
 	if ref != "" {
-		inst := findInstance(live, ref)
-		if inst == nil {
-			return nil, cmdutil.NewNotFoundError("instance", ref)
+		inst, err := findInstance(live, ref)
+		if err != nil {
+			return nil, err
 		}
 		if problem := gatewayProblem(inst, network, subnet); problem != "" {
 			return nil, cmdutil.NewValidationError(flagInstance, fmt.Sprintf("%s cannot be the gateway of subnet %s: %s", inst.Hostname, subnet.Name, problem))
@@ -238,18 +238,31 @@ func chooseGateway(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOS
 	return eligible[idx], nil
 }
 
-func findInstance(instances []verda.Instance, ref string) *verda.Instance {
+// findInstance matches an ID, else a hostname. Hostnames are not unique: several matches are an error.
+func findInstance(instances []verda.Instance, ref string) (*verda.Instance, error) {
 	for i := range instances {
 		if instances[i].ID == ref {
-			return &instances[i]
+			return &instances[i], nil
 		}
 	}
+	var matches []*verda.Instance
 	for i := range instances {
 		if instances[i].Hostname == ref {
-			return &instances[i]
+			matches = append(matches, &instances[i])
 		}
 	}
-	return nil
+	switch len(matches) {
+	case 0:
+		return nil, cmdutil.NewNotFoundError("instance", ref)
+	case 1:
+		return matches[0], nil
+	}
+	ids := make([]string, len(matches))
+	for i, m := range matches {
+		ids[i] = m.ID
+	}
+	return nil, cmdutil.NewValidationError(flagInstance,
+		fmt.Sprintf("%d instances are named %q (%s); pass the instance ID", len(matches), ref, strings.Join(ids, ", ")))
 }
 
 func confirmRouteMove(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *routeCreateOptions, subnet *verda.Subnet, existing *verda.Route, gw *verda.Instance) (bool, error) {

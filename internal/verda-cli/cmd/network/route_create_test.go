@@ -197,3 +197,23 @@ func TestRouteCreatePickerListsEligibleOnly(t *testing.T) {
 		t.Errorf("index 2 is Cancel: err = %v, posts = %d", err, len(postBodies(api)))
 	}
 }
+
+// Hostnames are not unique: two matches are refused and the IDs are listed.
+func TestRouteCreateAmbiguousHostname(t *testing.T) {
+	t.Parallel()
+	api := gatewayAPI()
+	api.addInstance("i-gw3", "gw-2", "FIN-03", "pn_a", "sn_a1", "5.5.5.5")
+	client := newFakeClient(t, api)
+	_, _, err := runNetwork(t, agentFactory(client), "route", "create", "--subnet", "sn_a1", "--instance", "gw-2")
+	if code := agentErrorCode(err); code != "VALIDATION_ERROR" || !strings.Contains(err.Error(), "i-gw2, i-gw3") {
+		t.Fatalf("err = %v, want VALIDATION_ERROR listing both IDs", err)
+	}
+	if len(postBodies(api)) != 0 {
+		t.Error("no POST expected")
+	}
+
+	_, _, err = runNetwork(t, agentFactory(client), "route", "create", "--subnet", "sn_a1", "--instance", "i-gw3")
+	if err != nil {
+		t.Errorf("by ID: %v", err)
+	}
+}
