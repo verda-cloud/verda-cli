@@ -50,9 +50,11 @@ fix.check: ## Fail if go fix has pending modernizations (CI)
 test: ## Run all tests (with race detector)
 	@go test -race -count=1 ./...
 
+INTEGRATION_TIMEOUT ?= 5m
+
 test.integration: build ## Run integration tests (requires staging credentials in [test] profile)
 	@cp $(OUTPUT_DIR)/verda /usr/local/bin/verda-test
-	@VERDA_BIN=$(CURDIR)/$(OUTPUT_DIR)/verda go test -tags=integration -v -count=1 -timeout=5m ./tests/integration/
+	@VERDA_BIN=$(CURDIR)/$(OUTPUT_DIR)/verda go test -tags=integration -v -count=1 -timeout=$(INTEGRATION_TIMEOUT) ./tests/integration/
 
 test-s3-integration: build ## Run S3 data-plane smoke test against a live endpoint (requires VERDA_S3_* env vars)
 	@VERDA_BIN=$(CURDIR)/$(OUTPUT_DIR)/verda VERDA_S3_INTEGRATION=1 \
