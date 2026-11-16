@@ -118,11 +118,12 @@ func renderNetwork(out io.Writer, v *networkDescribeView) error {
 		return nil
 	}
 	_, _ = fmt.Fprintln(out, "Subnets:")
-	return writeSubnetTable(out, v.Subnets, false)
+	return writeSubnetTable(out, v.Subnets, nil)
 }
 
-// writeSubnetTable prints subnets; withNetwork adds a NETWORK column holding NetworkID.
-func writeSubnetTable(out io.Writer, subnets []cmdutil.SubnetView, withNetwork bool) error {
+// writeSubnetTable prints subnets; non-nil networkNames (ID → name) adds a NETWORK column.
+func writeSubnetTable(out io.Writer, subnets []cmdutil.SubnetView, networkNames map[string]string) error {
+	withNetwork := networkNames != nil
 	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	header := "NAME\tID\tLOCATION\tCIDR\tDEFAULT\tIPS USED/TOTAL\tROUTE"
 	if withNetwork {
@@ -132,7 +133,7 @@ func writeSubnetTable(out io.Writer, subnets []cmdutil.SubnetView, withNetwork b
 	for i := range subnets {
 		s := &subnets[i]
 		if withNetwork {
-			_, _ = fmt.Fprintf(tw, "%s\t", s.NetworkID)
+			_, _ = fmt.Fprintf(tw, "%s\t", networkNames[s.NetworkID])
 		}
 		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%d/%d\t%s\n",
 			s.Name, s.ID, s.Location, s.CIDR, defaultColumn(s.IsDefault), s.UsedIPCount, s.TotalIPCount, routeColumn(s.DefaultRouteInstance))
