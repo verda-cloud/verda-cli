@@ -46,6 +46,7 @@ func NewCmdRoute(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command 
 	}
 	cmd.AddCommand(
 		NewCmdRouteList(f, ioStreams),
+		NewCmdRouteCreate(f, ioStreams),
 		NewCmdRouteDelete(f, ioStreams),
 	)
 	return cmd
