@@ -1,0 +1,164 @@
+// Copyright 2026 Verda Cloud Oy
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package util
+
+import (
+	"encoding/binary"
+	"errors"
+	"fmt"
+	"net/netip"
+	"strings"
+
+	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
+)
+
+// MaxSubnetBits is the smallest subnet the API accepts (/29).
+const MaxSubnetBits = 29
+
+// DefaultSubnetPool is where FreeSubnetCIDR looks for a subnet range by default.
+var DefaultSubnetPool = netip.MustParsePrefix("10.0.0.0/16")
+
+// DefaultSubnetBits is the size of a suggested subnet (/24).
+const DefaultSubnetBits = 24
+
+var privateRanges = []netip.Prefix{
+	netip.MustParsePrefix("10.0.0.0/8"),
+	netip.MustParsePrefix("172.16.0.0/12"),
+	netip.MustParsePrefix("192.168.0.0/16"),
+}
+
+var (
+	// ErrNoSubnetInLocation: the network has no subnet in the location.
+	ErrNoSubnetInLocation = errors.New("no subnet in this location")
+	// ErrAmbiguousSubnet: several subnets in the location and none is the default.
+	ErrAmbiguousSubnet = errors.New("several subnets in this location and none is the default")
+	// ErrNoFreeSubnet: every block of the requested size overlaps a taken range.
+	ErrNoFreeSubnet = errors.New("no free subnet range")
+)
+
+// ValidateSubnetCIDR mirrors the API rules: canonical IPv4, /29 or larger, inside an RFC 1918 range.
+func ValidateSubnetCIDR(s string) (netip.Prefix, error) {
+	p, err := netip.ParsePrefix(strings.TrimSpace(s))
+	if err != nil || !p.Addr().Is4() {
+		return netip.Prefix{}, fmt.Errorf("%q is not an IPv4 CIDR (example: 10.0.1.0/24)", s)
+	}
+	if p != p.Masked() {
+		return netip.Prefix{}, fmt.Errorf("%q is not canonical; use %s", s, p.Masked())
+	}
+	if p.Bits() > MaxSubnetBits {
+		return netip.Prefix{}, fmt.Errorf("%q is too small; the smallest subnet is /%d", s, MaxSubnetBits)
+	}
+	for _, r := range privateRanges {
+		if r.Bits() <= p.Bits() && r.Contains(p.Addr()) {
+			return p, nil
+		}
+	}
+	return netip.Prefix{}, fmt.Errorf("%q must be inside 10.0.0.0/8, 172.16.0.0/12 or 192.168.0.0/16", s)
+}
+
+// PrefixesOverlap reports whether two prefixes share any address.
+func PrefixesOverlap(a, b netip.Prefix) bool {
+	return a.Overlaps(b)
+}
+
+// FreeSubnetCIDR returns the first /bits block inside within that overlaps none of taken.
+func FreeSubnetCIDR(taken []netip.Prefix, within netip.Prefix, bits int) (netip.Prefix, error) {
+	if !within.IsValid() || !within.Addr().Is4() {
+		return netip.Prefix{}, fmt.Errorf("range %q is not an IPv4 CIDR", within)
+	}
+	if bits < within.Bits() || bits > 32 {
+		return netip.Prefix{}, fmt.Errorf("a /%d block does not fit in %s", bits, within)
+	}
+	within = within.Masked()
+	size := uint64(1) << (32 - bits)
+	start := ipv4ToUint(within.Addr())
+	end := start + (uint64(1) << (32 - within.Bits()))
+	for addr := start; addr < end; {
+		block := netip.PrefixFrom(uintToIPv4(addr), bits)
+		next := addr + size
+		free := true
+		for _, t := range taken {
+			if !t.IsValid() || !t.Addr().Is4() || !t.Overlaps(block) {
+				continue
+			}
+			free = false
+			// Skip past a taken range larger than one block.
+			if tEnd := ipv4ToUint(t.Masked().Addr()) + (uint64(1) << (32 - t.Bits())); tEnd > next {
+				next = (tEnd + size - 1) / size * size
+			}
+		}
+		if free {
+			return block, nil
+		}
+		addr = next
+	}
+	return netip.Prefix{}, fmt.Errorf("%w: every /%d in %s is taken", ErrNoFreeSubnet, bits, within)
+}
+
+// SubnetPrefixes parses the CIDRs of subnets; unparsable ones are skipped.
+func SubnetPrefixes(subnets []verda.Subnet) []netip.Prefix {
+	out := make([]netip.Prefix, 0, len(subnets))
+	for i := range subnets {
+		if p, err := netip.ParsePrefix(subnets[i].CIDR); err == nil {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// DefaultNetwork returns the project's default network, or nil. It never picks a non-default one.
+func DefaultNetwork(networks []verda.PrivateNetwork) *verda.PrivateNetwork {
+	for i := range networks {
+		if networks[i].IsDefault {
+			return &networks[i]
+		}
+	}
+	return nil
+}
+
+// DefaultSubnet returns the default subnet in location, else the only one there.
+// Errors: ErrNoSubnetInLocation, ErrAmbiguousSubnet.
+func DefaultSubnet(subnets []verda.Subnet, location string) (*verda.Subnet, error) {
+	var inLocation []*verda.Subnet
+	for i := range subnets {
+		if strings.EqualFold(subnets[i].Location.Code, location) {
+			inLocation = append(inLocation, &subnets[i])
+		}
+	}
+	switch len(inLocation) {
+	case 0:
+		return nil, ErrNoSubnetInLocation
+	case 1:
+		return inLocation[0], nil
+	}
+	for _, s := range inLocation {
+		if s.IsDefault {
+			return s, nil
+		}
+	}
+	return nil, ErrAmbiguousSubnet
+}
+
+func ipv4ToUint(a netip.Addr) uint64 {
+	b := a.As4()
+	return uint64(binary.BigEndian.Uint32(b[:]))
+}
+
+// uintToIPv4 keeps the low 32 bits of v.
+func uintToIPv4(v uint64) netip.Addr {
+	var b [8]byte
+	binary.BigEndian.PutUint64(b[:], v)
+	return netip.AddrFrom4([4]byte(b[4:]))
+}
