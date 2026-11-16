@@ -166,6 +166,13 @@ func printNoNetworks(ioStreams cmdutil.IOStreams) {
 	_, _ = fmt.Fprintln(ioStreams.ErrOut, "Create one with: verda network create")
 }
 
+func yesNo(b bool) string {
+	if b {
+		return flagYes
+	}
+	return "no"
+}
+
 func defaultColumn(isDefault bool) string {
 	if isDefault {
 		return defaultMark

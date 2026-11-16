@@ -109,10 +109,7 @@ func briefs(instances []verda.Instance) []instanceBrief {
 }
 
 func renderSubnet(out io.Writer, v *subnetDescribeView, instancesKnown bool) {
-	isDefault := "no"
-	if v.IsDefault {
-		isDefault = "yes"
-	}
+	isDefault := yesNo(v.IsDefault)
 	_, _ = fmt.Fprintf(out, "Name:       %s\n", v.Name)
 	_, _ = fmt.Fprintf(out, "ID:         %s\n", v.ID)
 	_, _ = fmt.Fprintf(out, "Network:    %s (%s)\n", v.NetworkName, v.NetworkID)

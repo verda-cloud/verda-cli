@@ -100,10 +100,7 @@ func runDescribe(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStre
 }
 
 func renderNetwork(out io.Writer, v *networkDescribeView) error {
-	isDefault := "no"
-	if v.IsDefault {
-		isDefault = "yes"
-	}
+	isDefault := yesNo(v.IsDefault)
 	_, _ = fmt.Fprintf(out, "Name:       %s\n", v.Name)
 	_, _ = fmt.Fprintf(out, "ID:         %s\n", v.ID)
 	_, _ = fmt.Fprintf(out, "Mode:       %s\n", v.Mode)
