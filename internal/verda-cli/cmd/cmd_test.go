@@ -16,6 +16,7 @@ package cmd
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -95,5 +96,19 @@ func TestServerlessCommandRegistration(t *testing.T) {
 				t.Errorf("batchjob registered = %v, want %v", ok, tc.batchjob)
 			}
 		})
+	}
+}
+
+func TestNetworkCommandRegisteredAsBeta(t *testing.T) {
+	t.Setenv("VERDA_HOME", t.TempDir())
+	var out bytes.Buffer
+	root, _ := NewRootCommand(cmdutil.IOStreams{In: &bytes.Buffer{}, Out: &out, ErrOut: &bytes.Buffer{}})
+	root.SetArgs([]string{"--help"})
+	root.SetOut(&out)
+	if err := root.Execute(); err != nil {
+		t.Fatalf("help: %v", err)
+	}
+	if !strings.Contains(out.String(), "network (beta)") {
+		t.Errorf("verda --help lacks %q:\n%s", "network (beta)", out.String())
 	}
 }
