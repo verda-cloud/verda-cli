@@ -123,3 +123,27 @@ func TestSubnetDescribePicker(t *testing.T) {
 		t.Errorf("picker choice 1 should be sn_a2:\n%s", out)
 	}
 }
+
+// An empty subnet prints "instances": [] so agents can tell it from an unknown list (absent).
+func TestSubnetDescribeInstancesEmptyVersusUnknown(t *testing.T) {
+	t.Parallel()
+	client := newFakeClient(t, seededAPI())
+	out, _, err := runNetwork(t, agentFactory(client), "subnet", "describe", "sn_a2")
+	if err != nil {
+		t.Fatalf("describe: %v", err)
+	}
+	if !strings.Contains(out, `"instances": []`) {
+		t.Errorf("empty subnet must carry \"instances\": []:\n%s", out)
+	}
+
+	api := seededAPI()
+	api.failOn("GET /instances", 500, "internal_error", "boom")
+	client = newFakeClient(t, api)
+	out, errOut, err := runNetwork(t, agentFactory(client), "subnet", "describe", "sn_a2")
+	if err != nil {
+		t.Fatalf("describe: %v", err)
+	}
+	if strings.Contains(out, `"instances"`) || !strings.Contains(errOut, "Warning") {
+		t.Errorf("unknown instance list must be absent with a warning: out=%s err=%q", out, errOut)
+	}
+}

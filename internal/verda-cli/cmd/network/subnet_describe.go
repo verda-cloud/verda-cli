@@ -35,11 +35,11 @@ type instanceBrief struct {
 	PublicIP  string `json:"public_ip,omitempty"  yaml:"public_ip,omitempty"`
 }
 
-// subnetDescribeView: Instances is nil when the instance list could not be read.
+// subnetDescribeView: Instances is nil (absent) when the instance list could not be read; an empty subnet has [].
 type subnetDescribeView struct {
 	cmdutil.SubnetView `yaml:",inline"`
-	NetworkName        string          `json:"network_name"        yaml:"network_name"`
-	Instances          []instanceBrief `json:"instances,omitempty" yaml:"instances,omitempty"`
+	NetworkName        string           `json:"network_name"        yaml:"network_name"`
+	Instances          *[]instanceBrief `json:"instances,omitempty" yaml:"instances,omitempty"`
 }
 
 // NewCmdSubnetDescribe creates the subnet describe command.
@@ -82,13 +82,14 @@ func runSubnetDescribe(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.
 	if err != nil {
 		_, _ = fmt.Fprintf(ioStreams.ErrOut, "Warning: could not list the instances in this subnet: %v\n", err)
 	} else {
-		view.Instances = briefs(instances)
+		b := briefs(instances)
+		view.Instances = &b
 	}
 
 	if wrote, err := cmdutil.WriteStructured(ioStreams.Out, f.OutputFormat(), view); wrote {
 		return err
 	}
-	renderSubnet(ioStreams.Out, &view, err == nil)
+	renderSubnet(ioStreams.Out, &view)
 	return nil
 }
 
@@ -108,7 +109,7 @@ func briefs(instances []verda.Instance) []instanceBrief {
 	return out
 }
 
-func renderSubnet(out io.Writer, v *subnetDescribeView, instancesKnown bool) {
+func renderSubnet(out io.Writer, v *subnetDescribeView) {
 	isDefault := yesNo(v.IsDefault)
 	_, _ = fmt.Fprintf(out, "Name:       %s\n", v.Name)
 	_, _ = fmt.Fprintf(out, "ID:         %s\n", v.ID)
@@ -119,19 +120,20 @@ func renderSubnet(out io.Writer, v *subnetDescribeView, instancesKnown bool) {
 	_, _ = fmt.Fprintf(out, "IPs used:   %d/%d\n", v.UsedIPCount, v.TotalIPCount)
 	_, _ = fmt.Fprintf(out, "Route:      %s\n", gatewayLabel(v.DefaultRouteInstance))
 	_, _ = fmt.Fprintf(out, "Created:    %s\n", cmdutil.TimeColumn(v.CreatedAt, timeLayout))
-	if !instancesKnown {
+	if v.Instances == nil {
 		return
 	}
+	instances := *v.Instances
 	_, _ = fmt.Fprintln(out)
-	if len(v.Instances) == 0 {
+	if len(instances) == 0 {
 		_, _ = fmt.Fprintln(out, "No instances in this subnet.")
 		return
 	}
-	_, _ = fmt.Fprintf(out, "Instances (%d):\n", len(v.Instances))
+	_, _ = fmt.Fprintf(out, "Instances (%d):\n", len(instances))
 	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	_, _ = fmt.Fprintln(tw, "HOSTNAME\tID\tSTATUS\tPRIVATE IP\tPUBLIC IP")
-	for i := range v.Instances {
-		b := &v.Instances[i]
+	for i := range instances {
+		b := &instances[i]
 		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", b.Hostname, b.ID, b.Status, cmdutil.TextColumn(b.PrivateIP), cmdutil.TextColumn(b.PublicIP))
 	}
 	_ = tw.Flush()
