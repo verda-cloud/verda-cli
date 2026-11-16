@@ -28,16 +28,21 @@ func gatewayAPI() *fakeAPI {
 	api := seededAPI()
 	api.addInstance("i-gw2", "gw-2", "FIN-03", "pn_a", "sn_a1", "9.9.9.9")
 	api.addInstance("i-us", "us-box", "US-SOUTHWEST-1", "pn_a", "sn_a2", "8.8.8.8")
+	api.addInstance("i-other", "other-net", "FIN-03", "pn_b", "", "7.7.7.7")
+	api.addInstance("i-dead", "dead-gw", "FIN-03", "pn_a", "sn_a1", "6.6.6.6")
+	api.instances[len(api.instances)-1].Status = verda.StatusDiscontinued
 	return api
 }
 
 func TestRouteCreateGatewayChecks(t *testing.T) {
 	t.Parallel()
 	tests := map[string]string{
-		"classic":  "not on network alpha",
-		"us-box":   "it is in US-SOUTHWEST-1, the subnet is in FIN-03",
-		"worker":   "no public IP",
-		"i-nobody": "",
+		"classic":   "not on network alpha",
+		"us-box":    "it is in US-SOUTHWEST-1, the subnet is in FIN-03",
+		"worker":    "no public IP",
+		"other-net": "not on network alpha",
+		"i-nobody":  "",
+		"dead-gw":   "",
 	}
 	for ref, want := range tests {
 		api := gatewayAPI()

@@ -170,10 +170,7 @@ func defaultSuffix(isDefault bool) string {
 
 // runChangeFlow asks which changes to make, then the new name; it fills opts.
 func runChangeFlow(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *updateOptions, currentName string, isDefault bool) error {
-	choices := []wizard.Choice{{Label: "Rename", Value: changeRename}}
-	if !isDefault {
-		choices = append(choices, wizard.Choice{Label: "Make default", Value: changeMakeDefault})
-	}
+	choices := changeChoices(isDefault)
 	var picked []string
 	flow := &wizard.Flow{
 		Name: "update",
@@ -213,6 +210,15 @@ func runChangeFlow(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOS
 		},
 	}
 	return newEngine(f.Prompter(), f.Status(), ioStreams.ErrOut).Run(ctx, flow)
+}
+
+// changeChoices: "Make default" is hidden when the target already is the default.
+func changeChoices(isDefault bool) []wizard.Choice {
+	choices := []wizard.Choice{{Label: "Rename", Value: changeRename}}
+	if !isDefault {
+		choices = append(choices, wizard.Choice{Label: "Make default", Value: changeMakeDefault})
+	}
+	return choices
 }
 
 func hasChange(v any, change string) bool {

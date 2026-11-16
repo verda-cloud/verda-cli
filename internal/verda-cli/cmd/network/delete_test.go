@@ -135,3 +135,20 @@ func TestDeleteOtherAPIErrorsUnchanged(t *testing.T) {
 		t.Error("only a 409 gets the retry hint")
 	}
 }
+
+// One attached instance is enough to refuse.
+func TestDeleteRefusesWithOneInstance(t *testing.T) {
+	t.Parallel()
+	for _, args := range [][]string{{"delete", "beta"}, {"subnet", "delete", "sn_b1"}} {
+		api := emptyNetworkAPI()
+		api.addInstance("i-solo", "solo", "FIN-03", "pn_b", "sn_b1", "")
+		client := newFakeClient(t, api)
+		_, _, err := runNetwork(t, agentFactory(client), append(args, "--yes")...)
+		if code := agentErrorCode(err); code != cmdutil.CodeResourceInUse || !strings.Contains(err.Error(), "1 instance(s): solo") {
+			t.Errorf("%v: err = %v", args, err)
+		}
+		if deletes(api) != 0 {
+			t.Errorf("%v: no DELETE expected", args)
+		}
+	}
+}

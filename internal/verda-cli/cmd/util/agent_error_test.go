@@ -289,6 +289,13 @@ func TestClassifyAPIErrorAddsAPICodeAndDetails(t *testing.T) {
 			wantDetails: `{"id":"pn_x"}`,
 		},
 		{
+			name:        "details without a code",
+			err:         &verda.APIError{StatusCode: 422, Message: "bad", Details: "field x"},
+			wantCode:    "API_ERROR",
+			wantExit:    ExitAPI,
+			wantDetails: "field x",
+		},
+		{
 			name:     "empty code and details",
 			err:      &verda.APIError{StatusCode: 500, Message: "boom"},
 			wantCode: "API_ERROR",

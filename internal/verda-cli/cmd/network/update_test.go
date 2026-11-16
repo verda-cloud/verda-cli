@@ -197,3 +197,20 @@ func TestUpdateHidesMakeDefaultForTheDefault(t *testing.T) {
 		t.Errorf("PATCH = %q", got)
 	}
 }
+
+func TestChangeChoicesHideMakeDefaultForTheDefault(t *testing.T) {
+	t.Parallel()
+	values := func(isDefault bool) []string {
+		var out []string
+		for _, c := range changeChoices(isDefault) {
+			out = append(out, c.Value)
+		}
+		return out
+	}
+	if got := values(true); len(got) != 1 || got[0] != changeRename {
+		t.Errorf("default target: choices = %v, want only %s", got, changeRename)
+	}
+	if got := values(false); len(got) != 2 || got[1] != changeMakeDefault {
+		t.Errorf("non-default target: choices = %v, want rename and %s", got, changeMakeDefault)
+	}
+}

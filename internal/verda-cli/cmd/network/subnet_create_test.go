@@ -202,3 +202,19 @@ func TestSubnetCreateFlowSkipsFlagSteps(t *testing.T) {
 		t.Errorf("opts = %+v", opts)
 	}
 }
+
+func TestSubnetCreateRejectsDuplicateNameAndDefaultFalse(t *testing.T) {
+	t.Parallel()
+	for _, extra := range [][]string{{"--name", "fin-03-1"}, {"--default=false"}} {
+		api := seededAPI()
+		client := newFakeClient(t, api)
+		args := append([]string{"subnet", "create", "--network", "alpha", "-l", "FIN-03"}, extra...)
+		_, _, err := runNetwork(t, agentFactory(client), args...)
+		if code := agentErrorCode(err); code != "VALIDATION_ERROR" {
+			t.Errorf("%v: code = %q (err %v), want VALIDATION_ERROR", extra, code, err)
+		}
+		if len(postBodies(api)) != 0 {
+			t.Errorf("%v: no POST expected", extra)
+		}
+	}
+}
