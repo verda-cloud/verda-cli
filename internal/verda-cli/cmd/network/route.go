@@ -16,6 +16,8 @@ package network
 
 import (
 	"context"
+	"fmt"
+	"io"
 
 	"github.com/spf13/cobra"
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
@@ -86,15 +88,17 @@ func instanceIndex(instances []verda.Instance) map[string]*verda.Instance {
 	return idx
 }
 
-// loadRoutes reads a subnet's routes and, best effort, the instance list (nil when it failed).
-func loadRoutes(ctx context.Context, client *verda.Client, networkID, subnetID string) ([]verda.Route, map[string]*verda.Instance, error) {
+// loadRoutes reads a subnet's routes and, best effort, the instance list. If that list
+// fails, it warns on warn and returns a nil index: gateways then show as the API reports them.
+func loadRoutes(ctx context.Context, client *verda.Client, warn io.Writer, networkID, subnetID string) ([]verda.Route, map[string]*verda.Instance, error) {
 	routes, err := client.PrivateNetworks.GetRoutes(ctx, networkID, subnetID)
 	if err != nil {
 		return nil, nil, err
 	}
 	instances, err := client.Instances.List(ctx, nil)
 	if err != nil {
-		return routes, nil, nil //nolint:nilerr // best effort: without the list, gateways are shown as the API reports them
+		_, _ = fmt.Fprintf(warn, "Warning: could not list instances, so a deleted gateway may not show as (deleted): %v\n", err)
+		return routes, nil, nil
 	}
 	return routes, instanceIndex(instances), nil
 }

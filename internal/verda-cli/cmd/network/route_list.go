@@ -67,7 +67,7 @@ func runRouteList(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStr
 	ctx, cancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
 	defer cancel()
 	stop := spinner(ctx, f, "Loading routes...")
-	routes, live, err := loadRoutes(ctx, client, network.ID, subnet.ID)
+	routes, live, err := loadRoutes(ctx, client, ioStreams.ErrOut, network.ID, subnet.ID)
 	stop()
 	if err != nil {
 		return err

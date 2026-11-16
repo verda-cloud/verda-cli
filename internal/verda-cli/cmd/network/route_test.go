@@ -169,3 +169,20 @@ func TestRouteDeletePicker(t *testing.T) {
 		t.Errorf("DELETE = %v", d)
 	}
 }
+
+func TestRouteListWarnsWhenInstancesUnknown(t *testing.T) {
+	t.Parallel()
+	api := routeAPI()
+	api.failOn("GET /instances", 500, "internal_error", "boom")
+	client := newFakeClient(t, api)
+	out, errOut, err := runNetwork(t, tableFactory(client, nil), "route", "list", "--subnet", "sn_a1")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if !strings.Contains(errOut, "Warning: could not list instances") {
+		t.Errorf("want a warning on stderr, got %q", errOut)
+	}
+	if !strings.Contains(out, "old-gw") {
+		t.Errorf("without the list, the gateway shows as the API reports it:\n%s", out)
+	}
+}

@@ -78,7 +78,7 @@ func runRouteDelete(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOS
 	}
 	ctx, cancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
 	stop := spinner(ctx, f, "Loading routes...")
-	routes, live, err := loadRoutes(ctx, client, network.ID, subnet.ID)
+	routes, live, err := loadRoutes(ctx, client, ioStreams.ErrOut, network.ID, subnet.ID)
 	stop()
 	cancel()
 	if err != nil {
