@@ -84,6 +84,7 @@ func NewCmdSubnetCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.C
 }
 
 func runSubnetCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *subnetCreateOptions) error {
+	opts.Name = strings.TrimSpace(opts.Name)
 	interactive := interactiveTTY(f)
 	if !interactive {
 		if missing := missingSubnetCreateFlags(opts); len(missing) > 0 {

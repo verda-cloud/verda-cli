@@ -17,6 +17,7 @@ package network
 import (
 	"errors"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
 
@@ -31,7 +32,7 @@ var errNameTaken = errors.New("the network already has a subnet with this name")
 
 func validateName(s string) error {
 	s = strings.TrimSpace(s)
-	if s == "" || len(s) > maxNameLen {
+	if s == "" || utf8.RuneCountInString(s) > maxNameLen {
 		return errNameLength
 	}
 	return nil

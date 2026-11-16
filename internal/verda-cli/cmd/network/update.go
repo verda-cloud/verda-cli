@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
@@ -84,6 +85,7 @@ func NewCmdUpdate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 
 // validateUpdateFlags checks flag values before any API call.
 func validateUpdateFlags(opts *updateOptions, kind string) error {
+	opts.Name = strings.TrimSpace(opts.Name)
 	if opts.defaultSet && !opts.Default {
 		return cmdutil.NewValidationError("default", "--default only sets; make another "+kind+" the default instead")
 	}
@@ -200,7 +202,8 @@ func runChangeFlow(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOS
 				ShouldSkip:  func(c map[string]any) bool { return !hasChange(c[stepChanges], changeRename) },
 				Validate:    func(v any) error { return validateName(v.(string)) },
 				Setter: func(v any) {
-					opts.Name, _ = v.(string)
+					name, _ := v.(string)
+					opts.Name = strings.TrimSpace(name)
 					opts.nameSet = true
 				},
 				Resetter: func() { opts.Name, opts.nameSet = "", false },

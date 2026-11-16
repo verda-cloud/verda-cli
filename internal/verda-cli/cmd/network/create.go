@@ -17,6 +17,7 @@ package network
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
@@ -73,6 +74,7 @@ func NewCmdCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 }
 
 func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *createOptions) error {
+	opts.Name = strings.TrimSpace(opts.Name)
 	if opts.Name == "" {
 		if !interactiveTTY(f) {
 			return cmdutil.NewMissingFlagsError([]string{"--" + flagName})

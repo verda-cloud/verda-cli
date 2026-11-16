@@ -73,6 +73,7 @@ func TestUpdateFlagsExactBody(t *testing.T) {
 		want string
 	}{
 		{[]string{"beta", "--name", "gamma"}, `{"name":"gamma"}`},
+		{[]string{"beta", "--name", " gamma "}, `{"name":"gamma"}`},
 		{[]string{"pn_b", "--default"}, `{"is_default":true}`},
 		{[]string{"beta", "--name", "gamma", "--default"}, `{"name":"gamma","is_default":true}`},
 	}

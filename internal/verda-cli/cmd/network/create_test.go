@@ -133,3 +133,22 @@ func TestCreateRejectsBadMode(t *testing.T) {
 		t.Error("no request may be sent for an invalid mode")
 	}
 }
+
+func TestNameIsTrimmedAndCountedInCharacters(t *testing.T) {
+	t.Parallel()
+	if err := validateName(strings.Repeat("ä", 64)); err != nil {
+		t.Errorf("64 two-byte characters must pass: %v", err)
+	}
+	if err := validateName(strings.Repeat("ä", 65)); err == nil {
+		t.Error("65 characters must be rejected")
+	}
+
+	api := newFakeAPI()
+	client := newFakeClient(t, api)
+	if _, _, err := runNetwork(t, agentFactory(client), "create", "--name", "  prod  "); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if body := api.requestsMatching("POST")[0].Body; !strings.Contains(body, `"name":"prod"`) {
+		t.Errorf("name must be trimmed: %s", body)
+	}
+}
