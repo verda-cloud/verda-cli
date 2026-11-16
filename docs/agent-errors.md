@@ -242,6 +242,30 @@ A flag value failed validation.
 
 **Agent action:** Fix the invalid value and retry.
 
+### `RESOURCE_IN_USE`
+
+**Exit code:** 1
+
+A delete was refused before any API call because something still depends on the resource. For example, a private network or subnet with instances attached (the API would answer 409). `details.blockers` lists what must be removed first.
+
+```json
+{
+  "error": {
+    "code": "RESOURCE_IN_USE",
+    "message": "Subnet fin-03-1 has 1 instance(s): gw-1 (i-1, FIN-03, 10.0.0.5). Delete them first (verda vm action --action delete), then run this again.",
+    "details": {
+      "resource": "subnet",
+      "id": "sn_82gp8jck",
+      "blockers": [
+        {"id": "i-1", "hostname": "gw-1", "location": "FIN-03", "private_ip": "10.0.0.5"}
+      ]
+    }
+  }
+}
+```
+
+**Agent action:** Tell the user what blocks the delete. Do not delete the blockers without the user's approval.
+
 ### `ERROR`
 
 **Exit code:** 1

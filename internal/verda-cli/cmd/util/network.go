@@ -290,3 +290,16 @@ func FilterInstancesOn(instances []verda.Instance, networkID, subnetID string) [
 	}
 	return out
 }
+
+// CodeResourceInUse: a delete was refused because something still depends on the resource.
+const CodeResourceInUse = "RESOURCE_IN_USE"
+
+// NewResourceInUseError refuses a delete; blockers lists what must go first (details.blockers).
+func NewResourceInUseError(resource, id, msg string, blockers any) *AgentError {
+	return &AgentError{
+		Code:     CodeResourceInUse,
+		Message:  msg,
+		Details:  map[string]any{"resource": resource, "id": id, "blockers": blockers},
+		ExitCode: ExitGeneral,
+	}
+}

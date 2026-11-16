@@ -41,6 +41,7 @@ const (
 	canceledMsg = "Canceled."
 	noneMark    = "-"
 	defaultMark = "*"
+	deletedMark = "(deleted)"
 )
 
 // NewCmdNetwork creates the `verda network` parent command.
@@ -72,6 +73,7 @@ func NewCmdNetwork(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Comman
 		NewCmdDescribe(f, ioStreams),
 		NewCmdCreate(f, ioStreams),
 		NewCmdUpdate(f, ioStreams),
+		NewCmdDelete(f, ioStreams),
 	)
 	return cmd
 }

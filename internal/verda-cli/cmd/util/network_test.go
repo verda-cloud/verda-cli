@@ -200,3 +200,14 @@ func TestDefaultSubnet(t *testing.T) {
 		}
 	}
 }
+
+func TestNewResourceInUseError(t *testing.T) {
+	t.Parallel()
+	ae := NewResourceInUseError("network", "pn_a", "network a has 1 instance(s)", []string{"i-1"})
+	if ae.Code != CodeResourceInUse || ae.ExitCode != ExitGeneral || ae.Details["resource"] != "network" || ae.Details["id"] != "pn_a" {
+		t.Errorf("got %+v", ae)
+	}
+	if ClassifyError(ae) != ae {
+		t.Error("an AgentError must classify as itself")
+	}
+}

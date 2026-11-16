@@ -100,6 +100,12 @@ func (a *fakeAPI) addInstance(id, hostname, location, networkID, subnetID, publi
 	a.instances = append(a.instances, inst)
 }
 
+func (a *fakeAPI) addRoute(subnetID, id, destination string, gw *verda.AttachedInstance) {
+	a.routes[subnetID] = append(a.routes[subnetID], verda.Route{
+		ID: id, SubnetID: subnetID, Destination: destination, Instance: gw, CreatedAt: testCreated,
+	})
+}
+
 // failOn makes "METHOD /path" answer with status and an API error body.
 func (a *fakeAPI) failOn(methodPath string, status int, code, message string) {
 	body, _ := json.Marshal(map[string]string{"code": code, "message": message})
