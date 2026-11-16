@@ -75,6 +75,7 @@ func NewCmdNetwork(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Comman
 		NewCmdUpdate(f, ioStreams),
 		NewCmdDelete(f, ioStreams),
 		NewCmdSubnet(f, ioStreams),
+		NewCmdRoute(f, ioStreams),
 	)
 	return cmd
 }
