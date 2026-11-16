@@ -136,8 +136,12 @@ func runRouteCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOS
 
 // checkRouteCreateFlags validates --destination and, off a terminal, the required flags.
 func checkRouteCreateFlags(f cmdutil.Factory, opts *routeCreateOptions) error {
-	if p, err := netip.ParsePrefix(opts.destination); err != nil || !p.Addr().Is4() {
+	p, err := netip.ParsePrefix(opts.destination)
+	if err != nil || !p.Addr().Is4() {
 		return cmdutil.NewValidationError(flagDestination, "must be an IPv4 CIDR, for example 0.0.0.0/0")
+	}
+	if p != p.Masked() {
+		return cmdutil.NewValidationError(flagDestination, fmt.Sprintf("%s is not canonical; use %s", opts.destination, p.Masked()))
 	}
 	if interactiveTTY(f) {
 		return nil
@@ -167,9 +171,14 @@ func loadRoutesAndInstances(ctx context.Context, client *verda.Client, networkID
 	return routes, instances, nil
 }
 
+// routeFor finds the route for destination, comparing parsed prefixes.
 func routeFor(routes []verda.Route, destination string) *verda.Route {
+	want, err := netip.ParsePrefix(destination)
 	for i := range routes {
 		if routes[i].Destination == destination {
+			return &routes[i]
+		}
+		if got, perr := netip.ParsePrefix(routes[i].Destination); err == nil && perr == nil && got.Masked() == want.Masked() {
 			return &routes[i]
 		}
 	}

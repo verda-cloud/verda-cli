@@ -160,7 +160,7 @@ func TestRouteCreateSameGatewayIsANoOp(t *testing.T) {
 func TestRouteCreateRejectsBadDestination(t *testing.T) {
 	t.Parallel()
 	client := newFakeClient(t, gatewayAPI())
-	for _, d := range []string{"::/0", "not-a-cidr", "10.0.0.1"} {
+	for _, d := range []string{"::/0", "not-a-cidr", "10.0.0.1", "1.2.3.4/0", "10.0.0.5/24"} {
 		_, _, err := runNetwork(t, agentFactory(client), "route", "create", "--subnet", "sn_a1", "--instance", "gw-2", "--destination", d)
 		if code := agentErrorCode(err); code != "VALIDATION_ERROR" {
 			t.Errorf("%s: code = %q", d, code)
@@ -215,5 +215,20 @@ func TestRouteCreateAmbiguousHostname(t *testing.T) {
 	_, _, err = runNetwork(t, agentFactory(client), "route", "create", "--subnet", "sn_a1", "--instance", "i-gw3")
 	if err != nil {
 		t.Errorf("by ID: %v", err)
+	}
+}
+
+func TestRouteForMatchesParsedPrefix(t *testing.T) {
+	t.Parallel()
+	routes := []verda.Route{{ID: "rt_1", Destination: "10.1.0.0/16"}}
+	if r := routeFor(routes, "10.1.0.0/16"); r == nil {
+		t.Error("exact match not found")
+	}
+	if r := routeFor(routes, "10.2.0.0/16"); r != nil {
+		t.Errorf("unexpected match %v", r)
+	}
+	routes[0].Destination = "10.1.0.1/16" // non-canonical value from the API
+	if r := routeFor(routes, "10.1.0.0/16"); r == nil {
+		t.Error("prefix match not found")
 	}
 }
