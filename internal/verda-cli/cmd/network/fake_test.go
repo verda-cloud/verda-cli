@@ -106,6 +106,18 @@ func (a *fakeAPI) failOn(methodPath string, status int, code, message string) {
 	a.errors[methodPath] = injectedError{status: status, body: string(body)}
 }
 
+func (a *fakeAPI) requestsMatching(method string) []recordedRequest {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	var out []recordedRequest
+	for _, r := range a.requests {
+		if r.Method == method {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
 func (a *fakeAPI) id(prefix string) string {
 	a.nextID++
 	return fmt.Sprintf("%s_new%d", prefix, a.nextID)
