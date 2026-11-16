@@ -91,7 +91,7 @@ func FreeSubnetCIDR(taken []netip.Prefix, within netip.Prefix, bits int) (netip.
 		next := addr + size
 		free := true
 		for _, t := range taken {
-			if !t.IsValid() || !t.Addr().Is4() || !t.Overlaps(block) {
+			if !t.Overlaps(block) {
 				continue
 			}
 			free = false
