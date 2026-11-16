@@ -15,6 +15,7 @@
 package util
 
 import (
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -161,4 +162,131 @@ func uintToIPv4(v uint64) netip.Addr {
 	var b [8]byte
 	binary.BigEndian.PutUint64(b[:], v)
 	return netip.AddrFrom4([4]byte(b[4:]))
+}
+
+// ResolveNetwork finds a network by ID or name.
+func ResolveNetwork(ctx context.Context, client *verda.Client, idOrName string) (*verda.PrivateNetwork, error) {
+	networks, err := client.PrivateNetworks.Get(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if n := FindNetwork(networks, idOrName); n != nil {
+		return n, nil
+	}
+	return nil, NewNotFoundError("network", idOrName)
+}
+
+// FindNetwork matches by ID first, then by name (names are unique in a project).
+func FindNetwork(networks []verda.PrivateNetwork, idOrName string) *verda.PrivateNetwork {
+	for i := range networks {
+		if networks[i].ID == idOrName {
+			return &networks[i]
+		}
+	}
+	for i := range networks {
+		if networks[i].Name == idOrName {
+			return &networks[i]
+		}
+	}
+	return nil
+}
+
+// FindSubnet matches by ID first, then by name (names are unique in a network).
+func FindSubnet(subnets []verda.Subnet, idOrName string) *verda.Subnet {
+	for i := range subnets {
+		if subnets[i].ID == idOrName {
+			return &subnets[i]
+		}
+	}
+	for i := range subnets {
+		if subnets[i].Name == idOrName {
+			return &subnets[i]
+		}
+	}
+	return nil
+}
+
+// ResolveSubnet finds a subnet by ID or name. With no network it searches every
+// network: subnet IDs are unique everywhere, but a name may repeat across networks.
+func ResolveSubnet(ctx context.Context, client *verda.Client, networkIDOrName, idOrName string) (*verda.PrivateNetwork, *verda.Subnet, error) {
+	if networkIDOrName != "" {
+		network, err := ResolveNetwork(ctx, client, networkIDOrName)
+		if err != nil {
+			return nil, nil, err
+		}
+		subnets, err := client.PrivateNetworks.GetSubnets(ctx, network.ID)
+		if err != nil {
+			return nil, nil, err
+		}
+		if s := FindSubnet(subnets, idOrName); s != nil {
+			return network, s, nil
+		}
+		return nil, nil, NewNotFoundError("subnet", idOrName)
+	}
+
+	networks, err := client.PrivateNetworks.Get(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	type match struct {
+		network *verda.PrivateNetwork
+		subnet  verda.Subnet
+	}
+	var byName []match
+	for i := range networks {
+		subnets, err := client.PrivateNetworks.GetSubnets(ctx, networks[i].ID)
+		if err != nil {
+			return nil, nil, err
+		}
+		for j := range subnets {
+			if subnets[j].ID == idOrName {
+				return &networks[i], &subnets[j], nil
+			}
+			if subnets[j].Name == idOrName {
+				byName = append(byName, match{&networks[i], subnets[j]})
+			}
+		}
+	}
+	switch len(byName) {
+	case 0:
+		return nil, nil, NewNotFoundError("subnet", idOrName)
+	case 1:
+		return byName[0].network, &byName[0].subnet, nil
+	}
+	names := make([]string, len(byName))
+	for i := range byName {
+		names[i] = byName[i].network.Name
+	}
+	return nil, nil, &AgentError{
+		Code:     "VALIDATION_ERROR",
+		Message:  fmt.Sprintf("%d subnets named %q in different networks (%s); pass --network", len(byName), idOrName, strings.Join(names, ", ")),
+		Details:  map[string]any{"field": "network", "networks": names},
+		ExitCode: ExitBadArgs,
+	}
+}
+
+// ListInstancesOn lists the instances attached to a network, or to one subnet if subnetID is set.
+// Workaround until the SDK wraps GET /private-networks/{id}/workloads.
+func ListInstancesOn(ctx context.Context, client *verda.Client, networkID, subnetID string) ([]verda.Instance, error) {
+	all, err := client.Instances.List(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	return FilterInstancesOn(all, networkID, subnetID), nil
+}
+
+// FilterInstancesOn keeps the instances on networkID (and subnetID when set).
+func FilterInstancesOn(instances []verda.Instance, networkID, subnetID string) []verda.Instance {
+	out := make([]verda.Instance, 0, len(instances))
+	for i := range instances {
+		inst := &instances[i]
+		if inst.PrivateNetworkID == nil || *inst.PrivateNetworkID != networkID {
+			continue
+		}
+		if subnetID != "" && (inst.SubnetID == nil || *inst.SubnetID != subnetID) {
+			continue
+		}
+		out = append(out, *inst)
+	}
+	return out
 }

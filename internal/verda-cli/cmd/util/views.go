@@ -323,6 +323,128 @@ func NewJobDeploymentShortViews(jobs []verda.JobDeploymentShortInfo) []JobDeploy
 	return views
 }
 
+// NetworkView is the JSON/YAML shape for one private network.
+type NetworkView struct {
+	ID        string     `json:"id"                    yaml:"id"`
+	Name      string     `json:"name"                  yaml:"name"`
+	Mode      string     `json:"mode"                  yaml:"mode"`
+	IsDefault bool       `json:"is_default"            yaml:"is_default"`
+	CreatedAt *time.Time `json:"created_at,omitempty"  yaml:"created_at,omitempty"`
+}
+
+// NewNetworkView converts one SDK private network to its output shape.
+func NewNetworkView(n *verda.PrivateNetwork) NetworkView {
+	return NetworkView{
+		ID:        n.ID,
+		Name:      n.Name,
+		Mode:      n.Mode,
+		IsDefault: n.IsDefault,
+		CreatedAt: nilIfZero(n.CreatedAt),
+	}
+}
+
+// NewNetworkViews converts a slice, preserving order.
+func NewNetworkViews(networks []verda.PrivateNetwork) []NetworkView {
+	views := make([]NetworkView, len(networks))
+	for i := range networks {
+		views[i] = NewNetworkView(&networks[i])
+	}
+	return views
+}
+
+// AttachedInstanceView is the JSON/YAML shape for an instance a subnet or route points at.
+type AttachedInstanceView struct {
+	ID        string  `json:"id"                   yaml:"id"`
+	Hostname  string  `json:"hostname"             yaml:"hostname"`
+	PrivateIP string  `json:"private_ip,omitempty" yaml:"private_ip,omitempty"`
+	PublicIP  *string `json:"public_ip,omitempty"  yaml:"public_ip,omitempty"`
+	Status    string  `json:"status,omitempty"     yaml:"status,omitempty"`
+}
+
+func newAttachedInstanceView(a *verda.AttachedInstance) *AttachedInstanceView {
+	if a == nil {
+		return nil
+	}
+	return &AttachedInstanceView{
+		ID:        a.ID,
+		Hostname:  a.Hostname,
+		PrivateIP: a.PrivateIP,
+		PublicIP:  a.PublicIP,
+		Status:    a.Status,
+	}
+}
+
+// SubnetView is the JSON/YAML shape for one subnet. NetworkID is not in the SDK
+// subnet; callers pass the network the subnet was read from.
+type SubnetView struct {
+	ID                   string                `json:"id"                               yaml:"id"`
+	NetworkID            string                `json:"network_id,omitempty"             yaml:"network_id,omitempty"`
+	Name                 string                `json:"name"                             yaml:"name"`
+	Location             string                `json:"location"                         yaml:"location"`
+	CIDR                 string                `json:"cidr"                             yaml:"cidr"`
+	IsDefault            bool                  `json:"is_default"                       yaml:"is_default"`
+	UsedIPCount          int                   `json:"used_ip_count"                    yaml:"used_ip_count"`
+	TotalIPCount         int                   `json:"total_ip_count"                   yaml:"total_ip_count"`
+	DefaultRouteInstance *AttachedInstanceView `json:"default_route_instance,omitempty" yaml:"default_route_instance,omitempty"`
+	CreatedAt            *time.Time            `json:"created_at,omitempty"             yaml:"created_at,omitempty"`
+}
+
+// NewSubnetView converts one SDK subnet to its output shape.
+func NewSubnetView(networkID string, s *verda.Subnet) SubnetView {
+	return SubnetView{
+		ID:                   s.ID,
+		NetworkID:            networkID,
+		Name:                 s.Name,
+		Location:             s.Location.Code,
+		CIDR:                 s.CIDR,
+		IsDefault:            s.IsDefault,
+		UsedIPCount:          s.UsedIPCount,
+		TotalIPCount:         s.TotalIPCount,
+		DefaultRouteInstance: newAttachedInstanceView(s.DefaultRouteInstance),
+		CreatedAt:            nilIfZero(s.CreatedAt),
+	}
+}
+
+// NewSubnetViews converts a slice of one network's subnets, preserving order.
+func NewSubnetViews(networkID string, subnets []verda.Subnet) []SubnetView {
+	views := make([]SubnetView, len(subnets))
+	for i := range subnets {
+		views[i] = NewSubnetView(networkID, &subnets[i])
+	}
+	return views
+}
+
+// RouteView is the JSON/YAML shape for one route. A nil Instance means the gateway instance is gone.
+type RouteView struct {
+	ID          string                `json:"id"                    yaml:"id"`
+	SubnetID    string                `json:"subnet_id"             yaml:"subnet_id"`
+	Location    string                `json:"location,omitempty"    yaml:"location,omitempty"`
+	Destination string                `json:"destination"           yaml:"destination"`
+	Instance    *AttachedInstanceView `json:"instance"              yaml:"instance"`
+	CreatedAt   *time.Time            `json:"created_at,omitempty"  yaml:"created_at,omitempty"`
+}
+
+// NewRouteView converts one SDK route to its output shape.
+func NewRouteView(r *verda.Route) RouteView {
+	return RouteView{
+		ID:          r.ID,
+		SubnetID:    r.SubnetID,
+		Location:    r.Location.Code,
+		Destination: r.Destination,
+		Instance:    newAttachedInstanceView(r.Instance),
+		CreatedAt:   nilIfZero(r.CreatedAt),
+	}
+}
+
+// NewRouteViews converts a slice, preserving order.
+func NewRouteViews(routes []verda.Route) []RouteView {
+	views := make([]RouteView, len(routes))
+	for i := range routes {
+		views[i] = NewRouteView(&routes[i])
+	}
+	return views
+}
+
 // TimeColumn renders a timestamp for table output. An absent value prints as
 // "-" rather than 0001-01-01, so a human reading the table sees "unknown"
 // instead of a plausible-looking date.

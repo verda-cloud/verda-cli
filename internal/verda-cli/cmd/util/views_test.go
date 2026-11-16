@@ -510,3 +510,54 @@ func TestVolumeInTrashViewOmitsZeroTimes(t *testing.T) {
 		t.Errorf("real deleted_at lost: %s", realJSON)
 	}
 }
+
+func TestNetworkViewsOmitZeroCreatedAt(t *testing.T) {
+	t.Parallel()
+
+	views := []any{
+		NewNetworkView(&verda.PrivateNetwork{ID: "pn_1", Name: "n", Mode: "custom"}),
+		NewSubnetView("pn_1", &verda.Subnet{ID: "sn_1", Name: "s", CIDR: "10.0.0.0/24"}),
+		NewRouteView(&verda.Route{ID: "rt_1", SubnetID: "sn_1", Destination: "0.0.0.0/0"}),
+	}
+	for _, v := range views {
+		jsonOut, yamlOut := marshalBoth(t, v)
+		for name, out := range map[string]string{"json": jsonOut, "yaml": yamlOut} {
+			if strings.Contains(out, "created_at") || strings.Contains(out, "0001-01-01") {
+				t.Errorf("%T %s carries a zero created_at: %s", v, name, out)
+			}
+		}
+	}
+}
+
+func TestSubnetViewFields(t *testing.T) {
+	t.Parallel()
+
+	pub := "1.2.3.4"
+	created := time.Date(2026, 11, 16, 10, 0, 0, 0, time.UTC)
+	v := NewSubnetView("pn_1", &verda.Subnet{
+		ID: "sn_1", Name: "fin-03-1", Location: verda.Location{Code: "FIN-03"}, CIDR: "10.0.0.0/24",
+		IsDefault: true, UsedIPCount: 3, TotalIPCount: 251, CreatedAt: created,
+		DefaultRouteInstance: &verda.AttachedInstance{ID: "i-1", Hostname: "gw", PublicIP: &pub},
+	})
+	jsonOut, yamlOut := marshalBoth(t, v)
+	for _, want := range []string{`"network_id": "pn_1"`, `"location": "FIN-03"`, `"hostname": "gw"`, `"public_ip": "1.2.3.4"`, `"created_at"`} {
+		if !strings.Contains(jsonOut, want) {
+			t.Errorf("json lacks %s:\n%s", want, jsonOut)
+		}
+	}
+	for _, want := range []string{"network_id: pn_1", "default_route_instance:", "used_ip_count: 3"} {
+		if !strings.Contains(yamlOut, want) {
+			t.Errorf("yaml lacks %s:\n%s", want, yamlOut)
+		}
+	}
+}
+
+// A route whose gateway is gone keeps "instance": null, so scripts can detect it.
+func TestRouteViewDeletedInstanceIsNull(t *testing.T) {
+	t.Parallel()
+
+	jsonOut, _ := marshalBoth(t, NewRouteView(&verda.Route{ID: "rt_1", Destination: "0.0.0.0/0"}))
+	if !strings.Contains(jsonOut, `"instance": null`) {
+		t.Errorf("want instance null:\n%s", jsonOut)
+	}
+}
