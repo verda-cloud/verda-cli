@@ -55,6 +55,8 @@ func NewCmdSubnet(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 		NewCmdSubnetList(f, ioStreams),
 		NewCmdSubnetDescribe(f, ioStreams),
 		NewCmdSubnetCreate(f, ioStreams),
+		NewCmdSubnetUpdate(f, ioStreams),
+		NewCmdSubnetDelete(f, ioStreams),
 	)
 	return cmd
 }
