@@ -100,7 +100,7 @@ func runSubnetCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IO
 
 	ctx, cancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
 	data, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading networks and locations...", func(ctx context.Context) (*subnetCreateData, error) {
-		return loadSubnetCreateData(ctx, client)
+		return loadSubnetCreateData(ctx, client, opts.Network)
 	})
 	cancel()
 	if err != nil {
@@ -158,7 +158,9 @@ func missingSubnetCreateFlags(opts *subnetCreateOptions) []string {
 	return missing
 }
 
-func loadSubnetCreateData(ctx context.Context, client *verda.Client) (*subnetCreateData, error) {
+// loadSubnetCreateData reads networks, locations and subnets. With networkArg set, only that
+// network's subnets are read (an unknown one is reported later by normalize).
+func loadSubnetCreateData(ctx context.Context, client *verda.Client, networkArg string) (*subnetCreateData, error) {
 	networks, err := client.PrivateNetworks.Get(ctx)
 	if err != nil {
 		return nil, err
@@ -173,12 +175,19 @@ func loadSubnetCreateData(ctx context.Context, client *verda.Client) (*subnetCre
 			data.locations = append(data.locations, locations[i])
 		}
 	}
-	for i := range networks {
-		subnets, err := client.PrivateNetworks.GetSubnets(ctx, networks[i].ID)
+	toRead := networks
+	if networkArg != "" {
+		toRead = nil
+		if n := cmdutil.FindNetwork(networks, networkArg); n != nil {
+			toRead = []verda.PrivateNetwork{*n}
+		}
+	}
+	for i := range toRead {
+		subnets, err := client.PrivateNetworks.GetSubnets(ctx, toRead[i].ID)
 		if err != nil {
 			return nil, err
 		}
-		data.subnets[networks[i].ID] = subnets
+		data.subnets[toRead[i].ID] = subnets
 	}
 	return data, nil
 }

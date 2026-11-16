@@ -218,3 +218,18 @@ func TestSubnetCreateRejectsDuplicateNameAndDefaultFalse(t *testing.T) {
 		}
 	}
 }
+
+// With --network, only that network's subnets are read.
+func TestSubnetCreateReadsOnlyTheChosenNetwork(t *testing.T) {
+	t.Parallel()
+	api := seededAPI()
+	client := newFakeClient(t, api)
+	if _, _, err := runNetwork(t, agentFactory(client), "subnet", "create", "--network", "alpha", "-l", "FIN-03"); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	for _, r := range api.requestsMatching("GET") {
+		if r.Path == "/private-networks/pn_b/subnets" {
+			t.Errorf("read the subnets of an unrelated network: %s", r.Path)
+		}
+	}
+}
