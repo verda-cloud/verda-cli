@@ -62,6 +62,27 @@ func TestPipedOutputCarriesNoANSI(t *testing.T) {
 			seed: func(s *mockapi.Server) { s.SeedVolume("ansi-vol", 100) },
 		},
 		{name: "ssh-key list", args: []string{"ssh-key", "list"}},
+		{
+			name: "network list",
+			args: []string{"network", "list"},
+			seed: func(s *mockapi.Server) { s.SeedNetwork("ansi-net", true) },
+		},
+		{
+			name: "network describe",
+			args: []string{"network", "describe", "ansi-net"},
+			seed: func(s *mockapi.Server) {
+				n := s.SeedNetwork("ansi-net", true)
+				s.SeedSubnet(n.ID, "fin-03-1", "FIN-03", "10.0.0.0/24")
+			},
+		},
+		{
+			name: "network subnet list",
+			args: []string{"network", "subnet", "list"},
+			seed: func(s *mockapi.Server) {
+				n := s.SeedNetwork("ansi-net", true)
+				s.SeedSubnet(n.ID, "fin-03-1", "FIN-03", "10.0.0.0/24")
+			},
+		},
 		{name: "status", args: []string{"status"}},
 	}
 

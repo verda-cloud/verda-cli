@@ -37,6 +37,18 @@ func TestDebugRedaction(t *testing.T) {
 		}
 	}
 
+	t.Run("network list", func(t *testing.T) {
+		t.Parallel()
+		srv := newServer(t)
+		srv.SeedNetwork("debug-net", true)
+		r := runCLI(t, srv, "--debug", "-o", "json", "network", "list")
+		requireExit(t, r, 0)
+		assertNoSecrets(t, r)
+		if !strings.Contains(r.Stdout, "debug-net") {
+			t.Fatalf("stdout lacks the network:\n%s", r.Stdout)
+		}
+	})
+
 	// JSON token request: redactSensitiveJSON handles "client_secret": "...".
 	t.Run("json token request", func(t *testing.T) {
 		t.Parallel()

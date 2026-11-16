@@ -184,3 +184,115 @@ func TestAgentErrorClassification(t *testing.T) {
 		}
 	})
 }
+
+func TestAgentNetworkCommands(t *testing.T) {
+	t.Parallel()
+
+	t.Run("list and subnet list are clean JSON", func(t *testing.T) {
+		t.Parallel()
+		srv := newServer(t)
+		n := srv.SeedNetwork("contract-net", true)
+		srv.SeedSubnet(n.ID, "fin-03-1", "FIN-03", "10.0.0.0/24")
+
+		for _, args := range [][]string{{"network", "list"}, {"network", "subnet", "list"}, {"network", "describe", n.ID}} {
+			r := runCLI(t, srv, append([]string{"--agent"}, args...)...)
+			requireExit(t, r, 0)
+			if r.Stderr != "" {
+				t.Fatalf("%v: stderr not empty in agent mode: %q", args, r.Stderr)
+			}
+			var v any
+			requireCleanJSON(t, r, &v)
+		}
+	})
+
+	t.Run("delete needs --yes, then deletes", func(t *testing.T) {
+		t.Parallel()
+		srv := newServer(t)
+		n := srv.SeedNetwork("contract-del", false)
+
+		r := runCLI(t, srv, "--agent", "network", "delete", n.ID)
+		requireExit(t, r, 2)
+		if env := parseAgentError(t, r); env.Error.Code != "CONFIRMATION_REQUIRED" {
+			t.Fatalf("code = %q, want CONFIRMATION_REQUIRED", env.Error.Code)
+		}
+		if !srv.HasNetwork(n.ID) {
+			t.Fatal("network deleted without --yes")
+		}
+
+		r = runCLI(t, srv, "--agent", "network", "delete", n.ID, "--yes")
+		requireExit(t, r, 0)
+		var result map[string]string
+		requireCleanJSON(t, r, &result)
+		if result["status"] != "completed" || result["id"] != n.ID || srv.HasNetwork(n.ID) {
+			t.Fatalf("result = %v, still present = %v", result, srv.HasNetwork(n.ID))
+		}
+	})
+
+	t.Run("delete with instances is RESOURCE_IN_USE", func(t *testing.T) {
+		t.Parallel()
+		srv := newServer(t)
+		n := srv.SeedNetwork("contract-busy", false)
+		sub := srv.SeedSubnet(n.ID, "fin-03-1", "FIN-03", "10.0.0.0/24")
+		inst := srv.SeedInstance("contract-vm", mockapi.TypeCPU, mockapi.CPUOnDemandTotal)
+		srv.AttachInstance(inst.ID, n.ID, sub.ID)
+
+		r := runCLI(t, srv, "--agent", "network", "delete", n.ID, "--yes")
+		requireExit(t, r, 1)
+		env := parseAgentError(t, r)
+		if env.Error.Code != "RESOURCE_IN_USE" || !srv.HasNetwork(n.ID) {
+			t.Fatalf("code = %q, still present = %v\nstderr: %s", env.Error.Code, srv.HasNetwork(n.ID), r.Stderr)
+		}
+		if blockers, _ := env.Error.Details["blockers"].([]any); len(blockers) != 1 {
+			t.Fatalf("details.blockers = %v", env.Error.Details["blockers"])
+		}
+	})
+
+	t.Run("409 keeps API_ERROR and adds api_code", func(t *testing.T) {
+		t.Parallel()
+		srv := newServer(t)
+		n := srv.SeedNetwork("contract-409", false)
+		srv.FailRoute("/private-networks/"+n.ID, 409)
+
+		r := runCLI(t, srv, "--agent", "network", "delete", n.ID, "--yes")
+		requireExit(t, r, 4)
+		env := parseAgentError(t, r)
+		if env.Error.Code != "API_ERROR" || env.Error.Details["api_code"] == nil || env.Error.Details["status"] != float64(409) {
+			t.Fatalf("error = %+v", env.Error)
+		}
+	})
+
+	t.Run("describe of a missing network is NOT_FOUND", func(t *testing.T) {
+		t.Parallel()
+		srv := newServer(t)
+		r := runCLI(t, srv, "--agent", "network", "describe", "pn_missing")
+		requireExit(t, r, 5)
+		if env := parseAgentError(t, r); env.Error.Code != "NOT_FOUND" {
+			t.Fatalf("code = %q, want NOT_FOUND", env.Error.Code)
+		}
+	})
+
+	t.Run("create without --name is MISSING_REQUIRED_FLAGS", func(t *testing.T) {
+		t.Parallel()
+		srv := newServer(t)
+		r := runCLI(t, srv, "--agent", "network", "create")
+		requireExit(t, r, 2)
+		if env := parseAgentError(t, r); env.Error.Code != "MISSING_REQUIRED_FLAGS" {
+			t.Fatalf("code = %q, want MISSING_REQUIRED_FLAGS", env.Error.Code)
+		}
+	})
+
+	t.Run("subnet create picks a CIDR", func(t *testing.T) {
+		t.Parallel()
+		srv := newServer(t)
+		n := srv.SeedNetwork("contract-sub", true)
+		srv.SeedSubnet(n.ID, "fin-03-1", "FIN-03", "10.0.0.0/24")
+
+		r := runCLI(t, srv, "--agent", "network", "subnet", "create", "--network", n.Name, "-l", "FIN-03")
+		requireExit(t, r, 0)
+		var sub map[string]any
+		requireCleanJSON(t, r, &sub)
+		if sub["cidr"] != "10.0.1.0/24" || sub["name"] != "fin-03-2" {
+			t.Fatalf("subnet = %v", sub)
+		}
+	})
+}

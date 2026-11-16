@@ -71,6 +71,8 @@ type Server struct {
 	volumes        map[string]*verda.Volume
 	sshKeys        map[string]*verda.SSHKey
 	containers     map[string]*containerFixture
+	networks       map[string]*networkFixture
+	networkOrder   []string
 	scalingPatches []map[string]any
 	scalingReadLag int
 	failures       map[string]int // exact path -> HTTP status override
@@ -87,6 +89,7 @@ func New() *Server {
 		volumes:    map[string]*verda.Volume{},
 		sshKeys:    map[string]*verda.SSHKey{},
 		containers: map[string]*containerFixture{},
+		networks:   map[string]*networkFixture{},
 		failures:   map[string]int{},
 		hangs:      map[string]bool{},
 	}
@@ -112,6 +115,7 @@ func New() *Server {
 	mux.HandleFunc("GET /instance-availability/{type}", s.handleTypeAvailability)
 	mux.HandleFunc("GET /balance", s.handleBalance)
 	s.registerContainerRoutes(mux)
+	s.registerNetworkRoutes(mux)
 	mux.HandleFunc("/", s.handleNotFound)
 
 	s.srv = httptest.NewServer(s.guard(mux))
@@ -672,7 +676,7 @@ func (s *Server) handleListScripts(w http.ResponseWriter, _ *http.Request) {
 func (s *Server) handleListLocations(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, []verda.Location{
 		{Code: verda.LocationFIN01, Name: "Helsinki 1", CountryCode: "FI"},
-		{Code: verda.LocationFIN03, Name: "Helsinki 3", CountryCode: "FI"},
+		{Code: verda.LocationFIN03, Name: "Helsinki 3", CountryCode: "FI", IsPrivateNetworksEnabled: true},
 	})
 }
 

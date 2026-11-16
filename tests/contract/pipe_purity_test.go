@@ -75,3 +75,30 @@ func TestAgentVMActionUsageErrorExit2(t *testing.T) {
 		t.Fatalf("code = %q, want VALIDATION_ERROR\nstderr: %s", env.Error.Code, r.Stderr)
 	}
 }
+
+// Without a target, network commands return the structured missing-flags error instead of prompting on piped stdin.
+func TestNetworkMissingTargetOnPipeIsAnError(t *testing.T) {
+	t.Parallel()
+	srv := newServer(t)
+	srv.SeedNetwork("contract-net", true)
+
+	for _, args := range [][]string{
+		{"network", "describe"},
+		{"network", "delete"},
+		{"network", "update"},
+		{"network", "subnet", "describe"},
+		{"network", "route", "list"},
+	} {
+		r := runCLI(t, srv, args...)
+		requireExit(t, r, 2)
+		if r.Stdout != "" {
+			t.Fatalf("%v: stdout not clean: %q", args, r.Stdout)
+		}
+		if env := parseAgentError(t, r); env.Error.Code != "MISSING_REQUIRED_FLAGS" {
+			t.Fatalf("%v: code = %q, want MISSING_REQUIRED_FLAGS", args, env.Error.Code)
+		}
+		if r.Duration >= 10*time.Second {
+			t.Fatalf("%v: took %s — regression toward blocking on stdin", args, r.Duration)
+		}
+	}
+}
