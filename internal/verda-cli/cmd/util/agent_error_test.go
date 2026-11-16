@@ -261,3 +261,69 @@ func TestClassifyOtherBadRequestStaysAPIError(t *testing.T) {
 		t.Errorf("exit = %d, want %d", ae.ExitCode, ExitAPI)
 	}
 }
+
+func TestClassifyAPIErrorAddsAPICodeAndDetails(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		err         *verda.APIError
+		wantCode    string
+		wantExit    int
+		wantAPICode any
+		wantDetails any
+	}{
+		{
+			name:        "409 conflict",
+			err:         &verda.APIError{StatusCode: 409, Code: "conflict", Message: "Subnet still has 1 attached instance(s)"},
+			wantCode:    "API_ERROR",
+			wantExit:    ExitAPI,
+			wantAPICode: "conflict",
+		},
+		{
+			name:        "404 not_found with details",
+			err:         &verda.APIError{StatusCode: 404, Code: "not_found", Message: "private network not found", Details: `{"id":"pn_x"}`},
+			wantCode:    "NOT_FOUND",
+			wantExit:    ExitNotFound,
+			wantAPICode: "not_found",
+			wantDetails: `{"id":"pn_x"}`,
+		},
+		{
+			name:     "empty code and details",
+			err:      &verda.APIError{StatusCode: 500, Message: "boom"},
+			wantCode: "API_ERROR",
+			wantExit: ExitAPI,
+		},
+		{
+			name:        "ssh key required keeps its code",
+			err:         &verda.APIError{StatusCode: 400, Code: "invalid_request", Message: "SSH keys can be an array of UUID's, a single UUID string, null value or not defined"},
+			wantCode:    "SSH_KEY_REQUIRED",
+			wantExit:    ExitBadArgs,
+			wantAPICode: "invalid_request",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ae := ClassifyError(tt.err)
+			if ae.Code != tt.wantCode || ae.ExitCode != tt.wantExit {
+				t.Fatalf("got %s/%d, want %s/%d", ae.Code, ae.ExitCode, tt.wantCode, tt.wantExit)
+			}
+			if got := ae.Details["status"]; got != tt.err.StatusCode {
+				t.Errorf("details.status = %v, want %d", got, tt.err.StatusCode)
+			}
+			gotCode, hasCode := ae.Details["api_code"]
+			if tt.wantAPICode == nil && hasCode {
+				t.Errorf("api_code must be absent, got %v", gotCode)
+			} else if tt.wantAPICode != nil && gotCode != tt.wantAPICode {
+				t.Errorf("api_code = %v, want %v", gotCode, tt.wantAPICode)
+			}
+			gotDetails, hasDetails := ae.Details["api_details"]
+			if tt.wantDetails == nil && hasDetails {
+				t.Errorf("api_details must be absent, got %v", gotDetails)
+			} else if tt.wantDetails != nil && gotDetails != tt.wantDetails {
+				t.Errorf("api_details = %v, want %v", gotDetails, tt.wantDetails)
+			}
+		})
+	}
+}

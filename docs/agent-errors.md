@@ -139,6 +139,21 @@ The Verda Cloud API returned an error not covered by a more specific code.
 }
 ```
 
+If the API sent its own error code, it is in `details.api_code`; for example, deleting a private network that still has instances returns status 409 with `"api_code": "conflict"`:
+
+```json
+{
+  "error": {
+    "code": "API_ERROR",
+    "message": "API error 409: Private network still has 1 attached instance(s); delete them first: <ids>",
+    "details": {
+      "status": 409,
+      "api_code": "conflict"
+    }
+  }
+}
+```
+
 **Agent action:** Show the error to the user. May be transient (retry) or permanent.
 
 ### `NOT_FOUND`
@@ -263,7 +278,7 @@ Errors are classified in this priority order:
 
 1. **Already an AgentError** (from explicit checks in commands) -- returned as-is
 2. **CLI usage errors** (`cmdutil.UsageError` from flag/argument misuse) -- VALIDATION_ERROR, exit 2
-3. **SDK `APIError`** -- mapped by HTTP status code (401/403 -> AUTH_ERROR, 404 -> NOT_FOUND, 402 -> INSUFFICIENT_BALANCE, others -> API_ERROR)
+3. **SDK `APIError`** -- mapped by HTTP status code (401/403 -> AUTH_ERROR, 404 -> NOT_FOUND, 402 -> INSUFFICIENT_BALANCE, others -> API_ERROR). When the API response carries them, `details.api_code` (the API's own error code, for example `conflict`, `not_found`, `invalid_request`) and `details.api_details` (its `details` field, as text or compact JSON) are added. Both keys are absent when the API sent no value.
 4. **SDK `ValidationError`** -- mapped to VALIDATION_ERROR with field and reason
 5. **Auth-related message heuristic** -- messages containing "no credentials configured", "unauthorized", "token expired" -> AUTH_ERROR
 6. **Fallback** -- generic ERROR with the original message

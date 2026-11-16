@@ -228,6 +228,28 @@ func ClassifyError(err error) *AgentError {
 }
 
 func classifyAPIError(apiErr *verda.APIError) *AgentError {
+	ae := classifyAPIStatus(apiErr)
+	addAPIFields(ae, apiErr)
+	return ae
+}
+
+// addAPIFields copies the API's own error code and details into Details; additive only.
+func addAPIFields(ae *AgentError, apiErr *verda.APIError) {
+	if apiErr.Code == "" && apiErr.Details == "" {
+		return
+	}
+	if ae.Details == nil {
+		ae.Details = map[string]any{}
+	}
+	if apiErr.Code != "" {
+		ae.Details["api_code"] = apiErr.Code
+	}
+	if apiErr.Details != "" {
+		ae.Details["api_details"] = apiErr.Details
+	}
+}
+
+func classifyAPIStatus(apiErr *verda.APIError) *AgentError {
 	switch apiErr.StatusCode {
 	case http.StatusUnauthorized, http.StatusForbidden:
 		return &AgentError{
