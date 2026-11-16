@@ -42,6 +42,8 @@ All commands: `--agent -o json` (except `verda ssh` and `verda auth show`).
 | "make bucket", "create bucket" / "remove bucket" | `object-storage mb` / `object-storage rb --yes` |
 | "share link", "presigned URL", "temporary link" | `object-storage presign s3://bucket/key` |
 | "set up S3", "configure object storage" | `object-storage configure` (user runs manually — interactive) |
+| "private network", "VPC", "network", "subnet" | `network list` / `network subnet list` |
+| "NAT gateway", "internet for private subnet", "route" | `network route create --subnet <s> --instance <i>` |
 
 ## Discovery
 
@@ -143,6 +145,27 @@ Hostname patterns: `{random}` → random words, `{location}` → location code
 | `verda volume action <id>` | Actions: detach, rename, resize, clone, delete |
 | `verda volume delete --id <id> --yes -o json` | `--yes` **required** in agent mode |
 | `verda volume trash -o json` | Recoverable within 96 hours |
+
+## Private Networks (beta; alias: `vpc`)
+
+A network is global; each subnet is in one location. IDs: `pn_…` (network), `sn_…` (subnet), `rt_…` (route). Arguments take an ID or a name; a subnet name needs `--network` only when several networks use it.
+
+| Command | Key Flags / Notes |
+|---------|-------------------|
+| `verda network list -o json` | Fields: `id`, `name`, `mode`, `is_default`, `created_at` |
+| `verda network describe <network> -o json` | Adds `subnets[]` and `instance_count` |
+| `verda network create -o json` | `--name` **required**, `--mode custom\|auto`, `--default` |
+| `verda network update <network> -o json` | `--name` and/or `--default` (only sets; `--default=false` is rejected) |
+| `verda network delete <network> --yes -o json` | Refused with `RESOURCE_IN_USE` while instances are attached — never delete them without asking |
+| `verda network subnet list -o json` | `--network`, `-l <location>` |
+| `verda network subnet create -o json` | `--network`, `-l` **required**; `--cidr` defaults to the first free /24 in 10.0.0.0/16; `--name` defaults to `<location>-<n>` |
+| `verda network subnet update <subnet> -o json` | `--name`, `--default`; the CIDR cannot change |
+| `verda network subnet delete <subnet> --yes -o json` | Same instance check as network delete |
+| `verda network route list --subnet <s> -o json` | `instance_deleted: true` when the gateway is gone |
+| `verda network route create --subnet <s> --instance <id\|hostname> -o json` | Gateway: same network, the subnet's location, a public IP. Moving an existing route needs `--yes` |
+| `verda network route delete <route-id> --subnet <s> --yes -o json` | The subnet loses internet access through the gateway |
+
+Only locations with `is_private_networks_enabled` (see `verda locations -o json`) take subnets. A 409 `conflict` on delete right after deleting instances: wait a minute and retry. Tell the user the gateway must enable IP forwarding and NAT itself.
 
 ## Object Storage (S3)
 
