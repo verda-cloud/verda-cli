@@ -125,7 +125,7 @@ func TestDescribeAgentJSON(t *testing.T) {
 func TestDescribeInstanceListFailureIsAWarning(t *testing.T) {
 	t.Parallel()
 	api := seededAPI()
-	api.failOn("GET /instances", 500, "internal_error", "boom")
+	api.failOn("GET /private-networks/pn_a/workloads", 500, "internal_error", "boom")
 	client := newFakeClient(t, api)
 	out, errOut, err := runNetwork(t, jsonFactory(client), "describe", "alpha")
 	if err != nil {

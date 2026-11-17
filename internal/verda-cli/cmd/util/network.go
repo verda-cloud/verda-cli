@@ -265,32 +265,6 @@ func ResolveSubnet(ctx context.Context, client *verda.Client, networkIDOrName, i
 	}
 }
 
-// ListInstancesOn lists the instances attached to a network, or to one subnet if subnetID is set.
-// Workaround until the SDK wraps GET /private-networks/{id}/workloads.
-func ListInstancesOn(ctx context.Context, client *verda.Client, networkID, subnetID string) ([]verda.Instance, error) {
-	all, err := client.Instances.List(ctx, nil)
-	if err != nil {
-		return nil, err
-	}
-	return FilterInstancesOn(all, networkID, subnetID), nil
-}
-
-// FilterInstancesOn keeps the instances on networkID (and subnetID when set).
-func FilterInstancesOn(instances []verda.Instance, networkID, subnetID string) []verda.Instance {
-	out := make([]verda.Instance, 0, len(instances))
-	for i := range instances {
-		inst := &instances[i]
-		if inst.PrivateNetworkID == nil || *inst.PrivateNetworkID != networkID {
-			continue
-		}
-		if subnetID != "" && (inst.SubnetID == nil || *inst.SubnetID != subnetID) {
-			continue
-		}
-		out = append(out, *inst)
-	}
-	return out
-}
-
 // CodeResourceInUse: a delete was refused because something still depends on the resource.
 const CodeResourceInUse = "RESOURCE_IN_USE"
 

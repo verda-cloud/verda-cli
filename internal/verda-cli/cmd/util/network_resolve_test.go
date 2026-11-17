@@ -33,12 +33,6 @@ func networkFakeClient(t *testing.T) *verda.Client {
 		"pn_a": {{ID: "sn_a1", Name: "web"}, {ID: "sn_a2", Name: "shared"}},
 		"pn_b": {{ID: "sn_b1", Name: "db"}, {ID: "sn_b2", Name: "shared"}},
 	}
-	pa, sa1, pb := "pn_a", "sn_a1", "pn_b"
-	instances := []verda.Instance{
-		{ID: "i-1", Hostname: "on-a1", PrivateNetworkID: &pa, SubnetID: &sa1},
-		{ID: "i-2", Hostname: "on-b", PrivateNetworkID: &pb},
-		{ID: "i-3", Hostname: "classic"},
-	}
 	writeJSON := func(w http.ResponseWriter, v any) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(v)
@@ -48,7 +42,6 @@ func networkFakeClient(t *testing.T) *verda.Client {
 	mux.HandleFunc("GET /private-networks/{id}/subnets", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, subnets[r.PathValue("id")])
 	})
-	mux.HandleFunc("GET /instances", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, instances) })
 	return newPollTestClient(t, mux)
 }
 
@@ -106,35 +99,5 @@ func TestResolveSubnet(t *testing.T) {
 				t.Errorf("got %s/%s, want %s/%s", n.ID, s.ID, tt.wantNet, tt.wantSub)
 			}
 		})
-	}
-}
-
-func TestListInstancesOn(t *testing.T) {
-	t.Parallel()
-	client := networkFakeClient(t)
-	ctx := context.Background()
-
-	tests := []struct {
-		network, subnet string
-		want            []string
-	}{
-		{network: "pn_a", want: []string{"i-1"}},
-		{network: "pn_a", subnet: "sn_a1", want: []string{"i-1"}},
-		{network: "pn_a", subnet: "sn_a2"},
-		{network: "pn_b", want: []string{"i-2"}},
-		{network: "pn_b", subnet: "sn_b1"},
-	}
-	for _, tt := range tests {
-		got, err := ListInstancesOn(ctx, client, tt.network, tt.subnet)
-		if err != nil {
-			t.Fatalf("ListInstancesOn: %v", err)
-		}
-		ids := make([]string, len(got))
-		for i := range got {
-			ids[i] = got[i].ID
-		}
-		if len(ids) != len(tt.want) || (len(ids) > 0 && ids[0] != tt.want[0]) {
-			t.Errorf("%s/%s: got %v, want %v", tt.network, tt.subnet, ids, tt.want)
-		}
 	}
 }

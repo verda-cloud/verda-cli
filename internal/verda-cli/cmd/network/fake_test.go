@@ -100,6 +100,29 @@ func (a *fakeAPI) addInstance(id, hostname, location, networkID, subnetID, publi
 	a.instances = append(a.instances, inst)
 }
 
+// workloads: the live instances on networkID, or on one subnet when subnetID is set.
+func (a *fakeAPI) workloads(networkID, subnetID string) []verda.PrivateNetworkWorkload {
+	out := []verda.PrivateNetworkWorkload{}
+	for i := range a.instances {
+		inst := &a.instances[i]
+		if inst.Status == verda.StatusDiscontinued || inst.PrivateNetworkID == nil || *inst.PrivateNetworkID != networkID {
+			continue
+		}
+		w := verda.PrivateNetworkWorkload{ID: inst.ID, Hostname: inst.Hostname, Status: inst.Status, Location: verda.Location{Code: inst.Location}, PublicIP: inst.IP}
+		if inst.SubnetID != nil {
+			w.SubnetID = *inst.SubnetID
+		}
+		if subnetID != "" && w.SubnetID != subnetID {
+			continue
+		}
+		if inst.PrivateIP != nil {
+			w.PrivateIP = *inst.PrivateIP
+		}
+		out = append(out, w)
+	}
+	return out
+}
+
 func (a *fakeAPI) addRoute(subnetID, id, destination string, gw *verda.AttachedInstance) {
 	a.routes[subnetID] = append(a.routes[subnetID], verda.Route{
 		ID: id, SubnetID: subnetID, Destination: destination, Instance: gw, CreatedAt: testCreated,
@@ -193,6 +216,20 @@ func (a *fakeAPI) handler() http.Handler {
 			subnets = []verda.Subnet{}
 		}
 		writeJSON(w, http.StatusOK, subnets)
+	})
+	mux.HandleFunc("GET /private-networks/{id}/workloads", func(w http.ResponseWriter, r *http.Request) {
+		if a.findNetwork(r.PathValue("id")) < 0 {
+			notFound(w, "private network")
+			return
+		}
+		writeJSON(w, http.StatusOK, a.workloads(r.PathValue("id"), ""))
+	})
+	mux.HandleFunc("GET /private-networks/{id}/subnets/{sid}/workloads", func(w http.ResponseWriter, r *http.Request) {
+		if a.findSubnet(r.PathValue("id"), r.PathValue("sid")) < 0 {
+			notFound(w, "subnet")
+			return
+		}
+		writeJSON(w, http.StatusOK, a.workloads(r.PathValue("id"), r.PathValue("sid")))
 	})
 	mux.HandleFunc("POST /private-networks/{id}/subnets", a.createSubnet)
 	mux.HandleFunc("GET /private-networks/{id}/subnets/{sid}", func(w http.ResponseWriter, r *http.Request) {

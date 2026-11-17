@@ -137,7 +137,7 @@ func TestSubnetDescribeInstancesEmptyVersusUnknown(t *testing.T) {
 	}
 
 	api := seededAPI()
-	api.failOn("GET /instances", 500, "internal_error", "boom")
+	api.failOn("GET /private-networks/pn_a/subnets/sn_a2/workloads", 500, "internal_error", "boom")
 	client = newFakeClient(t, api)
 	out, errOut, err := runNetwork(t, agentFactory(client), "subnet", "describe", "sn_a2")
 	if err != nil {

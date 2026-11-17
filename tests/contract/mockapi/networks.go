@@ -36,7 +36,9 @@ func (s *Server) registerNetworkRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /private-networks", s.handleCreateNetwork)
 	mux.HandleFunc("GET /private-networks/{id}", s.handleGetNetwork)
 	mux.HandleFunc("DELETE /private-networks/{id}", s.handleDeleteNetwork)
+	mux.HandleFunc("GET /private-networks/{id}/workloads", s.handleListWorkloads)
 	mux.HandleFunc("GET /private-networks/{id}/subnets", s.handleListSubnets)
+	mux.HandleFunc("GET /private-networks/{id}/subnets/{sid}/workloads", s.handleListWorkloads)
 	mux.HandleFunc("POST /private-networks/{id}/subnets", s.handleCreateSubnet)
 	mux.HandleFunc("DELETE /private-networks/{id}/subnets/{sid}", s.handleDeleteSubnet)
 	mux.HandleFunc("GET /private-networks/{id}/subnets/{sid}/routes", s.handleListRoutes)
@@ -80,6 +82,34 @@ func (s *Server) HasNetwork(id string) bool {
 	defer s.mu.Unlock()
 	_, ok := s.networks[id]
 	return ok
+}
+
+// handleListWorkloads lists the instances on a network, or on one subnet when the path names it.
+func (s *Server) handleListWorkloads(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	networkID, subnetID := r.PathValue("id"), r.PathValue("sid")
+	if s.networkLocked(w, networkID) == nil {
+		return
+	}
+	out := []verda.PrivateNetworkWorkload{}
+	for _, inst := range s.instances {
+		if inst.PrivateNetworkID == nil || *inst.PrivateNetworkID != networkID {
+			continue
+		}
+		if subnetID != "" && (inst.SubnetID == nil || *inst.SubnetID != subnetID) {
+			continue
+		}
+		wl := verda.PrivateNetworkWorkload{ID: inst.ID, Hostname: inst.Hostname, Status: inst.Status, Location: verda.Location{Code: inst.Location}, PublicIP: inst.IP}
+		if inst.SubnetID != nil {
+			wl.SubnetID = *inst.SubnetID
+		}
+		if inst.PrivateIP != nil {
+			wl.PrivateIP = *inst.PrivateIP
+		}
+		out = append(out, wl)
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) handleListNetworks(w http.ResponseWriter, _ *http.Request) {

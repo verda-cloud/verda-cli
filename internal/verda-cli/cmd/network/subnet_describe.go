@@ -75,8 +75,8 @@ func runSubnetDescribe(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.
 
 	ctx, cancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
 	defer cancel()
-	instances, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading instances...", func(ctx context.Context) ([]verda.Instance, error) {
-		return cmdutil.ListInstancesOn(ctx, client, network.ID, subnet.ID)
+	instances, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading instances...", func(ctx context.Context) ([]verda.PrivateNetworkWorkload, error) {
+		return client.PrivateNetworks.GetSubnetWorkloads(ctx, network.ID, subnet.ID)
 	})
 	view := subnetDescribeView{SubnetView: cmdutil.NewSubnetView(network.ID, subnet), NetworkName: network.Name}
 	if err != nil {
@@ -93,16 +93,13 @@ func runSubnetDescribe(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.
 	return nil
 }
 
-func briefs(instances []verda.Instance) []instanceBrief {
+func briefs(instances []verda.PrivateNetworkWorkload) []instanceBrief {
 	out := make([]instanceBrief, len(instances))
 	for i := range instances {
 		inst := &instances[i]
-		b := instanceBrief{ID: inst.ID, Hostname: inst.Hostname, Status: inst.Status}
-		if inst.PrivateIP != nil {
-			b.PrivateIP = *inst.PrivateIP
-		}
-		if inst.IP != nil {
-			b.PublicIP = *inst.IP
+		b := instanceBrief{ID: inst.ID, Hostname: inst.Hostname, Status: inst.Status, PrivateIP: inst.PrivateIP}
+		if inst.PublicIP != nil {
+			b.PublicIP = *inst.PublicIP
 		}
 		out[i] = b
 	}

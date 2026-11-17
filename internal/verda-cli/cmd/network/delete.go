@@ -78,7 +78,7 @@ func runDelete(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 
 	ctx, cancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
 	stop := spinner(ctx, f, "Checking what the network contains...")
-	instances, err := cmdutil.ListInstancesOn(ctx, client, network.ID, "")
+	instances, err := client.PrivateNetworks.GetWorkloads(ctx, network.ID)
 	var subnets []verda.Subnet
 	var routes map[string][]verda.Route
 	if err == nil {
@@ -165,17 +165,13 @@ func gatewayName(a *verda.AttachedInstance) string {
 }
 
 // instancesInUseError refuses a delete while instances are attached; the API would answer 409.
-func instancesInUseError(title, resource, name, id string, instances []verda.Instance) *cmdutil.AgentError {
+func instancesInUseError(title, resource, name, id string, instances []verda.PrivateNetworkWorkload) *cmdutil.AgentError {
 	labels := make([]string, len(instances))
 	details := make([]map[string]string, len(instances))
 	for i := range instances {
 		inst := &instances[i]
-		privateIP := ""
-		if inst.PrivateIP != nil {
-			privateIP = *inst.PrivateIP
-		}
-		labels[i] = fmt.Sprintf("%s (%s, %s, %s)", inst.Hostname, inst.ID, inst.Location, cmdutil.TextColumn(privateIP))
-		details[i] = map[string]string{"id": inst.ID, "hostname": inst.Hostname, "location": inst.Location, "private_ip": privateIP}
+		labels[i] = fmt.Sprintf("%s (%s, %s, %s)", inst.Hostname, inst.ID, inst.Location.Code, cmdutil.TextColumn(inst.PrivateIP))
+		details[i] = map[string]string{"id": inst.ID, "hostname": inst.Hostname, "location": inst.Location.Code, "private_ip": inst.PrivateIP}
 	}
 	return cmdutil.NewResourceInUseError(resource, id,
 		fmt.Sprintf("%s %s has %d instance(s): %s. Delete them first (verda vm action --action delete), then run this again.",

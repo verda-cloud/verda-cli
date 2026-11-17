@@ -69,7 +69,7 @@ func runSubnetDelete(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IO
 
 	ctx, cancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
 	stop := spinner(ctx, f, "Checking what the subnet contains...")
-	instances, err := cmdutil.ListInstancesOn(ctx, client, network.ID, subnet.ID)
+	instances, err := client.PrivateNetworks.GetSubnetWorkloads(ctx, network.ID, subnet.ID)
 	var routes []verda.Route
 	if err == nil {
 		routes, err = client.PrivateNetworks.GetRoutes(ctx, network.ID, subnet.ID)

@@ -70,10 +70,10 @@ func runDescribe(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStre
 	defer cancel()
 	stop := spinner(ctx, f, "Loading subnets...")
 	subnets, err := client.PrivateNetworks.GetSubnets(ctx, network.ID)
-	var instances []verda.Instance
+	var instances []verda.PrivateNetworkWorkload
 	var instErr error
 	if err == nil {
-		instances, instErr = cmdutil.ListInstancesOn(ctx, client, network.ID, "")
+		instances, instErr = client.PrivateNetworks.GetWorkloads(ctx, network.ID)
 	}
 	stop()
 	if err != nil {
