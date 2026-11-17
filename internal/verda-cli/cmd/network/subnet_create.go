@@ -127,7 +127,11 @@ func runSubnetCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IO
 		return err
 	}
 
-	req := verda.CreateSubnetRequest{LocationCode: opts.Location, Name: opts.Name, CIDR: opts.CIDR, IsDefault: opts.Default}
+	req := verda.CreateSubnetRequest{LocationCode: opts.Location, Name: opts.Name, CIDR: opts.CIDR}
+	if opts.Default {
+		// Without --default, omit is_default so the API makes the first subnet of a location its default.
+		req.IsDefault = new(true)
+	}
 	cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), "Request payload:", req)
 	ctx, cancel = context.WithTimeout(cmd.Context(), f.Options().Timeout)
 	defer cancel()

@@ -301,9 +301,14 @@ func (a *fakeAPI) createSubnet(w http.ResponseWriter, r *http.Request) {
 			first = false
 		}
 	}
+	// Like the API: nil makes the first subnet of a location the default; an explicit value wins.
+	isDefault := first
+	if req.IsDefault != nil {
+		isDefault = *req.IsDefault
+	}
 	s := verda.Subnet{
 		ID: a.id("sn"), Name: req.Name, Location: verda.Location{Code: req.LocationCode}, CIDR: req.CIDR,
-		IsDefault: req.IsDefault || first, TotalIPCount: 251, CreatedAt: testCreated,
+		IsDefault: isDefault, TotalIPCount: 251, CreatedAt: testCreated,
 	}
 	a.subnets[nid] = append(a.subnets[nid], s)
 	writeJSON(w, http.StatusCreated, s)
