@@ -91,13 +91,9 @@ func NewCmdSubnetCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.C
 }
 
 func runSubnetCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *subnetCreateOptions) error {
-	opts.Name = strings.TrimSpace(opts.Name)
-	opts.CIDR = strings.TrimSpace(opts.CIDR)
 	interactive := interactiveTTY(f)
-	if !interactive {
-		if missing := missingSubnetCreateFlags(opts); len(missing) > 0 {
-			return cmdutil.NewMissingFlagsError(missing)
-		}
+	if err := checkSubnetCreateFlags(opts, interactive); err != nil {
+		return err
 	}
 	client, err := f.VerdaClient()
 	if err != nil {
@@ -157,6 +153,26 @@ func runSubnetCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IO
 		isDefault = "yes"
 	}
 	_, _ = fmt.Fprintf(ioStreams.Out, "Created subnet %s (%s) in %s, %s, default: %s\n", view.Name, view.ID, view.Location, view.CIDR, isDefault)
+	return nil
+}
+
+// checkSubnetCreateFlags trims and checks the flag values before any API call or prompt.
+func checkSubnetCreateFlags(opts *subnetCreateOptions, interactive bool) error {
+	opts.Name = strings.TrimSpace(opts.Name)
+	opts.CIDR = strings.TrimSpace(opts.CIDR)
+	if opts.Name != "" {
+		if err := validateName(opts.Name); err != nil {
+			return cmdutil.NewValidationError(flagName, err.Error())
+		}
+	}
+	if opts.CIDR != "" {
+		if err := checkCIDRFormat(opts.CIDR); err != nil {
+			return cmdutil.NewValidationError(flagCIDR, err.Error())
+		}
+	}
+	if missing := missingSubnetCreateFlags(opts); !interactive && len(missing) > 0 {
+		return cmdutil.NewMissingFlagsError(missing)
+	}
 	return nil
 }
 

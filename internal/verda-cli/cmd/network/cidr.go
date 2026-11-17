@@ -28,6 +28,15 @@ var defaultSubnetPool = netip.MustParsePrefix("10.0.0.0/16")
 // defaultSubnetBits is the size of a suggested subnet (/24).
 const defaultSubnetBits = 24
 
+// checkCIDRFormat checks only that s is an IPv4 prefix, as the SDK does.
+// The API decides which ranges it accepts.
+func checkCIDRFormat(s string) error {
+	if p, err := netip.ParsePrefix(s); err != nil || !p.Addr().Is4() {
+		return fmt.Errorf("%q is not an IPv4 CIDR (example: 10.0.1.0/24)", s)
+	}
+	return nil
+}
+
 // freeSubnetCIDR returns the first /24 in 10.0.0.0/16 that overlaps none of taken.
 func freeSubnetCIDR(taken []netip.Prefix) (netip.Prefix, error) {
 	for a := defaultSubnetPool.Addr(); defaultSubnetPool.Contains(a); {

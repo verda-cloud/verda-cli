@@ -75,6 +75,9 @@ func NewCmdCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 
 func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *createOptions) error {
 	opts.Name = strings.TrimSpace(opts.Name)
+	if opts.Mode != verda.NetworkModeCustom && opts.Mode != verda.NetworkModeAuto {
+		return cmdutil.NewValidationError("mode", "must be custom or auto")
+	}
 	if opts.Name == "" {
 		if !interactiveTTY(f) {
 			return cmdutil.NewMissingFlagsError([]string{"--" + flagName})
@@ -83,13 +86,9 @@ func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 		if err := engine.Run(cmd.Context(), buildNetworkCreateFlow(opts)); err != nil {
 			return err
 		}
-		opts.Name = strings.TrimSpace(opts.Name)
 	}
 	if err := validateName(opts.Name); err != nil {
 		return cmdutil.NewValidationError("name", err.Error())
-	}
-	if opts.Mode != verda.NetworkModeCustom && opts.Mode != verda.NetworkModeAuto {
-		return cmdutil.NewValidationError("mode", "must be custom or auto")
 	}
 
 	client, err := f.VerdaClient()

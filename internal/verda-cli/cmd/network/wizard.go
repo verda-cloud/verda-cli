@@ -66,7 +66,7 @@ func stepNetworkName(opts *createOptions) wizard.Step {
 		Prompt:      wizard.TextInputPrompt,
 		Required:    true,
 		Validate:    func(v any) error { return validateName(strings.TrimSpace(v.(string))) },
-		Setter:      func(v any) { opts.Name = v.(string) },
+		Setter:      func(v any) { opts.Name = strings.TrimSpace(v.(string)) },
 		Resetter:    func() { opts.Name = "" },
 		IsSet:       func() bool { return opts.Name != "" },
 		Value:       func() any { return opts.Name },
@@ -166,6 +166,7 @@ func buildSubnetCreateFlow(opts *subnetCreateOptions, data *subnetCreateData) *w
 					}
 					return ""
 				},
+				Validate: func(v any) error { return checkCIDRFormat(strings.TrimSpace(v.(string))) },
 				Setter:   func(v any) { opts.CIDR = strings.TrimSpace(v.(string)) },
 				Resetter: func() { opts.CIDR = "" },
 				IsSet:    func() bool { return cidrSet },

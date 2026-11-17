@@ -19,6 +19,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
@@ -88,10 +89,11 @@ func interactiveTTY(f cmdutil.Factory) bool {
 	return isInteractiveTerminal() && !f.AgentMode() && f.OutputFormat() == outputTable
 }
 
-// checkNetworkArg: off a TTY, <network-id> is required. Call it before
-// f.VerdaClient() so bad input fails the same with or without credentials.
+// checkNetworkArg: off a TTY, <network-id> is required, and a blank ID is never
+// sent. Call it before f.VerdaClient() so bad input fails the same with or without credentials.
 func checkNetworkArg(f cmdutil.Factory, args []string) error {
-	if len(args) == 0 && !interactiveTTY(f) {
+	blank := len(args) > 0 && strings.TrimSpace(args[0]) == ""
+	if blank || (len(args) == 0 && !interactiveTTY(f)) {
 		return cmdutil.NewMissingFlagsError([]string{argNetwork})
 	}
 	return nil

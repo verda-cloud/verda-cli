@@ -17,6 +17,7 @@ package network
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
@@ -57,17 +58,17 @@ func NewCmdSubnet(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 	return cmd
 }
 
-// checkSubnetArgs: a subnet ID needs --network; off a TTY both are required.
+// checkSubnetArgs: a subnet ID needs --network; off a TTY both are required. A blank ID counts as missing.
 // Call it before f.VerdaClient() so bad input fails the same with or without credentials.
 func checkSubnetArgs(f cmdutil.Factory, networkID string, args []string) error {
 	if len(args) == 0 && interactiveTTY(f) {
 		return nil
 	}
 	var missing []string
-	if len(args) == 0 {
+	if len(args) == 0 || strings.TrimSpace(args[0]) == "" {
 		missing = append(missing, argSubnet)
 	}
-	if networkID == "" {
+	if strings.TrimSpace(networkID) == "" {
 		missing = append(missing, "--"+flagNetwork)
 	}
 	if len(missing) > 0 {
