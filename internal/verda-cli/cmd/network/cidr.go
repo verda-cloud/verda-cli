@@ -18,45 +18,15 @@ import (
 	"fmt"
 	"net/netip"
 	"slices"
-	"strings"
 
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
 )
-
-// maxSubnetBits is the smallest subnet the API accepts (/29).
-const maxSubnetBits = 29
 
 // defaultSubnetPool is where freeSubnetCIDR looks for a subnet range.
 var defaultSubnetPool = netip.MustParsePrefix("10.0.0.0/16")
 
 // defaultSubnetBits is the size of a suggested subnet (/24).
 const defaultSubnetBits = 24
-
-var privateRanges = []netip.Prefix{
-	netip.MustParsePrefix("10.0.0.0/8"),
-	netip.MustParsePrefix("172.16.0.0/12"),
-	netip.MustParsePrefix("192.168.0.0/16"),
-}
-
-// validateSubnetCIDR mirrors the API rules: canonical IPv4, /29 or larger, inside an RFC 1918 range.
-func validateSubnetCIDR(s string) (netip.Prefix, error) {
-	p, err := netip.ParsePrefix(strings.TrimSpace(s))
-	if err != nil || !p.Addr().Is4() {
-		return netip.Prefix{}, fmt.Errorf("%q is not an IPv4 CIDR (example: 10.0.1.0/24)", s)
-	}
-	if p != p.Masked() {
-		return netip.Prefix{}, fmt.Errorf("%q is not canonical; use %s", s, p.Masked())
-	}
-	if p.Bits() > maxSubnetBits {
-		return netip.Prefix{}, fmt.Errorf("%q is too small; the smallest subnet is /%d", s, maxSubnetBits)
-	}
-	for _, r := range privateRanges {
-		if r.Bits() <= p.Bits() && r.Contains(p.Addr()) {
-			return p, nil
-		}
-	}
-	return netip.Prefix{}, fmt.Errorf("%q must be inside 10.0.0.0/8, 172.16.0.0/12 or 192.168.0.0/16", s)
-}
 
 // freeSubnetCIDR returns the first /24 in 10.0.0.0/16 that overlaps none of taken.
 func freeSubnetCIDR(taken []netip.Prefix) (netip.Prefix, error) {

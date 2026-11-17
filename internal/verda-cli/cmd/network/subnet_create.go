@@ -62,10 +62,8 @@ func NewCmdSubnetCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.C
 			Without --cidr, the CLI uses the first free /24 in 10.0.0.0/16
 			that does not overlap a subnet of the network. It prints the
 			CIDR, except in agent mode.
-			A --cidr must be an IPv4 range of /29 or larger in 10.0.0.0/8,
-			172.16.0.0/12 or 192.168.0.0/16. It must not overlap a subnet
-			of the network in any location. The name default is
-			<location>-<n> in lower case, for example fin-03-1.
+			The API decides which --cidr values it accepts. The name
+			default is <location>-<n> in lower case, for example fin-03-1.
 
 			Without --default, the API makes the first subnet of a location
 			its default. --default makes the new subnet the default.
@@ -284,27 +282,9 @@ func (d *subnetCreateData) hasSubnetNamed(networkID, name string) bool {
 	return slices.ContainsFunc(d.subnets[networkID], func(s verda.Subnet) bool { return s.Name == name })
 }
 
-func (d *subnetCreateData) checkCIDR(networkID, cidr string) error {
-	p, err := validateSubnetCIDR(cidr)
-	if err != nil {
-		return err
-	}
-	subnets := d.subnets[networkID]
-	for i := range subnets {
-		taken, err := netip.ParsePrefix(subnets[i].CIDR)
-		if err == nil && p.Overlaps(taken) {
-			return fmt.Errorf("%s overlaps subnet %s (%s, %s)", p, subnets[i].Name, subnets[i].CIDR, subnets[i].Location.Code)
-		}
-	}
-	return nil
-}
-
 func (d *subnetCreateData) validate(opts *subnetCreateOptions) error {
 	if err := d.checkName(opts.Network, opts.Name); err != nil {
 		return cmdutil.NewValidationError(flagName, err.Error())
-	}
-	if err := d.checkCIDR(opts.Network, opts.CIDR); err != nil {
-		return cmdutil.NewValidationError(flagCIDR, err.Error())
 	}
 	return nil
 }

@@ -15,7 +15,7 @@ verda network delete "$NETWORK_ID"
 ## Agent Mode
 
 - Missing `--name`, `--network`, `--location` or an ID: `MISSING_REQUIRED_FLAGS` (exit 2).
-- Bad input (mode, name, CIDR, location): `VALIDATION_ERROR` (exit 2), before the create request.
+- Bad input (mode, name, location): `VALIDATION_ERROR` (exit 2), before the create request. The API checks `--cidr`.
 - Delete without `--yes`: `CONFIRMATION_REQUIRED` (exit 2).
 - Unknown ID: `NOT_FOUND` (exit 5).
 - Delete success: `{"resource", "id", "name", "action": "delete", "status": "completed"}`.

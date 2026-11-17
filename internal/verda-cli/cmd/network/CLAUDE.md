@@ -7,7 +7,7 @@
 - Parent: `verda network` (aliases `networks`, `net`, `private-network`, `vpc`), tagged `(beta)` via `cmdutil.TagAnnotation`, registered under "Resource Commands:" in `cmd/cmd.go`.
 - Verbs: `list` (`ls`), `create`, `delete` (`rm`); `subnet` (`subnets`) with `list` (`ls`), `create` and `delete` (`rm`).
 - SDK: `client.PrivateNetworks` (experimental in the SDK).
-- Files: one per verb; `cidr.go` (CIDR checks, free /24), `views.go` (JSON/YAML shapes), `wizard.go` (create flows); tests use the in-memory API in `fake_test.go`.
+- Files: one per verb; `cidr.go` (free /24), `views.go` (JSON/YAML shapes), `wizard.go` (create flows); tests use the in-memory API in `fake_test.go`.
 
 ## Domain-Specific Logic
 
@@ -19,8 +19,8 @@
 - **Delete with instances: the API refuses (409) and changes nothing.** The CLI does not check first; `ClassifyError` reports the 409 as `API_ERROR` (exit 4). It never deletes instances.
 - **Network delete removes its subnets.** The confirmation lists them (one extra `GetSubnets` call, skipped with `--yes`).
 - **`is_default` on network create is only sent when true** (`CreatePrivateNetworkRequest.IsDefault` is `omitempty`); the test checks the exact body.
-- **`is_default` on subnet create is a `*bool`.** The CLI sets it only when the user sets `--default` or answers the wizard step. `--default=false` sends `false`, and the API keeps it, also for the first subnet. Nil lets the API make the first subnet of a location its default. For that reason, the wizard skips the step for the first subnet in a location.
-- **Subnet CIDR.** `freeSubnetCIDR` suggests the first free /24 in 10.0.0.0/16. `checkCIDR` refuses an overlap with any subnet of the network, in all locations, before the POST. With `--network`, the command reads only that network's subnets.
+- **`is_default` on subnet create is a `*bool`.** The CLI sets it only when the user sets `--default` or answers the wizard step. `--default=false` sends `false`, and the API keeps it, also for the first subnet. Nil lets the API make the first subnet of a location its default. For that reason, the wizard skips the step for the first subnet in a location, unless `--default` was given (a skipped step resets its value).
+- **Subnet CIDR.** `freeSubnetCIDR` suggests the first free /24 in 10.0.0.0/16. The CLI does not check `--cidr`: the API decides which ranges it accepts. With `--network`, the command reads only that network's subnets.
 - **Subnet locations.** Only locations with `IsPrivateNetworksEnabled`. Another location gives `VALIDATION_ERROR` that lists the allowed codes.
 
 ## Gotchas & Edge Cases

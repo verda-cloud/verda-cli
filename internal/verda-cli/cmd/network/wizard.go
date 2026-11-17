@@ -166,7 +166,6 @@ func buildSubnetCreateFlow(opts *subnetCreateOptions, data *subnetCreateData) *w
 					}
 					return ""
 				},
-				Validate: func(v any) error { return data.checkCIDR(opts.Network, strings.TrimSpace(v.(string))) },
 				Setter:   func(v any) { opts.CIDR = strings.TrimSpace(v.(string)) },
 				Resetter: func() { opts.CIDR = "" },
 				IsSet:    func() bool { return cidrSet },

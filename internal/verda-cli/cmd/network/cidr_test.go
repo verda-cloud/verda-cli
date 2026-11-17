@@ -28,39 +28,6 @@ func prefixes(t *testing.T, ss ...string) []netip.Prefix {
 	return out
 }
 
-func TestValidateSubnetCIDR(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		in    string
-		valid bool
-	}{
-		{"10.0.1.0/24", true},
-		{"172.16.0.0/12", true},
-		{"192.168.10.0/29", true},
-		{"10.0.0.0/8", true},
-		{"10.0.1.0/30", false},      // smaller than /29
-		{"10.0.1.5/24", false},      // not canonical
-		{"8.8.8.0/24", false},       // public
-		{"172.32.0.0/16", false},    // outside 172.16/12
-		{"10.0.0.0/7", false},       // larger than the private range
-		{"fd00::/64", false},        // IPv6
-		{"not-a-cidr", false},       // invalid
-		{"", false},                 // empty
-		{"192.168.0.0/15", false},   // wider than 192.168/16
-		{" 10.0.2.0/24 ", true},     // whitespace trimmed
-		{"172.16.255.248/29", true}, // smallest allowed
-	}
-	for _, tt := range tests {
-		t.Run(tt.in, func(t *testing.T) {
-			t.Parallel()
-			_, err := validateSubnetCIDR(tt.in)
-			if (err == nil) != tt.valid {
-				t.Errorf("validateSubnetCIDR(%q) err = %v, want valid=%v", tt.in, err, tt.valid)
-			}
-		})
-	}
-}
-
 func TestFreeSubnetCIDR(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

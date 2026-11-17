@@ -91,20 +91,6 @@ func TestSubnetCreateDefaultIsSentOnlyWhenSet(t *testing.T) {
 	}
 }
 
-func TestSubnetCreateRejectsOverlapInAnyLocation(t *testing.T) {
-	t.Parallel()
-	api := seededAPI()
-	client := newFakeClient(t, api)
-	// 10.0.1.0/24 is the US-SOUTHWEST-1 subnet; a FIN-03 subnet must not overlap it either.
-	_, _, err := runNetwork(t, agentFactory(client), "subnet", "create", "--network", "pn_a", "-l", "FIN-03", "--cidr", "10.0.0.0/16")
-	if code := agentErrorCode(err); code != "VALIDATION_ERROR" || !strings.Contains(err.Error(), "overlaps subnet") {
-		t.Fatalf("err = %v, want an overlap VALIDATION_ERROR", err)
-	}
-	if len(postBodies(api)) != 0 {
-		t.Error("no POST may be sent")
-	}
-}
-
 func TestSubnetCreateSendsTrimmedCIDR(t *testing.T) {
 	t.Parallel()
 	api := seededAPI()
@@ -114,19 +100,6 @@ func TestSubnetCreateSendsTrimmedCIDR(t *testing.T) {
 	}
 	if bodies := postBodies(api); len(bodies) != 1 || !strings.Contains(bodies[0], `"cidr":"10.0.8.0/24"`) {
 		t.Fatalf("POST bodies = %q, want one with the trimmed CIDR", bodies)
-	}
-}
-
-func TestSubnetCreateRejectsInvalidCIDR(t *testing.T) {
-	t.Parallel()
-	api := seededAPI()
-	client := newFakeClient(t, api)
-	_, _, err := runNetwork(t, agentFactory(client), "subnet", "create", "--network", "pn_a", "-l", "FIN-03", "--cidr", "10.0.9.0/30")
-	if code := agentErrorCode(err); code != "VALIDATION_ERROR" {
-		t.Fatalf("code = %q, want VALIDATION_ERROR", code)
-	}
-	if len(postBodies(api)) != 0 {
-		t.Error("no POST may be sent")
 	}
 }
 
@@ -246,7 +219,6 @@ func TestSubnetCreateFlowEditedCIDRAndDefault(t *testing.T) {
 		wizard.SelectResult(0), // alpha (has FIN-03 already)
 		wizard.SelectResult(0), // FIN-03
 		wizard.TextResult("web"),
-		wizard.TextResult("10.0.0.0/24"), // overlaps fin-03-1: asked again
 		wizard.TextResult("172.16.4.0/24"),
 		wizard.ConfirmResult(true),
 	)
