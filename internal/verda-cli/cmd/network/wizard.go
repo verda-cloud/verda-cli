@@ -177,8 +177,9 @@ func buildSubnetCreateFlow(opts *subnetCreateOptions, data *subnetCreateData) *w
 				Description: "Make it the default subnet of this location?",
 				Prompt:      wizard.ConfirmPrompt,
 				DependsOn:   []string{flagNetwork, flagLocation},
-				ShouldSkip:  func(_ map[string]any) bool { return data.firstInLocation(opts.Network, opts.Location) },
-				Default:     func(_ map[string]any) any { return false },
+				// The engine resets a skipped step, so never skip a --default flag.
+				ShouldSkip: func(_ map[string]any) bool { return !defaultSet && data.firstInLocation(opts.Network, opts.Location) },
+				Default:    func(_ map[string]any) any { return false },
 				Setter: func(v any) {
 					opts.Default, _ = v.(bool)
 					opts.defaultSet = true
