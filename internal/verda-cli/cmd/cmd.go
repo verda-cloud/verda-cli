@@ -35,6 +35,7 @@ import (
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/instancetypes"
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/locations"
 	mcpcmd "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/mcp"
+	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/network"
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/objectstorage"
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/registry"
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/serverless"
@@ -135,6 +136,7 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) (*cobra.Command, *clioptions.Op
 		images.NewCmdImages(f, ioStreams),
 		instancetypes.NewCmdInstanceTypes(f, ioStreams),
 		locations.NewCmdLocations(f, ioStreams),
+		network.NewCmdNetwork(f, ioStreams),
 		registry.NewCmdRegistry(f, ioStreams),
 		objectstorage.NewCmdObjectStorage(f, ioStreams),
 		sshkey.NewCmdSSHKey(f, ioStreams),
