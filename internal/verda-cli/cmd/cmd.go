@@ -17,7 +17,6 @@ package cmd
 import (
 	"errors"
 	"fmt"
-	"os"
 	"runtime/debug"
 
 	"github.com/spf13/cobra"
@@ -160,14 +159,13 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) (*cobra.Command, *clioptions.Op
 			},
 		},
 	}
-	serverlessCmds := []*cobra.Command{serverless.NewCmdContainer(f, ioStreams)}
-	if batchjobEnabled() {
-		serverlessCmds = append(serverlessCmds, serverless.NewCmdBatchjob(f, ioStreams))
-	}
 	groups = append(groups,
 		cmdutil.CommandGroup{
-			Message:  "Serverless Commands:",
-			Commands: serverlessCmds,
+			Message: "Serverless Commands:",
+			Commands: []*cobra.Command{
+				serverless.NewCmdContainer(f, ioStreams),
+				serverless.NewCmdBatchjob(f, ioStreams),
+			},
 		},
 		cmdutil.CommandGroup{
 			Message:  "Resource Commands:",
@@ -203,15 +201,6 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) (*cobra.Command, *clioptions.Op
 	cmdutil.SetUsageTemplate(cmd, groups)
 
 	return cmd, opts
-}
-
-// batchjobEnabled gates the pre-release batchjob subtree behind
-// VERDA_BATCHJOB_ENABLED=1/true. Without it `verda batchjob` returns "unknown
-// command". The parent command also sets Hidden so it stays out of
-// `verda --help` even when a tester flips the env var on.
-func batchjobEnabled() bool {
-	v := os.Getenv("VERDA_BATCHJOB_ENABLED")
-	return v == "1" || v == "true"
 }
 
 // skipCredentialResolution returns true for commands that should work
