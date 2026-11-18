@@ -8,6 +8,7 @@
 - [`29fa441`] Feat/serverless containers missing features
 - [`595510f`] Fix: removed empty file
 - [`ad8164f`] Feat(network): add verda network and subnet list, create and delete for mk8s (beta)
+- [`7ece6b0`] Feat(serverless): release container and batchjob as ungated features
 
 ## [v1.10.0] - 2026-11-06
 - [`2a464bc`] Chore(deps): update verdacloud-sdk-go to v1.7.0 and add go fix check
