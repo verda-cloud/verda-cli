@@ -290,3 +290,13 @@ func agentErrorCode(err error) string {
 	}
 	return ""
 }
+
+func seededAPI() *fakeAPI {
+	api := newFakeAPI()
+	api.addNetwork("pn_a", "alpha", true)
+	api.addNetwork("pn_b", "beta", false)
+	api.addSubnet("pn_a", "sn_a1", "fin-03-1", "FIN-03", "10.0.0.0/24", true)
+	api.addSubnet("pn_a", "sn_a2", "us-1", "US-SOUTHWEST-1", "10.0.1.0/24", true)
+	api.subnets["pn_a"][0].DefaultRouteInstance = &verda.AttachedInstance{ID: "i-gw", Hostname: "gw-1"}
+	return api
+}
