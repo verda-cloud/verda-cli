@@ -18,23 +18,26 @@ import (
 	"bytes"
 	"testing"
 
+	"github.com/spf13/cobra"
+
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
 
-// container is a visible beta; batchjob stays Hidden (and env-gated in
-// cmd/cmd.go) until it ships.
-func TestServerlessGate(t *testing.T) {
+// Both trees are GA: visible, untagged. A reintroduced Hidden or "beta" tag
+// would silently drop them from `verda --help` and the generated docs.
+func TestServerlessCommandsVisible(t *testing.T) {
 	f := cmdutil.NewTestFactory(nil)
 	streams := cmdutil.IOStreams{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}
 
-	c := NewCmdContainer(f, streams)
-	if c.Hidden {
-		t.Errorf("container command should be visible")
-	}
-	if got := c.Annotations[cmdutil.TagAnnotation]; got != "beta" {
-		t.Errorf("container tag = %q, want beta", got)
-	}
-	if c := NewCmdBatchjob(f, streams); !c.Hidden {
-		t.Errorf("batchjob command should stay Hidden")
+	for name, c := range map[string]*cobra.Command{
+		"container": NewCmdContainer(f, streams),
+		"batchjob":  NewCmdBatchjob(f, streams),
+	} {
+		if c.Hidden {
+			t.Errorf("%s command should be visible", name)
+		}
+		if tag := c.Annotations[cmdutil.TagAnnotation]; tag != "" {
+			t.Errorf("%s tag = %q, want none", name, tag)
+		}
 	}
 }

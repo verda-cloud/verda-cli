@@ -69,31 +69,18 @@ func TestShouldCheckVersion(t *testing.T) {
 	}
 }
 
-// container is always registered (beta); batchjob only with VERDA_BATCHJOB_ENABLED.
+// Both serverless trees are GA: registered unconditionally and visible in `verda --help`.
 func TestServerlessCommandRegistration(t *testing.T) {
-	for _, tc := range []struct {
-		env      string
-		batchjob bool
-	}{
-		{"", false},
-		{"1", true},
-		{"true", true},
-		{"0", false},
-	} {
-		t.Run("VERDA_BATCHJOB_ENABLED="+tc.env, func(t *testing.T) {
-			t.Setenv("VERDA_HOME", t.TempDir())
-			t.Setenv("VERDA_BATCHJOB_ENABLED", tc.env)
-			root, _ := NewRootCommand(cmdutil.IOStreams{In: &bytes.Buffer{}, Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}})
-			found := map[string]*cobra.Command{}
-			for _, c := range root.Commands() {
-				found[c.Name()] = c
-			}
-			if c := found["container"]; c == nil || c.Hidden {
-				t.Errorf("container: registered=%v, want registered and not hidden", c != nil)
-			}
-			if _, ok := found["batchjob"]; ok != tc.batchjob {
-				t.Errorf("batchjob registered = %v, want %v", ok, tc.batchjob)
-			}
-		})
+	t.Setenv("VERDA_HOME", t.TempDir())
+	root, _ := NewRootCommand(cmdutil.IOStreams{In: &bytes.Buffer{}, Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}})
+	found := map[string]*cobra.Command{}
+	for _, c := range root.Commands() {
+		found[c.Name()] = c
+	}
+	for _, name := range []string{"container", "batchjob"} {
+		c := found[name]
+		if c == nil || c.Hidden {
+			t.Errorf("%s: registered=%v, want registered and not hidden", name, c != nil)
+		}
 	}
 }

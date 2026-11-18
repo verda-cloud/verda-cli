@@ -7,8 +7,6 @@ verda container   # → /container-deployments (continuous; supports spot)
 verda batchjob    # → /job-deployments (one-shot; deadline-based; no spot)
 ```
 
-`verda container` is a beta: it shows in `verda --help` as `(beta)`. `verda batchjob` is pre-release: it is registered only with `VERDA_BATCHJOB_ENABLED=1` and stays hidden from `verda --help`.
-
 Both command trees live in the `serverless` Go package (they share wizard step factories, validators, and the API cache), but are registered as top-level commands so users type `verda container ...` rather than `verda serverless container ...`.
 
 ## Container deployments
