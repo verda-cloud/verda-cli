@@ -205,6 +205,18 @@ Env names must match `^[A-Z_][A-Z0-9_]*$` (uppercase alphanumerics + underscore,
 
 The describe card shows env names only. `-o json|yaml` and `--agent` print plain values verbatim, as the API returns them. Put sensitive values in secrets (`--env-secret`): output shows only the secret name.
 
+### Managing env on a running deployment
+
+`verda container env` changes variables in place, without a redeploy. Every subcommand takes the **deployment name**; the CLI resolves the container inside it.
+
+```bash
+verda container env list my-endpoint
+verda container env set my-endpoint --env HF_HOME=/data/.huggingface --env-secret API_KEY=my-secret
+verda container env unset --deployment my-endpoint HF_HOME MODEL_NAME
+```
+
+`set` adds variables that do not exist yet and updates the ones that do. `unset` asks for confirmation (`--yes` to skip; required in agent mode). Without a name on a terminal, `list` and `set` open a deployment picker; `unset` uses `--deployment`.
+
 `verda container env list|set|unset` operate on the deployment's first container (the CLI creates exactly one, named `<deployment>-0` by the API). On a deployment with several containers, `env list` shows the first and prints a warning.
 
 ## See also

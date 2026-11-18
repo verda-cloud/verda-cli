@@ -25,7 +25,7 @@ This rule applies equally to Claude, Codex, Cursor, or a human editing the packa
   - `verda container` → `/container-deployments` (continuous endpoints, supports spot)
   - `verda batchjob` → `/job-deployments` (one-shot jobs, deadline-based, **no spot**)
 - There is **no** `verda serverless` parent command — the two trees were promoted to root for shorter invocations. They still share this Go package because they share wizard step factories, validators, and the API cache.
-- Verbs (both trees): `create`, `update`, `list` (alias `ls`), `describe` (aliases `get`, `show`), `delete` (aliases `rm`, `del`), `pause`, `resume`, `purge-queue`. Container also has `restart`, `scale` and `replicas`.
+- Verbs (both trees): `create`, `update`, `list` (alias `ls`), `describe` (aliases `get`, `show`), `delete` (aliases `rm`, `del`), `pause`, `resume`, `purge-queue`. Container also has `restart`, `scale`, `replicas`, and the `env`, `secret`, `file-secret` and `registry-creds` subtrees.
 - Files:
   - `container.go`, `batchjob.go` — Top-level command builders. `NewCmdContainer` and `NewCmdBatchjob` are exported and called directly from `cmd/cmd.go`. Both are GA: registered unconditionally, visible, no `cmdutil.TagAnnotation`. `visibility_test.go` and `cmd/cmd_test.go` guard this (the former `VERDA_BATCHJOB_ENABLED` gate and `(beta)` tag are gone).
   - `container_create.go` — `containerCreateOptions`, flags, `request()`, validate(), wizard entry point.
@@ -36,6 +36,7 @@ This rule applies equally to Claude, Codex, Cursor, or a human editing the packa
   - `container_scale.go` — `container scale`: flags → `scaling.Change`, confirm, PATCH, optional `--wait`.
   - `container_scale_wizard.go` — `buildScaleFlow`: setting multi-select, then one step per setting.
   - `container_replicas.go` — `container replicas`: `GetDeploymentReplicas` + table / structured output.
+  - `container_env.go` — `container env list|set|unset`: resolves the deployment's inner container (`containerNameOf`) and reads the grouped env GET (`fetchEnvVars`). See "Env endpoints key on the inner container" below.
   - `container_delete.go` — `DeleteDeployment(timeoutMs)` + destructive confirm.
   - `container_actions.go` — Data-driven action factory `newContainerActionCmd` (pause/resume/restart/purge-queue).
   - `batchjob_create.go` — `batchjobCreateOptions` (simpler: no spot, deadline required).

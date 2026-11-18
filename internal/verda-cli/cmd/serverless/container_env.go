@@ -124,7 +124,11 @@ func newCmdEnvList(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Comman
 		Use:     "list <deployment>",
 		Aliases: []string{"ls"},
 		Short:   "List environment variables",
-		Args:    cobra.MaximumNArgs(1),
+		Example: cmdutil.Examples(`
+			# List variables on a deployment (secret-backed values are masked)
+			verda container env list my-endpoint
+		`),
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name, err := resolveContainerName(cmd, f, ioStreams, args)
 			if err != nil {
