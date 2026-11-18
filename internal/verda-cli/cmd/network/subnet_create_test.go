@@ -205,7 +205,7 @@ func TestSubnetCreateFlowDefaults(t *testing.T) {
 		wizard.SelectResult(0), // FIN-03
 		wizard.TextResult(""),  // name: default
 		wizard.TextResult(""),  // CIDR: suggestion
-		// The default step is skipped: first subnet in the location.
+		// The default step is skipped: no default subnet in the location.
 	)
 	if opts.Network != "pn_b" || opts.Location != "FIN-03" || opts.Name != "fin-03-1" || opts.CIDR != "10.0.0.0/24" || opts.Default || opts.defaultSet {
 		t.Errorf("opts = %+v", opts)

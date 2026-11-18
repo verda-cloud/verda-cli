@@ -178,7 +178,7 @@ func buildSubnetCreateFlow(opts *subnetCreateOptions, data *subnetCreateData) *w
 				Prompt:      wizard.ConfirmPrompt,
 				DependsOn:   []string{flagNetwork, flagLocation},
 				// The engine resets a skipped step, so never skip a --default flag.
-				ShouldSkip: func(_ map[string]any) bool { return !defaultSet && data.firstInLocation(opts.Network, opts.Location) },
+				ShouldSkip: func(_ map[string]any) bool { return !defaultSet && data.noDefaultIn(opts.Network, opts.Location) },
 				Default:    func(_ map[string]any) any { return false },
 				Setter: func(v any) {
 					opts.Default, _ = v.(bool)

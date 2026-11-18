@@ -66,10 +66,10 @@ func NewCmdSubnetCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.C
 			The API decides which --cidr values it accepts. The name
 			default is <location>-<n> in lower case, for example fin-03-1.
 
-			Without --default, the API makes the first subnet of a location
-			its default. --default makes the new subnet the default.
-			--default=false makes it not the default, also when it is
-			the first subnet in its location.
+			Without --default, the new subnet becomes the default when the
+			network has no default subnet in its location. --default makes
+			the new subnet the default. --default=false makes it not the
+			default, also when the location has no default.
 		`),
 		Example: cmdutil.Examples(`
 			verda network subnet create
@@ -306,13 +306,10 @@ func (d *subnetCreateData) validate(opts *subnetCreateOptions) error {
 	return nil
 }
 
-// firstInLocation: the API makes the first subnet of a location its default.
-func (d *subnetCreateData) firstInLocation(networkID, location string) bool {
-	subnets := d.subnets[networkID]
-	for i := range subnets {
-		if strings.EqualFold(subnets[i].Location.Code, location) {
-			return false
-		}
-	}
-	return true
+// noDefaultIn: without is_default, the API makes a new subnet the default
+// when the network has no default subnet in its location.
+func (d *subnetCreateData) noDefaultIn(networkID, location string) bool {
+	return !slices.ContainsFunc(d.subnets[networkID], func(s verda.Subnet) bool {
+		return s.IsDefault && strings.EqualFold(s.Location.Code, location)
+	})
 }
