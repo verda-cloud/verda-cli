@@ -55,9 +55,10 @@ func NewCmdSubnetCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.C
 		Short: "Create a subnet in a private network",
 		Long: cmdutil.LongDesc(`
 			Create a subnet in one location of a private network. The
-			location must support private networks. On a terminal, the
-			CLI asks for the values that you do not give. In scripts and
-			agent mode, --network and --location are necessary.
+			location must support private networks. On a terminal without
+			--network or --location, the CLI asks for each value that you
+			do not give. In scripts and agent mode, --network and
+			--location are necessary.
 
 			Without --cidr, the CLI uses the first free /24 in 10.0.0.0/16
 			that does not overlap a subnet of the network. It prints the

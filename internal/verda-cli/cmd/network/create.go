@@ -44,8 +44,9 @@ func NewCmdCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 		Use:   "create",
 		Short: "Create a private network",
 		Long: cmdutil.LongDesc(`
-			Create a private network. On a terminal, omitted values are
-			asked for; in scripts and agent mode --name is required.
+			Create a private network. On a terminal without --name, the
+			CLI asks for the name and for each value that you do not
+			give. In scripts and agent mode, --name is necessary.
 
 			Mode "custom" (the default) means you create the subnets.
 			Mode "auto" matters only for the default network: a deploy
@@ -75,6 +76,7 @@ func NewCmdCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 
 func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *createOptions) error {
 	opts.Name = strings.TrimSpace(opts.Name)
+	opts.Mode = strings.ToLower(strings.TrimSpace(opts.Mode))
 	if opts.Mode != verda.NetworkModeCustom && opts.Mode != verda.NetworkModeAuto {
 		return cmdutil.NewValidationError("mode", "must be custom or auto")
 	}
@@ -117,7 +119,8 @@ func runCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStream
 		_, _ = fmt.Fprint(ioStreams.Out, ", default")
 	}
 	_, _ = fmt.Fprintln(ioStreams.Out)
-	if view.Mode == verda.NetworkModeCustom {
+	// Auto mode creates subnets only for the default network.
+	if view.Mode == verda.NetworkModeCustom || !view.IsDefault {
 		_, _ = fmt.Fprintln(ioStreams.ErrOut, "Next: verda network subnet create --network "+view.ID)
 	}
 	return nil
