@@ -205,6 +205,8 @@ Env names must match `^[A-Z_][A-Z0-9_]*$` (uppercase alphanumerics + underscore,
 
 The describe card shows env names only. `-o json|yaml` and `--agent` print plain values verbatim, as the API returns them. Put sensitive values in secrets (`--env-secret`): output shows only the secret name.
 
+`verda container env list|set|unset` operate on the deployment's first container (the CLI creates exactly one, named `<deployment>-0` by the API). On a deployment with several containers, `env list` shows the first and prints a warning.
+
 ## See also
 
 - `CLAUDE.md` in this directory — domain knowledge + gotchas for future Claude sessions

@@ -17,6 +17,8 @@ package serverless
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"net/url"
 	"strings"
 	"text/tabwriter"
 
@@ -27,6 +29,75 @@ import (
 )
 
 const envValueMasked = "***"
+
+// containerNameOf: the env endpoints key `container_name` on the container
+// inside the deployment (the API names it "<deployment>-0"), not on the
+// deployment; sending the deployment name returns not_found.
+func containerNameOf(ctx context.Context, client *verda.Client, deployment string) (string, error) {
+	d, err := client.ContainerDeployments.GetDeploymentByName(ctx, deployment)
+	if err != nil {
+		return "", err
+	}
+	if len(d.Containers) == 0 {
+		return "", fmt.Errorf("deployment %q has no containers", deployment)
+	}
+	return d.Containers[0].Name, nil
+}
+
+// envVarGroup is one element of the GET environment-variables response,
+// which is grouped per container (GetDeploymentEnvVariablesPublicApiResponseDto).
+type envVarGroup struct {
+	ContainerName string                  `json:"container_name"`
+	Env           []verda.ContainerEnvVar `json:"env"`
+}
+
+// fetchEnvVars reads the grouped response directly. SDK v1.9.0's
+// GetEnvironmentVariables decodes it as a flat []ContainerEnvVar, which
+// yields one blank entry per container; drop this once the SDK returns groups.
+func fetchEnvVars(ctx context.Context, client *verda.Client, deployment string) ([]envVarGroup, error) {
+	req, err := client.NewRequest(ctx, http.MethodGet, "/container-deployments/"+url.PathEscape(deployment)+"/environment-variables", nil)
+	if err != nil {
+		return nil, err
+	}
+	var groups []envVarGroup
+	if _, err := client.Do(req, &groups); err != nil {
+		return nil, err
+	}
+	return groups, nil
+}
+
+// envTarget is what an env write needs: the container to key on and its current variables.
+type envTarget struct {
+	Container string
+	Vars      []verda.ContainerEnvVar
+}
+
+func loadEnvTarget(ctx context.Context, client *verda.Client, deployment string) (*envTarget, error) {
+	cn, err := containerNameOf(ctx, client, deployment)
+	if err != nil {
+		return nil, err
+	}
+	groups, err := fetchEnvVars(ctx, client, deployment)
+	if err != nil {
+		return nil, err
+	}
+	return &envTarget{Container: cn, Vars: envVarsOf(groups, cn)}, nil
+}
+
+// envVarsOf: the variables of container; "" picks the first group. The
+// deployment GET and the env GET are separate reads, so the container may be
+// missing from the groups (no vars yet, or a lagging read): that is empty, not an error.
+func envVarsOf(groups []envVarGroup, container string) []verda.ContainerEnvVar {
+	if container == "" && len(groups) > 0 {
+		return groups[0].Env
+	}
+	for i := range groups {
+		if groups[i].ContainerName == container {
+			return groups[i].Env
+		}
+	}
+	return nil
+}
 
 func newCmdContainerEnv(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 	cmd := &cobra.Command{
@@ -70,12 +141,16 @@ func newCmdEnvList(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Comman
 			ctx, cancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
 			defer cancel()
 
-			vars, err := cmdutil.WithSpinner(ctx, f.Status(), "Fetching environment variables...", func(ctx context.Context) ([]verda.ContainerEnvVar, error) {
-				return client.ContainerDeployments.GetEnvironmentVariables(ctx, name)
+			groups, err := cmdutil.WithSpinner(ctx, f.Status(), "Fetching environment variables...", func(ctx context.Context) ([]envVarGroup, error) {
+				return fetchEnvVars(ctx, client, name)
 			})
 			if err != nil {
 				return err
 			}
+			if len(groups) > 1 {
+				_, _ = fmt.Fprintf(ioStreams.ErrOut, "Warning: deployment has %d containers; showing %q\n", len(groups), groups[0].ContainerName)
+			}
+			vars := envVarsOf(groups, "")
 
 			if wrote, werr := cmdutil.WriteStructured(ioStreams.Out, f.OutputFormat(), vars); wrote {
 				return werr
@@ -156,12 +231,13 @@ func newCmdEnvSet(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 			ctx, cancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
 			defer cancel()
 
-			current, err := cmdutil.WithSpinner(ctx, f.Status(), "Fetching current variables...", func(ctx context.Context) ([]verda.ContainerEnvVar, error) {
-				return client.ContainerDeployments.GetEnvironmentVariables(ctx, name)
+			target, err := cmdutil.WithSpinner(ctx, f.Status(), "Fetching current variables...", func(ctx context.Context) (*envTarget, error) {
+				return loadEnvTarget(ctx, client, name)
 			})
 			if err != nil {
 				return err
 			}
+			containerName, current := target.Container, target.Vars
 
 			existing := make(map[string]bool, len(current))
 			for _, v := range current {
@@ -178,7 +254,7 @@ func newCmdEnvSet(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 			}
 
 			if len(toAdd) > 0 {
-				req := &verda.ContainerEnvVarsRequest{ContainerName: name, Env: toAdd}
+				req := &verda.ContainerEnvVarsRequest{ContainerName: containerName, Env: toAdd}
 				cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), "Add env vars:", req)
 				if err := cmdutil.RunWithSpinner(ctx, f.Status(), "Adding environment variables...", func(ctx context.Context) error {
 					return client.ContainerDeployments.AddEnvironmentVariables(ctx, name, req)
@@ -187,7 +263,7 @@ func newCmdEnvSet(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 				}
 			}
 			if len(toUpdate) > 0 {
-				req := &verda.ContainerEnvVarsRequest{ContainerName: name, Env: toUpdate}
+				req := &verda.ContainerEnvVarsRequest{ContainerName: containerName, Env: toUpdate}
 				cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), "Update env vars:", req)
 				if err := cmdutil.RunWithSpinner(ctx, f.Status(), "Updating environment variables...", func(ctx context.Context) error {
 					return client.ContainerDeployments.UpdateEnvironmentVariables(ctx, name, req)
@@ -266,8 +342,15 @@ func newCmdEnvUnset(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Comma
 			ctx, cancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
 			defer cancel()
 
+			containerName, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading deployment...", func(ctx context.Context) (string, error) {
+				return containerNameOf(ctx, client, deployment)
+			})
+			if err != nil {
+				return err
+			}
+
 			req := &verda.DeleteContainerEnvVarsRequest{
-				ContainerName: deployment,
+				ContainerName: containerName,
 				Env:           args,
 			}
 			cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), "Delete env vars:", req)

@@ -52,12 +52,24 @@ func newEnvRecordingServer(t *testing.T, vars []verda.ContainerEnvVar) *envRecor
 		})
 	})
 
-	mux.HandleFunc("GET /container-deployments/{name}/environment-variables", func(w http.ResponseWriter, _ *http.Request) {
+	// Mirrors the API: the single container is named "<deployment>-0", and
+	// the env write endpoints key on that, not on the deployment name.
+	mux.HandleFunc("GET /container-deployments/{name}", func(w http.ResponseWriter, r *http.Request) {
+		name := r.PathValue("name")
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(verda.ContainerDeployment{
+			Name:       name,
+			Containers: []verda.DeploymentContainer{{Name: name + "-0", Image: verda.ContainerImage{Image: "nginx:1.27.3"}}},
+		})
+	})
+
+	// Grouped per container, as the API returns it (one group per container).
+	mux.HandleFunc("GET /container-deployments/{name}/environment-variables", func(w http.ResponseWriter, r *http.Request) {
 		rec.mu.Lock()
 		v := rec.envVars
 		rec.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(v)
+		_ = json.NewEncoder(w).Encode([]map[string]any{{"container_name": r.PathValue("name") + "-0", "env": v}})
 	})
 
 	mux.HandleFunc("POST /container-deployments/{name}/environment-variables", func(w http.ResponseWriter, r *http.Request) {
@@ -186,8 +198,8 @@ func TestEnvSet_AddNew(t *testing.T) {
 	if err := json.Unmarshal(addBody, &got); err != nil {
 		t.Fatalf("unmarshal add body: %v\nbody: %s", err, addBody)
 	}
-	if got.ContainerName != "my-endpoint" {
-		t.Errorf("container_name: got %q, want my-endpoint", got.ContainerName)
+	if got.ContainerName != "my-endpoint-0" {
+		t.Errorf("container_name: got %q, want the inner container my-endpoint-0", got.ContainerName)
 	}
 	if len(got.Env) != 1 || got.Env[0].Name != "FOO" || got.Env[0].ValueOrReferenceToSecret != "bar" {
 		t.Errorf("env: got %+v", got.Env)
@@ -230,6 +242,43 @@ func TestEnvSet_UpdateExisting(t *testing.T) {
 	}
 	if len(got.Env) != 1 || got.Env[0].Name != "FOO" || got.Env[0].ValueOrReferenceToSecret != "new" {
 		t.Errorf("patch env: got %+v", got.Env)
+	}
+	if got.ContainerName != "my-endpoint-0" {
+		t.Errorf("container_name: got %q, want the inner container my-endpoint-0", got.ContainerName)
+	}
+}
+
+// A deployment read with no containers has nothing to key the env write on;
+// fail before sending rather than let the API return a confusing not_found.
+func TestEnvSet_NoContainers(t *testing.T) {
+	t.Parallel()
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /oauth2/token", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"access_token": "test-token", "token_type": "Bearer"})
+	})
+	mux.HandleFunc("GET /container-deployments/{name}", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(verda.ContainerDeployment{Name: "my-endpoint"})
+	})
+	var wrote bool
+	mux.HandleFunc("/container-deployments/{name}/environment-variables", func(w http.ResponseWriter, _ *http.Request) {
+		wrote = true
+		w.WriteHeader(http.StatusNoContent)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	f := newTestFactory(t, srv.URL)
+
+	var stdout, stderr bytes.Buffer
+	cmd := NewCmdContainer(f, cmdutil.IOStreams{Out: &stdout, ErrOut: &stderr})
+	cmd.SetArgs([]string{"env", "set", "my-endpoint", "--env", "FOO=bar"})
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "has no containers") {
+		t.Fatalf("want 'has no containers' error, got %v", err)
+	}
+	if wrote {
+		t.Error("env endpoint must not be called when the container name is unknown")
 	}
 }
 
@@ -351,8 +400,8 @@ func TestEnvUnset_WithYes(t *testing.T) {
 	if err := json.Unmarshal(delBody, &got); err != nil {
 		t.Fatalf("unmarshal delete body: %v\nbody: %s", err, delBody)
 	}
-	if got.ContainerName != "my-endpoint" {
-		t.Errorf("container_name: got %q, want my-endpoint", got.ContainerName)
+	if got.ContainerName != "my-endpoint-0" {
+		t.Errorf("container_name: got %q, want the inner container my-endpoint-0", got.ContainerName)
 	}
 	if len(got.Env) != 1 || got.Env[0] != "HF_HOME" {
 		t.Errorf("env: got %v, want [HF_HOME]", got.Env)
@@ -568,5 +617,103 @@ func TestEnvUnset_AgentMode_RequiresDeployment(t *testing.T) {
 	}
 	if agentErr.Code != "MISSING_REQUIRED_FLAGS" {
 		t.Errorf("code: got %q, want MISSING_REQUIRED_FLAGS", agentErr.Code)
+	}
+}
+
+// newMultiContainerServer serves a two-container deployment whose env groups
+// differ, so tests can tell which group a command read.
+func newMultiContainerServer(t *testing.T) (*httptest.Server, *envRecordingServer) {
+	t.Helper()
+	rec := &envRecordingServer{}
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /oauth2/token", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"access_token": "test-token", "token_type": "Bearer"})
+	})
+	mux.HandleFunc("GET /container-deployments/{name}", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(verda.ContainerDeployment{
+			Name:       "my-endpoint",
+			Containers: []verda.DeploymentContainer{{Name: "my-endpoint-0"}, {Name: "sidecar-1"}},
+		})
+	})
+	mux.HandleFunc("GET /container-deployments/{name}/environment-variables", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]map[string]any{
+			{"container_name": "my-endpoint-0", "env": []verda.ContainerEnvVar{{Name: "MAIN_ONLY", Type: "plain", ValueOrReferenceToSecret: "1"}}},
+			{"container_name": "sidecar-1", "env": []verda.ContainerEnvVar{{Name: "SIDE_ONLY", Type: "plain", ValueOrReferenceToSecret: "2"}}},
+		})
+	})
+	mux.HandleFunc("POST /container-deployments/{name}/environment-variables", func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		rec.mu.Lock()
+		rec.addBody = body
+		rec.mu.Unlock()
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("PATCH /container-deployments/{name}/environment-variables", func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		rec.mu.Lock()
+		rec.patchBody = body
+		rec.mu.Unlock()
+		w.WriteHeader(http.StatusNoContent)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	return srv, rec
+}
+
+// list shows the first container's group and warns that others exist.
+func TestEnvList_MultiContainer_ShowsFirstAndWarns(t *testing.T) {
+	t.Parallel()
+	srv, _ := newMultiContainerServer(t)
+	f := newTestFactory(t, srv.URL)
+
+	var stdout, stderr bytes.Buffer
+	cmd := NewCmdContainer(f, cmdutil.IOStreams{Out: &stdout, ErrOut: &stderr})
+	cmd.SetArgs([]string{"env", "list", "my-endpoint"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("env list failed: %v\nstderr:\n%s", err, stderr.String())
+	}
+	var got []struct{ Name string }
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v\nstdout: %s", err, stdout.String())
+	}
+	if len(got) != 1 || got[0].Name != "MAIN_ONLY" {
+		t.Errorf("want only MAIN_ONLY from the first group, got %+v", got)
+	}
+	if !strings.Contains(stderr.String(), "2 containers") {
+		t.Errorf("want multi-container warning on stderr, got %q", stderr.String())
+	}
+}
+
+// set partitions add/update against the resolved container's group, not
+// another container's: SIDE_ONLY exists only on the sidecar, so it is added.
+func TestEnvSet_MultiContainer_UsesOwnGroup(t *testing.T) {
+	t.Parallel()
+	srv, rec := newMultiContainerServer(t)
+	f := newTestFactory(t, srv.URL)
+
+	var stdout, stderr bytes.Buffer
+	cmd := NewCmdContainer(f, cmdutil.IOStreams{Out: &stdout, ErrOut: &stderr})
+	cmd.SetArgs([]string{"env", "set", "my-endpoint", "--env", "SIDE_ONLY=x", "--env", "MAIN_ONLY=y"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("env set failed: %v\nstderr:\n%s", err, stderr.String())
+	}
+	var add, patch struct {
+		ContainerName string                  `json:"container_name"`
+		Env           []struct{ Name string } `json:"env"`
+	}
+	if err := json.Unmarshal(rec.getAddBody(), &add); err != nil {
+		t.Fatalf("unmarshal add: %v", err)
+	}
+	if err := json.Unmarshal(rec.getPatchBody(), &patch); err != nil {
+		t.Fatalf("unmarshal patch: %v", err)
+	}
+	if add.ContainerName != "my-endpoint-0" || len(add.Env) != 1 || add.Env[0].Name != "SIDE_ONLY" {
+		t.Errorf("add: want SIDE_ONLY on my-endpoint-0, got %+v", add)
+	}
+	if patch.ContainerName != "my-endpoint-0" || len(patch.Env) != 1 || patch.Env[0].Name != "MAIN_ONLY" {
+		t.Errorf("patch: want MAIN_ONLY on my-endpoint-0, got %+v", patch)
 	}
 }
