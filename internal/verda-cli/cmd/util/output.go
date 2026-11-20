@@ -37,6 +37,7 @@ func WriteStructured(w io.Writer, format string, data any) (bool, error) {
 	switch format {
 	case "json":
 		enc := json.NewEncoder(w)
+		enc.SetEscapeHTML(false)
 		enc.SetIndent("", "  ")
 		return true, enc.Encode(data)
 	case "yaml":

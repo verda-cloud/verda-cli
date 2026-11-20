@@ -24,7 +24,7 @@ import (
 func TestWriteStructuredJSON(t *testing.T) {
 	t.Parallel()
 
-	data := map[string]string{"name": "test-vol", "id": "abc-123"}
+	data := map[string]string{"name": "test-vol", "id": "abc-123", "hint": "use <pool> & more"}
 	var buf bytes.Buffer
 
 	wrote, err := WriteStructured(&buf, "json", data)
@@ -33,6 +33,9 @@ func TestWriteStructuredJSON(t *testing.T) {
 	}
 	if !wrote {
 		t.Fatal("WriteStructured(json) returned false, want true")
+	}
+	if !strings.Contains(buf.String(), "use <pool> & more") {
+		t.Fatalf("HTML characters must not be escaped: %s", buf.String())
 	}
 
 	var decoded map[string]string
