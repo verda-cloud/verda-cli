@@ -62,17 +62,13 @@ func NewCmdKubeconfigDelete(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cob
 }
 
 func runKubeconfigDelete(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, scope *poolScope, args []string, yes bool) error {
-	if err := checkKubeconfigTarget(f, cmd, scope, args); err != nil {
+	if err := scope.check(f, cmd, args, argKubeconfigRef); err != nil {
 		return err
 	}
 	if err := checkConfirmed(f, yes, "delete"); err != nil {
 		return err
 	}
-	client, err := f.VerdaClient()
-	if err != nil {
-		return err
-	}
-	target, err := scope.resolve(cmd, f, ioStreams, client)
+	client, target, err := scope.connect(cmd, f, ioStreams)
 	if err != nil || target == nil {
 		return err
 	}
@@ -97,13 +93,10 @@ func runKubeconfigDelete(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmduti
 	}
 
 	cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), "Delete kubeconfig:", map[string]string{"id": kc.ID, "cluster": target.Name, "location": target.Location})
-	ctx, cancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
-	defer cancel()
-	err = cmdutil.RunWithSpinner(ctx, f.Status(), "Deleting kubeconfig...", func(ctx context.Context) error {
+	if err := apiRun(cmd.Context(), f, "Deleting kubeconfig...", func(ctx context.Context) error {
 		return client.ManagedKubernetes.DeleteKubeconfig(ctx, target.Location, target.Name, kc.ID)
-	})
-	if err != nil {
-		return mapErr(err)
+	}); err != nil {
+		return err
 	}
 
 	result := ActionResult{Resource: kindKubeconfig, ID: kc.ID, Name: kc.ID, Location: target.Location, Cluster: target.Name, Action: "delete", Status: statusAccepted}
@@ -114,7 +107,7 @@ func runKubeconfigDelete(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmduti
 	return nil
 }
 
-// copiesNote: the CLI cannot revoke a certificate. system:masters is bound to cluster-admin by the control plane itself, so no RBAC change cuts that group off.
+// copiesNote: system:masters is bound to cluster-admin by the control plane, so no RBAC change cuts it off.
 const copiesNote = "Deleting the cluster invalidates them. A copy that does not use system:masters can also be cut off by removing its group's RBAC binding in the cluster."
 
 // validUntil: the date is known only when the id came from the picker; a named id is not read first.

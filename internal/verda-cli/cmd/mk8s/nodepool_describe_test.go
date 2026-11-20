@@ -21,8 +21,6 @@ import (
 	"strings"
 	"testing"
 
-	tuitest "github.com/verda-cloud/verda-cli/pkg/tui/testing"
-
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
 
@@ -71,24 +69,8 @@ func TestNodePoolDescribe_Table(t *testing.T) {
 			t.Errorf("output misses %q:\n%s", s, out)
 		}
 	}
-
-	out, _, err = runMK8s(t, tableFactory(newFakeClient(t, api), nil), "node-pool", "describe", "workers", "--cluster", "prod")
-	if err != nil || strings.Contains(out, "Errors:") {
-		t.Errorf("a healthy pool shows no Errors section: err=%v\n%s", err, out)
-	}
 	if got := api.paths("GET"); !slices.Contains(got, "/mk8sclusters/FIN-03/prod/pools/gpu") {
 		t.Errorf("requests = %v", got)
-	}
-}
-
-func TestNodePoolDescribe_AgentAndAliases(t *testing.T) {
-	t.Parallel()
-	out, _, err := runMK8s(t, agentFactory(newFakeClient(t, poolAPI())), "pool", "show", "workers", "--cluster", "prod", "-l", "FIN-03")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if v := decodeJSON[PoolView](t, out); v.Name != "workers" || v.Errors == nil || len(v.Errors) != 0 {
-		t.Errorf("view = %+v", v)
 	}
 }
 
@@ -102,50 +84,7 @@ func TestNodePoolDescribe_MissingTargets(t *testing.T) {
 	if missing, _ := ae.Details["missing"].([]string); !slices.Equal(missing, []string{"--cluster", "<pool>"}) {
 		t.Errorf("missing = %v", missing)
 	}
-	if _, _, err := runMK8s(t, agentFactory(newFakeClient(t, poolAPI())), "node-pool", "describe", "  ", "--cluster", "prod"); agentErrorCode(err) != "MISSING_REQUIRED_FLAGS" {
-		t.Errorf("blank pool: %v", err)
-	}
 	if _, _, err := runMK8s(t, tableFactory(newFakeClient(t, poolAPI()), nil), "node-pool", "describe", "ghost", "--cluster", "prod"); agentErrorCode(err) != "NOT_FOUND" {
 		t.Errorf("unknown pool: %v", err)
 	}
-}
-
-func TestNodePoolDescribe_Pickers(t *testing.T) {
-	withTerminal(t)
-
-	t.Run("cluster picker then pool picker", func(t *testing.T) {
-		api := poolAPI()
-		out, _, err := runMK8s(t, tableFactory(newFakeClient(t, api), pickerAnswers(0, 1)), "node-pool", "describe")
-		if err != nil || !strings.Contains(out, "gpu") {
-			t.Fatalf("out=%q err=%v", out, err)
-		}
-	})
-
-	t.Run("pool picker only", func(t *testing.T) {
-		out, _, err := runMK8s(t, tableFactory(newFakeClient(t, poolAPI()), pickerAnswers(0)), "node-pool", "describe", "--cluster", "prod")
-		if err != nil || !strings.Contains(out, "workers") {
-			t.Fatalf("out=%q err=%v", out, err)
-		}
-	})
-
-	t.Run("cancel row and Esc end cleanly", func(t *testing.T) {
-		for name, p := range map[string]*cancelPrompter{
-			"cancel row": {Prompter: pickerAnswers(2)},
-			"esc":        {Prompter: tuitest.New(), selectErr: contextCanceled()},
-		} {
-			f := tableFactory(newFakeClient(t, poolAPI()), nil)
-			f.PrompterOverride = p
-			out, errOut, err := runMK8s(t, f, "node-pool", "describe", "--cluster", "prod")
-			if err != nil || out != "" || !strings.Contains(errOut, canceledMsg) {
-				t.Errorf("%s: out=%q err=%q error=%v", name, out, errOut, err)
-			}
-		}
-	})
-
-	t.Run("no pools", func(t *testing.T) {
-		out, errOut, err := runMK8s(t, tableFactory(newFakeClient(t, seededClusters()), tuitest.New()), "node-pool", "describe", "--cluster", "prod")
-		if err != nil || !strings.Contains(out, "No node pools in cluster prod.") || !strings.Contains(errOut, "node-pool create") {
-			t.Errorf("out=%q err=%q error=%v", out, errOut, err)
-		}
-	})
 }

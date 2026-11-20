@@ -101,11 +101,7 @@ func runNodePoolScale(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.I
 	if err := opts.validate(f, cmd, args); err != nil {
 		return err
 	}
-	client, err := f.VerdaClient()
-	if err != nil {
-		return err
-	}
-	target, err := opts.resolve(cmd, f, ioStreams, client)
+	client, target, err := opts.connect(cmd, f, ioStreams)
 	if err != nil || target == nil {
 		return err
 	}
@@ -145,13 +141,9 @@ func runNodePoolScale(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.I
 	return waitErr
 }
 
-// validate checks the flags before any API call.
 func (o *nodePoolScaleOptions) validate(f cmdutil.Factory, cmd *cobra.Command, args []string) error {
-	if o.Wait.Wait && o.Wait.Timeout <= 0 {
-		return cmdutil.UsageErrorf(cmd, "--%s must be greater than 0", flagWaitTimeout)
-	}
-	if o.replicasSet && o.Replicas < 0 {
-		return cmdutil.UsageErrorf(cmd, "--%s must be 0 or more", flagReplicas)
+	if err := checkPoolFlags(cmd, o.Wait, o.Replicas); err != nil {
+		return err
 	}
 	if missing := o.scaleMissing(f, cmd, args); len(missing) > 0 {
 		return cmdutil.NewMissingFlagsError(missing)
@@ -159,13 +151,12 @@ func (o *nodePoolScaleOptions) validate(f cmdutil.Factory, cmd *cobra.Command, a
 	return nil
 }
 
-// poolSettled: the pool is already at the scale-done condition for want.
 func poolSettled(pool *verda.ManagedKubernetesNodePool, want int) bool {
 	_, done := poolScaled(want)(pool)
 	return done
 }
 
-// applyScale confirms and sends the update. It returns nil without an error when the user declined.
+// applyScale returns nil without an error when the user declined.
 func (o *nodePoolScaleOptions) applyScale(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client *verda.Client, target *clusterTarget, pool *verda.ManagedKubernetesNodePool) (*verda.ManagedKubernetesNodePool, error) {
 	if ok, err := o.confirm(cmd.Context(), f, ioStreams, target, pool); err != nil || !ok {
 		return nil, err
@@ -173,13 +164,11 @@ func (o *nodePoolScaleOptions) applyScale(cmd *cobra.Command, f cmdutil.Factory,
 	replicas := o.Replicas
 	req := verda.UpdateManagedKubernetesNodePoolRequest{Replicas: &replicas}
 	cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), "Request payload:", req)
-	ctx, cancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
-	defer cancel()
-	updated, err := cmdutil.WithSpinner(ctx, f.Status(), "Scaling node pool...", func(ctx context.Context) (*verda.ManagedKubernetesNodePool, error) {
+	updated, err := apiCall(cmd.Context(), f, "Scaling node pool...", func(ctx context.Context) (*verda.ManagedKubernetesNodePool, error) {
 		return client.ManagedKubernetes.UpdateNodePool(ctx, target.Location, target.Name, pool.Name, req)
 	})
 	if err != nil {
-		return nil, mapErr(err)
+		return nil, err
 	}
 	cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), "API response:", newPoolView(updated))
 	return updated, nil
@@ -192,7 +181,6 @@ func pluralize(n int, noun string) string {
 	return fmt.Sprintf("%d %ss", n, noun)
 }
 
-// reportScaleUnchanged: the pool already has the requested count, so nothing is sent.
 func reportScaleUnchanged(f cmdutil.Factory, ioStreams cmdutil.IOStreams, pool *verda.ManagedKubernetesNodePool) error {
 	result := PoolScaleResult{Status: statusUnchanged, PreviousReplicas: pool.Replicas, Pool: newPoolView(pool)}
 	if wrote, err := cmdutil.WriteStructured(ioStreams.Out, f.OutputFormat(), result); wrote {
@@ -202,20 +190,15 @@ func reportScaleUnchanged(f cmdutil.Factory, ioStreams cmdutil.IOStreams, pool *
 	return nil
 }
 
-// scaleMissing lists what a scale needs that a terminal cannot ask for.
 func (o *nodePoolScaleOptions) scaleMissing(f cmdutil.Factory, cmd *cobra.Command, args []string) []string {
-	missing := o.missing(f, cmd)
-	if poolArgMissing(f, args) {
-		missing = append(missing, argPool)
-	}
+	missing := o.missing(f, cmd, args, argPool)
 	if !o.replicasSet && !interactiveTTY(f) {
 		missing = append(missing, "--"+flagReplicas)
 	}
 	return missing
 }
 
-// confirm applies the confirmation rule: only a scale-down is destructive, and
-// only now is the current count known. It reports whether to go on.
+// confirm: only a scale-down is destructive, and only now is the current count known.
 func (o *nodePoolScaleOptions) confirm(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, t *clusterTarget, pool *verda.ManagedKubernetesNodePool) (bool, error) {
 	if o.Yes {
 		return true, nil
@@ -230,7 +213,6 @@ func (o *nodePoolScaleOptions) confirm(ctx context.Context, f cmdutil.Factory, i
 	return confirmScale(ctx, f, ioStreams, t, pool, o.Replicas, down)
 }
 
-// wait polls until the new count is ready and records the outcome in result.
 func (o *nodePoolScaleOptions) wait(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client *verda.Client, t *clusterTarget, updated *verda.ManagedKubernetesNodePool, result *PoolScaleResult) error {
 	last, err := waitForPool(ctx, f, ioStreams, client, t, updated.Name, poolScaled(o.Replicas), o.Wait.Timeout)
 	if last != nil {
@@ -252,7 +234,7 @@ func (o *nodePoolScaleOptions) wait(ctx context.Context, f cmdutil.Factory, ioSt
 	return err
 }
 
-// askReplicas prompts for the new count. ok is false when the user canceled.
+// askReplicas: ok is false when the user canceled.
 func askReplicas(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, pool *verda.ManagedKubernetesNodePool) (n int, ok bool, err error) {
 	v, err := f.Prompter().TextInput(ctx, fmt.Sprintf("New number of workers (pool %s has %d)", pool.Name, pool.Replicas),
 		tui.WithDefault(strconv.Itoa(pool.Replicas)), tui.WithValidation(validateReplicas))

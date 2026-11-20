@@ -15,11 +15,9 @@
 package mk8s
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/spf13/cobra"
-	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
 
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
@@ -54,14 +52,9 @@ func runLocations(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStr
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
-	defer cancel()
-
-	res, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading locations...", func(ctx context.Context) (*verda.ManagedKubernetesEnabledLocations, error) {
-		return client.ManagedKubernetes.GetEnabledLocations(ctx)
-	})
+	res, err := apiCall(cmd.Context(), f, "Loading locations...", client.ManagedKubernetes.GetEnabledLocations)
 	if err != nil {
-		return mapErr(err)
+		return err
 	}
 	codes := res.Locations
 	if codes == nil {

@@ -55,14 +55,10 @@ func NewCmdKubeconfigDescribe(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *c
 }
 
 func runKubeconfigDescribe(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, scope *poolScope, args []string) error {
-	if err := checkKubeconfigTarget(f, cmd, scope, args); err != nil {
+	if err := scope.check(f, cmd, args, argKubeconfigRef); err != nil {
 		return err
 	}
-	client, err := f.VerdaClient()
-	if err != nil {
-		return err
-	}
-	target, err := scope.resolve(cmd, f, ioStreams, client)
+	client, target, err := scope.connect(cmd, f, ioStreams)
 	if err != nil || target == nil {
 		return err
 	}

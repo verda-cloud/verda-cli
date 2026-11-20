@@ -23,10 +23,7 @@ import (
 
 // KubeconfigView is the JSON/YAML (and --debug) shape of a kubeconfig. It has
 // no field for the YAML, which holds a client private key: never marshal the
-// SDK struct instead.
-//
-// Every key is always present, so scripts see one shape (a pending kubeconfig
-// has not_after null, one without groups has []); only file is conditional.
+// SDK struct instead. Every key but file is always present.
 type KubeconfigView struct {
 	ID          string     `json:"id"              yaml:"id"`
 	DisplayName string     `json:"display_name"    yaml:"display_name"`
@@ -37,7 +34,6 @@ type KubeconfigView struct {
 	File        string     `json:"file,omitempty"  yaml:"file,omitempty"`
 }
 
-// newKubeconfigView copies the metadata only; file is the path written, if any.
 func newKubeconfigView(k *verda.ManagedKubernetesKubeconfig, file string) KubeconfigView {
 	groups := k.Groups
 	if groups == nil {
@@ -139,9 +135,8 @@ func newPoolSummaryViews(pools []verda.ManagedKubernetesNodePool) []PoolSummaryV
 	return views
 }
 
-// ClusterDescribeView is a cluster with its node pools. node_pools is null
-// (and node_pools_error set) when the pool call failed, [] when there are none.
-// It is a pointer so YAML, which writes a nil slice as [], also says null.
+// ClusterDescribeView: node_pools is null when the pool call failed, [] when
+// there are none; a pointer, because YAML writes a nil slice as [].
 type ClusterDescribeView struct {
 	ClusterView    `yaml:",inline"`
 	NodePools      *[]PoolSummaryView `json:"node_pools"                 yaml:"node_pools"`
@@ -166,8 +161,7 @@ func ageColumn(t, now time.Time) string {
 	}
 }
 
-// ActionResult is the structured output of a command that only accepts a
-// request, such as a delete. Cluster is set for resources that belong to one.
+// ActionResult is the structured output of a delete.
 type ActionResult struct {
 	Resource string `json:"resource"          yaml:"resource"`
 	ID       string `json:"id,omitempty"      yaml:"id,omitempty"`
@@ -178,12 +172,11 @@ type ActionResult struct {
 	Status   string `json:"status"            yaml:"status"`
 }
 
-// utcTime renders a time as "2006-01-02 15:04 UTC", the form of every date in mk8s output.
+// utcTime is the form of every date in mk8s output.
 func utcTime(t time.Time) string {
 	return t.UTC().Format(timeLayout) + " UTC"
 }
 
-// timeColumn renders a time for a table, "-" when it is not set.
 func timeColumn(t time.Time) string {
 	if t.IsZero() {
 		return "-"

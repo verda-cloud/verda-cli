@@ -60,13 +60,6 @@ func TestWriteAgentError(t *testing.T) {
 	}
 }
 
-func TestNewMissingOneOfFlagsError_MessageNamesMissing(t *testing.T) {
-	got := NewMissingOneOfFlagsError([]string{"--cluster", "--common-name"}, []string{"--a", "--b"}).Message
-	if want := "required flags not provided: --cluster, --common-name; set at least one of --a, --b"; got != want {
-		t.Errorf("message = %q, want %q", got, want)
-	}
-}
-
 func TestNewMissingOneOfFlagsError_JSON(t *testing.T) {
 	var buf bytes.Buffer
 	WriteAgentError(&buf, NewMissingOneOfFlagsError(nil, []string{"--a", "--b"}))

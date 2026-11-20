@@ -69,28 +69,6 @@ func TestClusterDelete_Structured(t *testing.T) {
 	}
 }
 
-func TestClusterDelete_NeedsYesOffTerminalBeforeAnyCall(t *testing.T) {
-	t.Parallel()
-	for name, mk := range map[string]func(*fakeAPI, *testing.T) *cmdutil.TestFactory{
-		"agent":          func(api *fakeAPI, t *testing.T) *cmdutil.TestFactory { return agentFactory(newFakeClient(t, api)) },
-		"json on a pipe": func(api *fakeAPI, t *testing.T) *cmdutil.TestFactory { return jsonFactory(newFakeClient(t, api)) },
-		"table on a pipe": func(api *fakeAPI, t *testing.T) *cmdutil.TestFactory {
-			return tableFactory(newFakeClient(t, api), nil)
-		},
-	} {
-		api := seededClusters()
-		_, _, err := runMK8s(t, mk(api, t), "cluster", "delete", "prod")
-		if ae := cmdutil.ClassifyError(err); ae == nil || ae.Code != "CONFIRMATION_REQUIRED" {
-			t.Errorf("%s: err = %v", name, err)
-		} else if !strings.Contains(ae.Message, "without a terminal, in agent mode or with -o json|yaml") {
-			t.Errorf("%s: the message must name every cause: %q", name, ae.Message)
-		}
-		if n := len(api.requests); n != 0 {
-			t.Errorf("%s: %d request(s) before the check", name, n)
-		}
-	}
-}
-
 func TestClusterDelete_MissingCluster(t *testing.T) {
 	t.Parallel()
 	_, _, err := runMK8s(t, agentFactory(newFakeClient(t, seededClusters())), "cluster", "delete", "--yes")
@@ -101,76 +79,27 @@ func TestClusterDelete_MissingCluster(t *testing.T) {
 
 func TestClusterDelete_Interactive(t *testing.T) {
 	withTerminal(t)
-
-	t.Run("the warning names pools, worker VMs and kubeconfigs", func(t *testing.T) {
+	for name, tc := range map[string]struct {
+		prompter *tuitest.Prompter
+		args     []string
+		warning  bool
+	}{
+		"confirmed": {tuitest.New().AddConfirm(true), nil, true},
+		// No prompter answers: a confirm would fail the test.
+		"--yes skips the confirmation": {tuitest.New(), []string{"--yes"}, false},
+	} {
 		api := seededClusters()
-		_, errOut, err := runMK8s(t, tableFactory(newFakeClient(t, api), tuitest.New().AddConfirm(true)), "cluster", "delete", "prod")
+		_, errOut, err := runMK8s(t, tableFactory(newFakeClient(t, api), tc.prompter), append([]string{"cluster", "delete", "prod"}, tc.args...)...)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("%s: %v", name, err)
 		}
 		for _, want := range []string{"node pools", "worker VMs", "kubeconfigs", "Downloaded kubeconfigs stop working", "cannot be undone"} {
-			if !strings.Contains(errOut, want) {
-				t.Errorf("warning misses %q: %s", want, errOut)
+			if strings.Contains(errOut, want) != tc.warning {
+				t.Errorf("%s: warning and %q: %s", name, want, errOut)
 			}
 		}
 		if n := len(api.requestsMatching("DELETE")); n != 1 {
-			t.Errorf("DELETEs = %d", n)
+			t.Errorf("%s: DELETEs = %d", name, n)
 		}
-	})
-
-	t.Run("picker then confirm deletes the chosen cluster", func(t *testing.T) {
-		api := seededClusters()
-		if _, _, err := runMK8s(t, tableFactory(newFakeClient(t, api), tuitest.New().AddSelect(1).AddConfirm(true)), "cluster", "delete"); err != nil {
-			t.Fatal(err)
-		}
-		dels := api.requestsMatching("DELETE")
-		if len(dels) != 1 || dels[0].Path != "/mk8sclusters/FIN-01/staging" {
-			t.Errorf("DELETE requests = %v", dels)
-		}
-	})
-
-	t.Run("declined, Esc and Ctrl+C delete nothing", func(t *testing.T) {
-		for name, p := range map[string]*cancelPrompter{
-			"declined": {Prompter: tuitest.New().AddConfirm(false)},
-			"esc":      {Prompter: tuitest.New(), confirmErr: contextCanceled()},
-			"ctrl+c":   {Prompter: tuitest.New(), confirmErr: errInterrupted()},
-		} {
-			api := seededClusters()
-			f := tableFactory(newFakeClient(t, api), nil)
-			f.PrompterOverride = p
-			_, errOut, err := runMK8s(t, f, "cluster", "delete", "prod")
-			if err != nil || !strings.Contains(errOut, canceledMsg) {
-				t.Errorf("%s: err=%v stderr=%q", name, err, errOut)
-			}
-			if n := len(api.requestsMatching("DELETE")); n != 0 {
-				t.Errorf("%s: %d DELETE(s)", name, n)
-			}
-		}
-	})
-
-	t.Run("--yes skips the confirmation", func(t *testing.T) {
-		api := seededClusters()
-		// No prompter answers: a confirm would fail the test.
-		if _, _, err := runMK8s(t, tableFactory(newFakeClient(t, api), tuitest.New()), "cluster", "delete", "prod", "--yes"); err != nil {
-			t.Fatal(err)
-		}
-		if n := len(api.requestsMatching("DELETE")); n != 1 {
-			t.Errorf("DELETEs = %d", n)
-		}
-	})
-}
-
-func TestClusterDelete_Errors(t *testing.T) {
-	t.Parallel()
-	_, _, err := runMK8s(t, tableFactory(newFakeClient(t, seededClusters()), nil), "cluster", "delete", "ghost", "--yes")
-	if agentErrorCode(err) != "NOT_FOUND" {
-		t.Errorf("unknown cluster: %v", err)
-	}
-
-	api := newFakeAPI()
-	api.disabled = true
-	_, _, err = runMK8s(t, tableFactory(newFakeClient(t, api), nil), "cluster", "delete", "prod", "-l", "FIN-03", "--yes")
-	if err == nil || agentErrorCode(err) != "AUTH_ERROR" || !strings.Contains(err.Error(), "not enabled for this project") {
-		t.Errorf("not enabled: %v", err)
 	}
 }

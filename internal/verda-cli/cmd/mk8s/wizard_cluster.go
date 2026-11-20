@@ -32,6 +32,15 @@ var newWizardEngine = func(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *wiza
 	return wizard.NewEngine(f.Prompter(), f.Status(), wizard.WithOutput(ioStreams.ErrOut))
 }
 
+// runWizard returns a stopError as written, not wrapped with the step name.
+func runWizard(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, flow *wizard.Flow) error {
+	err := newWizardEngine(f, ioStreams).Run(ctx, flow)
+	if stop, ok := errors.AsType[*stopError](err); ok {
+		return stop
+	}
+	return err
+}
+
 // wizardLayout has no hint bar view: the engine renders its own below each prompt.
 func wizardLayout() []wizard.ViewDef {
 	return []wizard.ViewDef{
@@ -41,7 +50,7 @@ func wizardLayout() []wizard.ViewDef {
 
 // The SDK and the API own the real rules (name format and length, CIDR size and
 // overlap); the wizard only rejects input that cannot be sent at all.
-func validateClusterName(s string) error {
+func validateName(s string) error {
 	if s == "" {
 		return errors.New("name must not be empty")
 	}
@@ -62,96 +71,56 @@ func validateVersion(s string) error {
 	return nil
 }
 
+func wizardText(v any) string { s, _ := v.(string); return strings.TrimSpace(s) }
+
+// stringStep binds a required step to *dst. set is fixed when the flow is
+// built: a value from a flag skips the step.
+func stringStep(name, desc string, prompt wizard.PromptType, dst *string, set bool) wizard.Step {
+	return wizard.Step{
+		Name: name, Description: desc, Prompt: prompt, Required: true,
+		Setter:   func(v any) { *dst = wizardText(v) },
+		Resetter: func() { *dst = "" },
+		IsSet:    func() bool { return set },
+		Value:    func() any { return *dst },
+	}
+}
+
+func textStep(name, desc string, dst *string, set bool, validate func(string) error) wizard.Step {
+	s := stringStep(name, desc, wizard.TextInputPrompt, dst, set)
+	s.Validate = func(v any) error { return validate(wizardText(v)) }
+	return s
+}
+
+func selectStep(name, desc string, dst *string, set bool, loader wizard.LoaderFunc, dependsOn ...string) wizard.Step {
+	s := stringStep(name, desc, wizard.SelectPrompt, dst, set)
+	s.Loader, s.DependsOn = loader, dependsOn
+	return s
+}
+
+// cidrStep is optional: Enter keeps def, and Back restores it.
+func cidrStep(name, desc string, dst *string, set bool, def string) wizard.Step {
+	s := textStep(name, desc, dst, set, func(t string) error { return validateCIDR(t, def) })
+	s.Required = false
+	s.Default = func(map[string]any) any { return def }
+	s.Resetter = func() { *dst = def }
+	return s
+}
+
 // buildClusterCreateFlow asks for every value the flags did not give. Each step
 // loads its choices when it is reached, through the shared cache.
 func buildClusterCreateFlow(opts *clusterCreateOptions, cache *wizardCache) *wizard.Flow {
-	nameSet, locationSet, versionSet := opts.Name != "", opts.Location != "", opts.Version != ""
-	networkSet, subnetSet := opts.Network != "", opts.Subnet != ""
-	podSet, serviceSet := opts.podCIDRSet, opts.serviceCIDRSet
-	text := func(v any) string { s, _ := v.(string); return strings.TrimSpace(s) }
-
 	return &wizard.Flow{
 		Name:   "mk8s-cluster-create",
 		Layout: wizardLayout(),
 		Steps: []wizard.Step{
-			{
-				Name:        flagName,
-				Description: "Cluster name (unique in the project)",
-				Prompt:      wizard.TextInputPrompt,
-				Required:    true,
-				Validate:    func(v any) error { return validateClusterName(text(v)) },
-				Setter:      func(v any) { opts.Name = text(v) },
-				Resetter:    func() { opts.Name = "" },
-				IsSet:       func() bool { return nameSet },
-				Value:       func() any { return opts.Name },
-			},
-			{
-				Name:        flagLocation,
-				Description: "Location",
-				Prompt:      wizard.SelectPrompt,
-				Required:    true,
-				Loader:      locationLoader(cache),
-				Setter:      func(v any) { opts.Location = text(v) },
-				Resetter:    func() { opts.Location = "" },
-				IsSet:       func() bool { return locationSet },
-				Value:       func() any { return opts.Location },
-			},
-			{
-				Name:        flagKubernetesVersion,
-				Description: "Kubernetes version (for example 1.37.0)",
-				Prompt:      wizard.TextInputPrompt,
-				Required:    true,
-				Validate:    func(v any) error { return validateVersion(text(v)) },
-				Setter:      func(v any) { opts.Version = text(v) },
-				Resetter:    func() { opts.Version = "" },
-				IsSet:       func() bool { return versionSet },
-				Value:       func() any { return opts.Version },
-			},
-			{
-				Name:        flagNetwork,
-				Description: "Private network",
-				Prompt:      wizard.SelectPrompt,
-				Required:    true,
-				Loader:      networkLoader(cache),
-				Setter:      func(v any) { opts.Network = text(v) },
-				Resetter:    func() { opts.Network = "" },
-				IsSet:       func() bool { return networkSet },
-				Value:       func() any { return opts.Network },
-			},
-			{
-				Name:        flagSubnet,
-				Description: "Subnet (in the network and location you chose)",
-				Prompt:      wizard.SelectPrompt,
-				Required:    true,
-				DependsOn:   []string{flagNetwork, flagLocation},
-				Loader:      subnetLoader(opts, cache),
-				Setter:      func(v any) { opts.Subnet = text(v) },
-				Resetter:    func() { opts.Subnet = "" },
-				IsSet:       func() bool { return subnetSet },
-				Value:       func() any { return opts.Subnet },
-			},
-			{
-				Name:        flagPodCIDR,
-				Description: "Pod IP range (CIDR)",
-				Prompt:      wizard.TextInputPrompt,
-				Default:     func(_ map[string]any) any { return defaultPodCIDR },
-				Validate:    func(v any) error { return validateCIDR(text(v), defaultPodCIDR) },
-				Setter:      func(v any) { opts.PodCIDR = text(v) },
-				Resetter:    func() { opts.PodCIDR = defaultPodCIDR },
-				IsSet:       func() bool { return podSet },
-				Value:       func() any { return opts.PodCIDR },
-			},
-			{
-				Name:        flagServiceCIDR,
-				Description: "Service IP range (CIDR)",
-				Prompt:      wizard.TextInputPrompt,
-				Default:     func(_ map[string]any) any { return defaultServiceCIDR },
-				Validate:    func(v any) error { return validateCIDR(text(v), defaultServiceCIDR) },
-				Setter:      func(v any) { opts.ServiceCIDR = text(v) },
-				Resetter:    func() { opts.ServiceCIDR = defaultServiceCIDR },
-				IsSet:       func() bool { return serviceSet },
-				Value:       func() any { return opts.ServiceCIDR },
-			},
+			textStep(flagName, "Cluster name (unique in the project)", &opts.Name, opts.Name != "", validateName),
+			selectStep(flagLocation, "Location", &opts.Location, opts.Location != "", locationLoader(cache)),
+			textStep(flagKubernetesVersion, "Kubernetes version (for example 1.37.0)", &opts.Version, opts.Version != "", validateVersion),
+			selectStep(flagNetwork, "Private network", &opts.Network, opts.Network != "", networkLoader(cache)),
+			selectStep(flagSubnet, "Subnet (in the network and location you chose)", &opts.Subnet, opts.Subnet != "",
+				subnetLoader(opts, cache), flagNetwork, flagLocation),
+			cidrStep(flagPodCIDR, "Pod IP range (CIDR)", &opts.PodCIDR, opts.podCIDRSet, defaultPodCIDR),
+			cidrStep(flagServiceCIDR, "Service IP range (CIDR)", &opts.ServiceCIDR, opts.serviceCIDRSet, defaultServiceCIDR),
 		},
 	}
 }
@@ -190,7 +159,6 @@ func networkLoader(cache *wizardCache) wizard.LoaderFunc {
 	}
 }
 
-// subnetLoader lists the subnets of the chosen network that are in the chosen location.
 func subnetLoader(opts *clusterCreateOptions, cache *wizardCache) wizard.LoaderFunc {
 	return func(ctx context.Context, _ tui.Prompter, _ tui.Status, _ *wizard.Store) ([]wizard.Choice, error) {
 		subnets, err := cache.networkSubnets(ctx, opts.Network)

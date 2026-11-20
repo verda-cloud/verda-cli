@@ -25,16 +25,14 @@ import (
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
 
-// confirmationRequired is CONFIRMATION_REQUIRED for every mk8s command. The
-// cause is not always agent mode: a script, a non-terminal or -o json|yaml also cannot prompt.
+// confirmationRequired: the cause is not always agent mode, so the text names every case.
 func confirmationRequired(action string) *cmdutil.AgentError {
 	ae := cmdutil.NewConfirmationRequiredError(action)
 	ae.Message = fmt.Sprintf("destructive action %q requires --yes: there is no prompt in scripts, without a terminal, in agent mode or with -o json|yaml", action)
 	return ae
 }
 
-// checkConfirmed: destructive commands (and cluster upgrade) need --yes unless
-// a person at a terminal can confirm. It never prompts.
+// checkConfirmed never prompts: --yes is needed unless a person at a terminal can confirm.
 func checkConfirmed(f cmdutil.Factory, yes bool, action string) error {
 	if !yes && !interactiveTTY(f) {
 		return confirmationRequired(action)
@@ -43,8 +41,6 @@ func checkConfirmed(f cmdutil.Factory, yes bool, action string) error {
 }
 
 // confirmWarning prints a red warning with detail lines on stderr, then asks.
-// It returns false, nil when the user declines or presses Esc or Ctrl+C, after
-// printing "Canceled.".
 func confirmWarning(ctx context.Context, ioStreams cmdutil.IOStreams, prompter tui.Prompter, heading string, detail []string, prompt string) (bool, error) {
 	warn := lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Bold(true)
 	_, _ = fmt.Fprintf(ioStreams.ErrOut, "\n  %s %s\n", warn.Render("⚠"), warn.Render(heading))

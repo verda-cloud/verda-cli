@@ -89,13 +89,10 @@ func runClusterDelete(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.I
 	}
 
 	cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), "Delete cluster:", map[string]string{"name": target.Name, "location": target.Location})
-	ctx, cancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
-	defer cancel()
-	err = cmdutil.RunWithSpinner(ctx, f.Status(), "Deleting cluster...", func(ctx context.Context) error {
+	if err := apiRun(cmd.Context(), f, "Deleting cluster...", func(ctx context.Context) error {
 		return client.ManagedKubernetes.Delete(ctx, target.Location, target.Name)
-	})
-	if err != nil {
-		return mapErr(err)
+	}); err != nil {
+		return err
 	}
 
 	result := ActionResult{Resource: kindCluster, Name: target.Name, Location: target.Location, Action: "delete", Status: statusAccepted}

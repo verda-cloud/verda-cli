@@ -59,14 +59,10 @@ func NewCmdKubeconfigList(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra
 }
 
 func runKubeconfigList(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, scope *poolScope) error {
-	if missing := scope.missing(f, cmd); len(missing) > 0 {
-		return cmdutil.NewMissingFlagsError(missing)
-	}
-	client, err := f.VerdaClient()
-	if err != nil {
+	if err := scope.check(f, cmd, nil, ""); err != nil {
 		return err
 	}
-	target, err := scope.resolve(cmd, f, ioStreams, client)
+	client, target, err := scope.connect(cmd, f, ioStreams)
 	if err != nil || target == nil {
 		return err
 	}
@@ -93,8 +89,8 @@ func runKubeconfigList(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.
 	return tw.Flush()
 }
 
-// listKubeconfigViews and getKubeconfigView convert inside the call, so an SDK
-// struct (with the YAML and its private key) never reaches a printer or the debug log.
+// listKubeconfigViews and getKubeconfigView convert inside the call, so the SDK
+// struct (with the private key) never reaches a printer or the debug log.
 func listKubeconfigViews(ctx context.Context, f cmdutil.Factory, client *verda.Client, t *clusterTarget) ([]KubeconfigView, error) {
 	return apiCall(ctx, f, "Loading kubeconfigs...", func(ctx context.Context) ([]KubeconfigView, error) {
 		list, err := client.ManagedKubernetes.ListKubeconfigs(ctx, t.Location, t.Name)
@@ -120,22 +116,8 @@ func getKubeconfigView(ctx context.Context, f cmdutil.Factory, client *verda.Cli
 	})
 }
 
-// checkKubeconfigTarget fails before any call when --cluster or <id> cannot be
-// asked for. It lists everything missing at once.
-func checkKubeconfigTarget(f cmdutil.Factory, cmd *cobra.Command, scope *poolScope, args []string) error {
-	missing := scope.missing(f, cmd)
-	if poolArgMissing(f, args) {
-		missing = append(missing, argKubeconfigRef)
-	}
-	if len(missing) > 0 {
-		return cmdutil.NewMissingFlagsError(missing)
-	}
-	return nil
-}
-
-// resolveKubeconfig: a named id is read when read is set and used as given
-// otherwise; with no id a picker lists the cluster's kubeconfigs. A nil result
-// with a nil error means the user canceled or the cluster has none.
+// resolveKubeconfig: a named id is read only when read is set; with no id a
+// picker. A nil result with a nil error means canceled or none.
 func resolveKubeconfig(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client *verda.Client, t *clusterTarget, args []string, read bool) (*KubeconfigView, error) {
 	if len(args) > 0 {
 		id := strings.TrimSpace(args[0])
@@ -182,7 +164,7 @@ func groupsColumn(groups []string) string {
 	return cmdutil.TextColumn(strings.Join(groups, ","))
 }
 
-// expiresColumn is "-" while the kubeconfig is pending: the API sets not_after when it issues the certificate.
+// expiresColumn is "-" while pending: the API sets not_after when it issues the certificate.
 func expiresColumn(t *time.Time) string {
 	if t == nil {
 		return "-"

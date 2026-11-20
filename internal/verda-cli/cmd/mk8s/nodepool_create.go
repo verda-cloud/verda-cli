@@ -16,9 +16,7 @@ package mk8s
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"slices"
 	"strings"
 	"time"
 
@@ -126,28 +124,21 @@ func NewCmdNodePoolCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra
 func (o *nodePoolCreateOptions) trim() {
 	o.Cluster, o.Location = strings.TrimSpace(o.Cluster), strings.TrimSpace(o.Location)
 	o.Name, o.InstanceType = strings.TrimSpace(o.Name), strings.TrimSpace(o.InstanceType)
-	keys := make([]string, 0, len(o.SSHKeys))
-	for _, k := range o.SSHKeys {
-		if k = strings.TrimSpace(k); k != "" && !slices.Contains(keys, k) {
-			keys = append(keys, k)
-		}
-	}
-	o.SSHKeys = keys
+	o.SSHKeys = cleanGroups(o.SSHKeys)
 }
 
-// validate rejects values that cannot work before any prompt or call. The errors
-// are UsageErrors: main prints an AgentError as JSON even for a person.
-func (o *nodePoolCreateOptions) validate(cmd *cobra.Command) error {
-	if o.Wait.Wait && o.Wait.Timeout <= 0 {
+// checkPoolFlags runs before any prompt or call. The errors are UsageErrors:
+// main prints an AgentError as JSON even for a person.
+func checkPoolFlags(cmd *cobra.Command, w cmdutil.WaitOptions, replicas int) error {
+	if w.Wait && w.Timeout <= 0 {
 		return cmdutil.UsageErrorf(cmd, "--%s must be greater than 0", flagWaitTimeout)
 	}
-	if o.Replicas < 0 {
+	if replicas < 0 {
 		return cmdutil.UsageErrorf(cmd, "--%s must be 0 or more", flagReplicas)
 	}
 	return nil
 }
 
-// missingValues lists the required values that are empty.
 func (o *nodePoolCreateOptions) missingValues() []string {
 	var m []string
 	if o.Cluster == "" {
@@ -177,7 +168,7 @@ func (o *nodePoolCreateOptions) request() verda.CreateManagedKubernetesNodePoolR
 
 func runNodePoolCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *nodePoolCreateOptions) error {
 	opts.trim()
-	if err := opts.validate(cmd); err != nil {
+	if err := checkPoolFlags(cmd, opts.Wait, opts.Replicas); err != nil {
 		return err
 	}
 	missing := opts.missingValues()
@@ -200,10 +191,7 @@ func runNodePoolCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.
 	}
 	if len(missing) > 0 {
 		flow := buildNodePoolCreateFlow(opts, newWizardCache(f, client))
-		if err := newWizardEngine(f, ioStreams).Run(cmd.Context(), flow); err != nil {
-			if stop, ok := errors.AsType[*stopError](err); ok {
-				return stop
-			}
+		if err := runWizard(cmd.Context(), f, ioStreams, flow); err != nil {
 			return err
 		}
 		opts.trim()
@@ -219,9 +207,7 @@ func runNodePoolCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.
 	}
 
 	cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), "Request payload:", req)
-	ctx, cancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
-	defer cancel()
-	pool, err := cmdutil.WithSpinner(ctx, f.Status(), "Creating node pool...", func(ctx context.Context) (*verda.ManagedKubernetesNodePool, error) {
+	pool, err := apiCall(cmd.Context(), f, "Creating node pool...", func(ctx context.Context) (*verda.ManagedKubernetesNodePool, error) {
 		return client.ManagedKubernetes.CreateNodePool(ctx, target.Location, target.Name, req)
 	})
 	if err != nil {
@@ -252,12 +238,8 @@ func runNodePoolCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.
 }
 
 func confirmNodePoolCreate(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, t *clusterTarget, req *verda.CreateManagedKubernetesNodePoolRequest) (bool, error) {
-	replicas := 0
-	if req.Replicas != nil {
-		replicas = *req.Replicas
-	}
 	_, _ = fmt.Fprintf(ioStreams.ErrOut, "\nCreate node pool %s\n  Cluster:        %s (%s)\n  Instance type:  %s\n  Workers:        %d\n  SSH keys:       %s\n\n",
-		req.Name, t.Name, t.Location, req.InstanceType, replicas, strings.Join(req.SSHKeyIDs, ", "))
+		req.Name, t.Name, t.Location, req.InstanceType, *req.Replicas, strings.Join(req.SSHKeyIDs, ", "))
 	return askConfirm(ctx, ioStreams, f.Prompter(), "Create node pool "+req.Name+"?")
 }
 

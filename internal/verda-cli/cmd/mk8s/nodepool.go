@@ -63,7 +63,7 @@ func NewCmdNodePool(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Comma
 	return cmd
 }
 
-// poolScope is the cluster a node-pool command acts on: --cluster and -l.
+// poolScope is --cluster and -l, shared by the node-pool and kubeconfig commands.
 type poolScope struct {
 	Cluster  string
 	Location string
@@ -74,42 +74,45 @@ func (s *poolScope) addFlags(cmd *cobra.Command) {
 	addLocationFlag(cmd, &s.Location)
 }
 
-// missing lists --cluster when a terminal cannot ask for it (or it is blank).
-func (s *poolScope) missing(f cmdutil.Factory, cmd *cobra.Command) []string {
+// missing lists --cluster, and arg (<pool> or <id>) unless it is "", when a
+// terminal cannot ask for them or they are blank.
+func (s *poolScope) missing(f cmdutil.Factory, cmd *cobra.Command, args []string, arg string) []string {
+	var m []string
 	if clusterArgMissing(f, s.Cluster, cmd.Flags().Changed(flagCluster)) {
-		return []string{"--" + flagCluster}
+		m = append(m, "--"+flagCluster)
+	}
+	if arg != "" && clusterArgMissing(f, argOrEmpty(args), len(args) > 0) {
+		m = append(m, arg)
+	}
+	return m
+}
+
+// check fails before any call, listing everything missing at once.
+func (s *poolScope) check(f cmdutil.Factory, cmd *cobra.Command, args []string, arg string) error {
+	if m := s.missing(f, cmd, args, arg); len(m) > 0 {
+		return cmdutil.NewMissingFlagsError(m)
 	}
 	return nil
 }
 
-func (s *poolScope) resolve(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client *verda.Client) (*clusterTarget, error) {
-	return resolveCluster(cmd, f, ioStreams, client, s.Cluster, s.Location)
-}
-
-// poolArgMissing: the pool was not given where it has to be, or was blank.
-func poolArgMissing(f cmdutil.Factory, args []string) bool {
-	blank := len(args) > 0 && strings.TrimSpace(args[0]) == ""
-	return blank || (len(args) == 0 && !interactiveTTY(f))
-}
-
-// checkPoolTarget fails before any call when --cluster or <pool> cannot be
-// asked for. It lists everything missing at once.
-func checkPoolTarget(f cmdutil.Factory, cmd *cobra.Command, scope *poolScope, args []string) error {
-	missing := scope.missing(f, cmd)
-	if poolArgMissing(f, args) {
-		missing = append(missing, argPool)
+// connect returns a nil target with a nil error when the user canceled or there is nothing to pick.
+func (s *poolScope) connect(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams) (*verda.Client, *clusterTarget, error) {
+	client, err := f.VerdaClient()
+	if err != nil {
+		return nil, nil, err
 	}
-	if len(missing) > 0 {
-		return cmdutil.NewMissingFlagsError(missing)
-	}
-	return nil
+	t, err := resolveCluster(cmd, f, ioStreams, client, s.Cluster, s.Location)
+	return client, t, err
 }
 
 // resolvePool reads the pool named by args[0], or asks for one. A nil pool with
 // a nil error means the user canceled or the cluster has no pool.
 func resolvePool(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client *verda.Client, t *clusterTarget, args []string) (*verda.ManagedKubernetesNodePool, error) {
 	if len(args) > 0 {
-		return getPool(cmd.Context(), f, client, t, strings.TrimSpace(args[0]))
+		name := strings.TrimSpace(args[0])
+		return apiCall(cmd.Context(), f, "Loading node pool...", func(ctx context.Context) (*verda.ManagedKubernetesNodePool, error) {
+			return client.ManagedKubernetes.GetNodePool(ctx, t.Location, t.Name, name)
+		})
 	}
 	pools, err := listPools(cmd.Context(), f, client, t)
 	if err != nil {
@@ -118,30 +121,18 @@ func resolvePool(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStre
 	return pickPool(cmd.Context(), f, ioStreams, t, pools)
 }
 
-func getPool(ctx context.Context, f cmdutil.Factory, client *verda.Client, t *clusterTarget, name string) (*verda.ManagedKubernetesNodePool, error) {
-	return apiCall(ctx, f, "Loading node pool...", func(ctx context.Context) (*verda.ManagedKubernetesNodePool, error) {
-		return client.ManagedKubernetes.GetNodePool(ctx, t.Location, t.Name, name)
-	})
-}
-
 func listPools(ctx context.Context, f cmdutil.Factory, client *verda.Client, t *clusterTarget) ([]verda.ManagedKubernetesNodePool, error) {
 	return apiCall(ctx, f, "Loading node pools...", func(ctx context.Context) ([]verda.ManagedKubernetesNodePool, error) {
 		return client.ManagedKubernetes.ListNodePools(ctx, t.Location, t.Name)
 	})
 }
 
-// poolDescribeCmd, poolDeleteCmd and poolScaleCmd are the commands named in "check with" and "to stop" hints.
-func poolDescribeCmd(t *clusterTarget, pool string) string {
-	return fmt.Sprintf("verda mk8s node-pool describe %s --cluster %s -l %s", pool, t.Name, t.Location)
+// poolCmd is a node-pool command for "check with" and "to stop" hints.
+func poolCmd(verb string, t *clusterTarget, pool string) string {
+	return fmt.Sprintf("verda mk8s node-pool %s %s --cluster %s -l %s", verb, pool, t.Name, t.Location)
 }
 
-func poolDeleteCmd(t *clusterTarget, pool string) string {
-	return fmt.Sprintf("verda mk8s node-pool delete %s --cluster %s -l %s", pool, t.Name, t.Location)
-}
-
-func poolScaleCmd(t *clusterTarget, pool string, replicas int) string {
-	return fmt.Sprintf("verda mk8s node-pool scale %s --cluster %s -l %s --replicas %d", pool, t.Name, t.Location, replicas)
-}
+func poolDescribeCmd(t *clusterTarget, pool string) string { return poolCmd("describe", t, pool) }
 
 func pickPool(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, t *clusterTarget, pools []verda.ManagedKubernetesNodePool) (*verda.ManagedKubernetesNodePool, error) {
 	if len(pools) == 0 {

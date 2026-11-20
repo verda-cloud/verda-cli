@@ -36,22 +36,18 @@ const (
 	canceledMsg  = "Canceled."
 )
 
-// clusterTarget names an existing cluster: names are unique per project, but
-// every API path also needs the location.
+// clusterTarget: names are unique per project, but every API path also needs the location.
 type clusterTarget struct {
 	Name     string
 	Location string
 }
 
-// addLocationFlag registers -l/--location for commands that act on a cluster.
 func addLocationFlag(cmd *cobra.Command, location *string) {
 	cmd.Flags().StringVarP(location, flagLocation, "l", "", locationUsage)
 }
 
-// checkClusterArg: off a terminal the cluster is required, and a blank one is
-// never sent. given says whether the user passed it; label names it in the
-// error (<cluster> or --cluster). Call it before f.VerdaClient() so bad input
-// fails the same with or without credentials.
+// checkClusterArg runs before f.VerdaClient(), so bad input fails the same
+// with or without credentials. label is <cluster> or --cluster.
 func checkClusterArg(f cmdutil.Factory, name string, given bool, label string) error {
 	if clusterArgMissing(f, name, given) {
 		return cmdutil.NewMissingFlagsError([]string{label})
@@ -65,10 +61,8 @@ func clusterArgMissing(f cmdutil.Factory, name string, given bool) bool {
 	return blank || (!given && !interactiveTTY(f))
 }
 
-// resolveCluster finds the cluster to act on: with a name and a location no
-// call, with a name alone one List, with no name a picker. A nil target with a
-// nil error means the user canceled or there is nothing to pick. Call
-// checkClusterArg first.
+// resolveCluster: name and location make no call, a name alone one List, no
+// name a picker. A nil target with a nil error means canceled or nothing to pick.
 func resolveCluster(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client *verda.Client, name, location string) (*clusterTarget, error) {
 	name, location = strings.TrimSpace(name), strings.TrimSpace(location)
 	if name != "" && location != "" {
@@ -84,7 +78,6 @@ func resolveCluster(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOS
 	return matchCluster(cmd, clusters, name)
 }
 
-// argOrEmpty is the first positional argument, or "".
 func argOrEmpty(args []string) string {
 	if len(args) == 0 {
 		return ""
@@ -92,7 +85,6 @@ func argOrEmpty(args []string) string {
 	return args[0]
 }
 
-// describeCmd is the command that shows a cluster, for "check with" hints.
 func describeCmd(name, location string) string {
 	return fmt.Sprintf("verda mk8s cluster describe %s -l %s", name, location)
 }
@@ -111,15 +103,19 @@ func apiCall[T any](ctx context.Context, f cmdutil.Factory, msg string, fn func(
 	return v, mapErr(err)
 }
 
+func apiRun(ctx context.Context, f cmdutil.Factory, msg string, fn func(context.Context) error) error {
+	_, err := apiCall(ctx, f, msg, func(ctx context.Context) (struct{}, error) { return struct{}{}, fn(ctx) })
+	return err
+}
+
 func listClusters(ctx context.Context, f cmdutil.Factory, client *verda.Client) ([]verda.ManagedKubernetesCluster, error) {
 	return apiCall(ctx, f, "Loading clusters...", func(ctx context.Context) ([]verda.ManagedKubernetesCluster, error) {
 		return client.ManagedKubernetes.List(ctx)
 	})
 }
 
-// matchCluster finds name in the project's clusters. The errors are plain, not
-// AgentErrors, which main prints as JSON even for a person: ClassifyError still
-// gives NOT_FOUND and VALIDATION_ERROR.
+// matchCluster returns plain errors, not AgentErrors (main prints those as JSON
+// even for a person); ClassifyError still gives NOT_FOUND and VALIDATION_ERROR.
 func matchCluster(cmd *cobra.Command, clusters []verda.ManagedKubernetesCluster, name string) (*clusterTarget, error) {
 	var locations []string
 	for i := range clusters {
@@ -137,7 +133,6 @@ func matchCluster(cmd *cobra.Command, clusters []verda.ManagedKubernetesCluster,
 	}
 }
 
-// pickCluster prompts for a cluster, limited to one location when given.
 func pickCluster(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, clusters []verda.ManagedKubernetesCluster, location string) (*clusterTarget, error) {
 	var shown []verda.ManagedKubernetesCluster
 	for i := range clusters {
@@ -170,8 +165,7 @@ func pickCluster(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStr
 	return nil, nil
 }
 
-// pickerHints shows the hint bar of a picker outside a wizard. Esc ends the
-// command there, so the bar says cancel, not back.
+// pickerHints: outside a wizard Esc ends the command, so the bar says cancel, not back.
 func pickerHints() []tui.SelectOption {
 	return []tui.SelectOption{tui.WithShowHints(true), tui.WithSelectRelabel("esc", "esc cancel")}
 }
