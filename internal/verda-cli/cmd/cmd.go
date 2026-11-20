@@ -34,6 +34,7 @@ import (
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/instancetypes"
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/locations"
 	mcpcmd "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/mcp"
+	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/mk8s"
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/network"
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/objectstorage"
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/registry"
@@ -165,6 +166,12 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) (*cobra.Command, *clioptions.Op
 			Commands: []*cobra.Command{
 				serverless.NewCmdContainer(f, ioStreams),
 				serverless.NewCmdBatchjob(f, ioStreams),
+			},
+		},
+		cmdutil.CommandGroup{
+			Message: "Kubernetes Commands:",
+			Commands: []*cobra.Command{
+				mk8s.NewCmdMK8s(f, ioStreams),
 			},
 		},
 		cmdutil.CommandGroup{

@@ -52,7 +52,7 @@ func EnsureVerdaDir() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := mkdirSecure(dir); err != nil {
+	if err := MkdirSecure(dir); err != nil {
 		return "", fmt.Errorf("cannot create config directory %s: %w\n\n"+
 			"Check directory permissions or set VERDA_HOME to an alternative location", dir, err)
 	}
@@ -74,7 +74,7 @@ func EnsureVerdaBinDir() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := mkdirSecure(dir); err != nil {
+	if err := MkdirSecure(dir); err != nil {
 		return "", fmt.Errorf("cannot create binary directory %s: %w", dir, err)
 	}
 	return dir, nil
@@ -84,7 +84,7 @@ func EnsureVerdaBinDir() (string, error) {
 // On Unix, the file is created with 0600. On Windows, it inherits the
 // parent directory ACL (Go's os.WriteFile uses default security).
 func WriteSecureFile(path string, data []byte) error {
-	if err := mkdirSecure(filepath.Dir(path)); err != nil {
+	if err := MkdirSecure(filepath.Dir(path)); err != nil {
 		return fmt.Errorf("cannot create directory for %s: %w", path, err)
 	}
 	if err := os.WriteFile(path, data, 0o600); err != nil {
@@ -97,8 +97,8 @@ func WriteSecureFile(path string, data []byte) error {
 	return nil
 }
 
-// mkdirSecure creates a directory with 0700 on Unix.
-func mkdirSecure(dir string) error {
+// MkdirSecure creates a directory (and parents) and sets 0700 on the leaf on Unix.
+func MkdirSecure(dir string) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
