@@ -620,9 +620,17 @@ func TestEnvUnset_AgentMode_RequiresDeployment(t *testing.T) {
 	}
 }
 
+// multiContainerGroups is the env GET body for the two-container deployment,
+// in deployment order; tests pass other orders to show list keys on the
+// deployment, not on group position.
+var multiContainerGroups = []map[string]any{
+	{"container_name": "my-endpoint-0", "env": []verda.ContainerEnvVar{{Name: "MAIN_ONLY", Type: "plain", ValueOrReferenceToSecret: "1"}}},
+	{"container_name": "sidecar-1", "env": []verda.ContainerEnvVar{{Name: "SIDE_ONLY", Type: "plain", ValueOrReferenceToSecret: "2"}}},
+}
+
 // newMultiContainerServer serves a two-container deployment whose env groups
 // differ, so tests can tell which group a command read.
-func newMultiContainerServer(t *testing.T) (*httptest.Server, *envRecordingServer) {
+func newMultiContainerServer(t *testing.T, groups []map[string]any) (*httptest.Server, *envRecordingServer) {
 	t.Helper()
 	rec := &envRecordingServer{}
 	mux := http.NewServeMux()
@@ -639,10 +647,7 @@ func newMultiContainerServer(t *testing.T) (*httptest.Server, *envRecordingServe
 	})
 	mux.HandleFunc("GET /container-deployments/{name}/environment-variables", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode([]map[string]any{
-			{"container_name": "my-endpoint-0", "env": []verda.ContainerEnvVar{{Name: "MAIN_ONLY", Type: "plain", ValueOrReferenceToSecret: "1"}}},
-			{"container_name": "sidecar-1", "env": []verda.ContainerEnvVar{{Name: "SIDE_ONLY", Type: "plain", ValueOrReferenceToSecret: "2"}}},
-		})
+		_ = json.NewEncoder(w).Encode(groups)
 	})
 	mux.HandleFunc("POST /container-deployments/{name}/environment-variables", func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
@@ -663,27 +668,49 @@ func newMultiContainerServer(t *testing.T) (*httptest.Server, *envRecordingServe
 	return srv, rec
 }
 
-// list shows the first container's group and warns that others exist.
+// list shows Containers[0] of the deployment, the same container set and
+// unset write to, whatever order the env GET returns and even when that
+// container has no group yet. The warning counts deployment containers.
 func TestEnvList_MultiContainer_ShowsFirstAndWarns(t *testing.T) {
 	t.Parallel()
-	srv, _ := newMultiContainerServer(t)
-	f := newTestFactory(t, srv.URL)
+	reversed := []map[string]any{multiContainerGroups[1], multiContainerGroups[0]}
+	firstMissing := []map[string]any{multiContainerGroups[1]}
+	cases := []struct {
+		name   string
+		groups []map[string]any
+		want   []string
+	}{
+		{"deployment order", multiContainerGroups, []string{"MAIN_ONLY"}},
+		{"reversed order", reversed, []string{"MAIN_ONLY"}},
+		{"first container missing", firstMissing, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			srv, _ := newMultiContainerServer(t, tc.groups)
+			f := newTestFactory(t, srv.URL)
 
-	var stdout, stderr bytes.Buffer
-	cmd := NewCmdContainer(f, cmdutil.IOStreams{Out: &stdout, ErrOut: &stderr})
-	cmd.SetArgs([]string{"env", "list", "my-endpoint"})
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("env list failed: %v\nstderr:\n%s", err, stderr.String())
-	}
-	var got []struct{ Name string }
-	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
-		t.Fatalf("unmarshal: %v\nstdout: %s", err, stdout.String())
-	}
-	if len(got) != 1 || got[0].Name != "MAIN_ONLY" {
-		t.Errorf("want only MAIN_ONLY from the first group, got %+v", got)
-	}
-	if !strings.Contains(stderr.String(), "2 containers") {
-		t.Errorf("want multi-container warning on stderr, got %q", stderr.String())
+			var stdout, stderr bytes.Buffer
+			cmd := NewCmdContainer(f, cmdutil.IOStreams{Out: &stdout, ErrOut: &stderr})
+			cmd.SetArgs([]string{"env", "list", "my-endpoint"})
+			if err := cmd.Execute(); err != nil {
+				t.Fatalf("env list failed: %v\nstderr:\n%s", err, stderr.String())
+			}
+			var got []struct{ Name string }
+			if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+				t.Fatalf("unmarshal: %v\nstdout: %s", err, stdout.String())
+			}
+			names := make([]string, 0, len(got))
+			for _, v := range got {
+				names = append(names, v.Name)
+			}
+			if strings.Join(names, ",") != strings.Join(tc.want, ",") {
+				t.Errorf("want vars of my-endpoint-0 %v, got %v", tc.want, names)
+			}
+			if !strings.Contains(stderr.String(), `2 containers; showing "my-endpoint-0"`) {
+				t.Errorf("want multi-container warning naming my-endpoint-0 on stderr, got %q", stderr.String())
+			}
+		})
 	}
 }
 
@@ -691,7 +718,7 @@ func TestEnvList_MultiContainer_ShowsFirstAndWarns(t *testing.T) {
 // another container's: SIDE_ONLY exists only on the sidecar, so it is added.
 func TestEnvSet_MultiContainer_UsesOwnGroup(t *testing.T) {
 	t.Parallel()
-	srv, rec := newMultiContainerServer(t)
+	srv, rec := newMultiContainerServer(t, multiContainerGroups)
 	f := newTestFactory(t, srv.URL)
 
 	var stdout, stderr bytes.Buffer

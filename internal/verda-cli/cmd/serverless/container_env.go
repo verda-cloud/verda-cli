@@ -32,16 +32,17 @@ const envValueMasked = "***"
 
 // containerNameOf: the env endpoints key `container_name` on the container
 // inside the deployment (the API names it "<deployment>-0"), not on the
-// deployment; sending the deployment name returns not_found.
-func containerNameOf(ctx context.Context, client *verda.Client, deployment string) (string, error) {
+// deployment; sending the deployment name returns not_found. Multi-container
+// deployments always target Containers[0]; count is the deployment's size.
+func containerNameOf(ctx context.Context, client *verda.Client, deployment string) (name string, count int, err error) {
 	d, err := client.ContainerDeployments.GetDeploymentByName(ctx, deployment)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	if len(d.Containers) == 0 {
-		return "", fmt.Errorf("deployment %q has no containers", deployment)
+		return "", 0, fmt.Errorf("deployment %q has no containers", deployment)
 	}
-	return d.Containers[0].Name, nil
+	return d.Containers[0].Name, len(d.Containers), nil
 }
 
 // envVarGroup is one element of the GET environment-variables response,
@@ -66,14 +67,17 @@ func fetchEnvVars(ctx context.Context, client *verda.Client, deployment string) 
 	return groups, nil
 }
 
-// envTarget is what an env write needs: the container to key on and its current variables.
+// envTarget: the container every env command keys on and its current
+// variables. list, set and unset all resolve it the same way so they never
+// disagree on which container a multi-container deployment means.
 type envTarget struct {
-	Container string
-	Vars      []verda.ContainerEnvVar
+	Container  string
+	Containers int
+	Vars       []verda.ContainerEnvVar
 }
 
 func loadEnvTarget(ctx context.Context, client *verda.Client, deployment string) (*envTarget, error) {
-	cn, err := containerNameOf(ctx, client, deployment)
+	cn, count, err := containerNameOf(ctx, client, deployment)
 	if err != nil {
 		return nil, err
 	}
@@ -81,16 +85,13 @@ func loadEnvTarget(ctx context.Context, client *verda.Client, deployment string)
 	if err != nil {
 		return nil, err
 	}
-	return &envTarget{Container: cn, Vars: envVarsOf(groups, cn)}, nil
+	return &envTarget{Container: cn, Containers: count, Vars: envVarsOf(groups, cn)}, nil
 }
 
-// envVarsOf: the variables of container; "" picks the first group. The
-// deployment GET and the env GET are separate reads, so the container may be
-// missing from the groups (no vars yet, or a lagging read): that is empty, not an error.
+// envVarsOf: the variables of container. The deployment GET and the env GET
+// are separate reads, so the container may be missing from the groups (no
+// vars yet, or a lagging read): that is empty, not an error.
 func envVarsOf(groups []envVarGroup, container string) []verda.ContainerEnvVar {
-	if container == "" && len(groups) > 0 {
-		return groups[0].Env
-	}
 	for i := range groups {
 		if groups[i].ContainerName == container {
 			return groups[i].Env
@@ -145,16 +146,16 @@ func newCmdEnvList(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Comman
 			ctx, cancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
 			defer cancel()
 
-			groups, err := cmdutil.WithSpinner(ctx, f.Status(), "Fetching environment variables...", func(ctx context.Context) ([]envVarGroup, error) {
-				return fetchEnvVars(ctx, client, name)
+			target, err := cmdutil.WithSpinner(ctx, f.Status(), "Fetching environment variables...", func(ctx context.Context) (*envTarget, error) {
+				return loadEnvTarget(ctx, client, name)
 			})
 			if err != nil {
 				return err
 			}
-			if len(groups) > 1 {
-				_, _ = fmt.Fprintf(ioStreams.ErrOut, "Warning: deployment has %d containers; showing %q\n", len(groups), groups[0].ContainerName)
+			if target.Containers > 1 {
+				_, _ = fmt.Fprintf(ioStreams.ErrOut, "Warning: deployment has %d containers; showing %q\n", target.Containers, target.Container)
 			}
-			vars := envVarsOf(groups, "")
+			vars := target.Vars
 
 			if wrote, werr := cmdutil.WriteStructured(ioStreams.Out, f.OutputFormat(), vars); wrote {
 				return werr
@@ -347,7 +348,8 @@ func newCmdEnvUnset(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Comma
 			defer cancel()
 
 			containerName, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading deployment...", func(ctx context.Context) (string, error) {
-				return containerNameOf(ctx, client, deployment)
+				cn, _, err := containerNameOf(ctx, client, deployment)
+				return cn, err
 			})
 			if err != nil {
 				return err

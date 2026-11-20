@@ -197,6 +197,21 @@ func TestEnvList_FetchError(t *testing.T) {
 	}
 }
 
+// list resolves the container through the deployment GET like set and unset,
+// so an unknown deployment fails there instead of reading someone's env GET.
+func TestEnvList_DeploymentLookupError(t *testing.T) {
+	t.Parallel()
+	rec := newEnvServer(t, envServerConfig{fail: map[string]int{"GET deployment": http.StatusNotFound}})
+	f := newTestFactory(t, rec.srv.URL)
+	stdout, _, err := runEnv(t, f, "list", "missing")
+	if err == nil {
+		t.Fatal("want error from deployment GET, got nil")
+	}
+	if stdout != "" {
+		t.Errorf("want no stdout on failure, got %q", stdout)
+	}
+}
+
 func TestEnvSet_DeploymentLookupError(t *testing.T) {
 	t.Parallel()
 	rec := newEnvServer(t, envServerConfig{fail: map[string]int{"GET deployment": http.StatusNotFound}})
@@ -524,10 +539,10 @@ func TestEnvVarsOf(t *testing.T) {
 	b := []verda.ContainerEnvVar{{Name: "B"}}
 	groups := []envVarGroup{{ContainerName: "x-0", Env: a}, {ContainerName: "y-0", Env: b}}
 
-	if got := envVarsOf(nil, ""); got != nil {
-		t.Errorf("no groups, first: want nil, got %v", got)
+	if got := envVarsOf(nil, "x-0"); got != nil {
+		t.Errorf("no groups: want nil, got %v", got)
 	}
-	if got := envVarsOf(groups, ""); len(got) != 1 || got[0].Name != "A" {
+	if got := envVarsOf(groups, "x-0"); len(got) != 1 || got[0].Name != "A" {
 		t.Errorf("first group: want A, got %v", got)
 	}
 	if got := envVarsOf(groups, "y-0"); len(got) != 1 || got[0].Name != "B" {
