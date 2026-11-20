@@ -24,7 +24,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/spf13/cobra"
 	"github.com/verda-cloud/verda-cli/pkg/tui"
-	"github.com/verda-cloud/verda-cli/pkg/tui/bubbletea"
 	"github.com/verda-cloud/verda-cli/pkg/tui/wizard"
 
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
@@ -99,7 +98,6 @@ func buildMoveFlow(f cmdutil.Factory, client API, st *moveWizardState) *wizard.F
 		Name: "s3-move",
 		Layout: []wizard.ViewDef{
 			{ID: "progress", View: wizard.NewProgressView(wizard.WithProgressPercent())},
-			{ID: "hints", View: wizard.NewHintBarView(wizard.WithHintStyle(bubbletea.HintStyle()))},
 		},
 		Steps: []wizard.Step{
 			moveStepSourceBucket(f, client, st),

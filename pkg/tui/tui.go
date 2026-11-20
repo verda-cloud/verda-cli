@@ -326,6 +326,7 @@ type MultiSelectConfig struct {
 	RelabelByID   map[string]string // override individual binding labels by ID
 	HiddenByID    []string          // suppress these binding labels from the hint bar
 	ExtraBindings any               // engine-specific extra/replacement bindings (set via bubbletea options)
+	BackItem      bool              // last choice is a "back" action: no checkbox, never selected, Enter on it goes back
 
 	// MinError / MaxError override the validation messages shown when the
 	// selection count is below Min or above Max. nil = library default.
@@ -336,6 +337,12 @@ type MultiSelectConfig struct {
 // WithMultiSelectDefaults sets the default selected indices.
 func WithMultiSelectDefaults(indices []int) MultiSelectOption {
 	return func(c *MultiSelectConfig) { c.Defaults = indices }
+}
+
+// WithMultiSelectBackItem marks the last choice as a back action rather than
+// a selectable value.
+func WithMultiSelectBackItem() MultiSelectOption {
+	return func(c *MultiSelectConfig) { c.BackItem = true }
 }
 
 // WithMultiSelectPageSize sets the number of visible items.

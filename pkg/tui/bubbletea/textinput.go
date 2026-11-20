@@ -20,6 +20,7 @@ import (
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/verda-cloud/verda-cli/pkg/tui"
 )
@@ -109,6 +110,7 @@ func newTextInputModel(prompt string, cfg tui.TextInputConfig) textInputModel {
 	ti.Placeholder = cfg.Placeholder
 	ti.SetValue(cfg.Default)
 	ti.Focus()
+	syncPlaceholderWidth(&ti)
 
 	defaults := ApplyBindingOverrides(DefaultTextInputBindings(), cfg.RelabelByID, cfg.HiddenByID)
 	var bindings []KeyBinding[textInputModel]
@@ -141,10 +143,26 @@ func (m textInputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	before := m.textInput.Value()
 	var cmd tea.Cmd
 	m.textInput, cmd = m.textInput.Update(msg)
-	m.err = nil
+	if m.textInput.Value() != before {
+		m.err = nil
+		syncPlaceholderWidth(&m.textInput)
+	}
 	return m, cmd
+}
+
+// syncPlaceholderWidth: bubbles renders only the first rune of a placeholder
+// while Width is 0, so give an empty input the placeholder's width and leave
+// typed text unbounded.
+func syncPlaceholderWidth(ti *textinput.Model) {
+	if ti.Value() == "" {
+		ti.SetWidth(lipgloss.Width(ti.Placeholder))
+		return
+	}
+	ti.SetWidth(0)
+	ti.SetCursor(ti.Position()) // recompute scroll offsets computed under the narrow width
 }
 
 // Hints derives key hints from the resolved bindings.

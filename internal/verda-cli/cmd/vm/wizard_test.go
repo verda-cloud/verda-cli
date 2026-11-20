@@ -123,3 +123,16 @@ func TestBuildCreateFlowSpotSkipsContract(t *testing.T) {
 		t.Errorf("expected hostname=spot-vm, got %q", opts.Hostname)
 	}
 }
+
+func TestBuildCreateFlowHasNoExtraHintBar(t *testing.T) {
+	t.Parallel()
+	errClient := func() (*verda.Client, error) { return nil, errors.New("no client in test") }
+	for _, mode := range []WizardMode{WizardModeDeploy, WizardModeTemplate} {
+		flow := buildCreateFlow(context.Background(), errClient, &createOptions{}, mode)
+		for _, def := range flow.Layout {
+			if _, ok := def.View.(*wizard.HintBarView); ok {
+				t.Fatalf("mode %v: view %q duplicates the wizard composite's hint bar", mode, def.ID)
+			}
+		}
+	}
+}

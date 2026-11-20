@@ -1940,3 +1940,100 @@ func TestEngine_MultiSelectMinErrorPlumbed(t *testing.T) {
 		t.Errorf("expected wizard MinError override in view, got %q", view)
 	}
 }
+
+func multiSelectBackFlow(got *[]string) *Flow {
+	return &Flow{
+		Name: "test",
+		Steps: []Step{
+			{
+				Name:     "region",
+				Prompt:   SelectPrompt,
+				Required: true,
+				Loader:   StaticChoices(Choice{Label: "Finland", Value: "FIN-01"}),
+			},
+			{
+				Name:     "keys",
+				Prompt:   MultiSelectPrompt,
+				Required: true,
+				Loader:   StaticChoices(Choice{Label: "key-a", Value: "a"}),
+				Setter:   func(v any) { *got = v.([]string) },
+			},
+		},
+	}
+}
+
+// Select-all ticks the "← Back" row too, yielding index len(choices).
+func TestEngine_MultiSelect_BackIndexInResultDoesNotPanic(t *testing.T) {
+	var got []string
+	engine := newTestEngine([]promptResult{
+		selectResult(0),
+		multiSelectResult([]int{0, 1}),
+	})
+	if err := engine.Run(context.Background(), multiSelectBackFlow(&got)); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 1 || got[0] != "a" {
+		t.Errorf("got %v, want [a]", got)
+	}
+}
+
+func TestEngine_BuildPromptModel_MultiSelectBackIsNotAValue(t *testing.T) {
+	var got []string
+	flow := multiSelectBackFlow(&got)
+	engine := newTestEngine(nil)
+	engine.flow = flow
+	engine.steps = make([]stepRuntime, len(flow.Steps))
+	engine.current = 1
+	choices := []Choice{{Label: "key-a", Value: "a"}}
+
+	model := engine.buildPromptModel(flow.Steps[1], choices, true)
+	updated, _ := model.Update(tea.KeyPressMsg{Code: 'a', Mod: tea.ModCtrl})
+	updated, _ = updated.(bubbletea.PromptModel).Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	updated, cmd := updated.(bubbletea.PromptModel).Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if _, done := updated.(bubbletea.PromptModel).Result(); done {
+		t.Fatal("Enter on the Back row must not complete the step")
+	}
+	if cmd == nil {
+		t.Fatal("expected a go-back command")
+	}
+	if _, ok := cmd().(bubbletea.GoBackMsg); !ok {
+		t.Fatalf("expected GoBackMsg, got %T", cmd())
+	}
+}
+
+func TestEngine_RewindOne_KeepsAnswerAsDefault(t *testing.T) {
+	flow := &Flow{
+		Name: "test",
+		Steps: []Step{
+			{Name: "name", Prompt: TextInputPrompt, Required: true},
+			{Name: "gpu", Prompt: SelectPrompt, Required: true, DependsOn: []string{"name"}},
+		},
+	}
+	engine := newTestEngine(nil)
+	engine.flow = flow
+	engine.steps = make([]stepRuntime, len(flow.Steps))
+	engine.transition(0, stateCompleted, "my-pool")
+	engine.steps[0].loaded = true
+	engine.current = 1
+
+	engine.rewindOne()
+
+	if engine.current != 0 {
+		t.Fatalf("current = %d, want 0", engine.current)
+	}
+	if _, ok := engine.Collected()["name"]; ok {
+		t.Error("store must not keep the rewound answer: dependents would see a stale value")
+	}
+	if engine.steps[0].loaded {
+		t.Error("loader cache must be invalidated so dependent loaders re-run")
+	}
+	def, ok := engine.promptDefault(flow.Steps[0])
+	if !ok || def != "my-pool" {
+		t.Errorf("promptDefault = %v, %v; want my-pool", def, ok)
+	}
+
+	engine.transition(0, stateCompleted, "other")
+	if _, ok := engine.promptDefault(flow.Steps[0]); ok {
+		t.Error("prior answer must be dropped once the step is completed again")
+	}
+}
