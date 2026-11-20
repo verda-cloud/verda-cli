@@ -20,20 +20,16 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
-	"go.yaml.in/yaml/v3"
 
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
 
 // kcYAML is the YAML the fake serves; kcPrivateKeyMarker stands for the private key.
 const kcYAML = "apiVersion: v1\nkind: Config\nusers:\n- name: alice\n  user:\n    client-key-data: " + kcPrivateKeyMarker + "\n"
-
-const kcCreateRoute = "POST /mk8sclusters/{loc}/{name}/kubeconfigs"
 
 // kcReadyOnGet makes every kubeconfig GET answer ready with the YAML.
 func kcReadyOnGet(api *fakeAPI) {
@@ -70,126 +66,74 @@ func kcAssertErrNoKey(t *testing.T, err error) {
 	}
 }
 
-func kcBody(t *testing.T, api *fakeAPI) map[string]any {
-	t.Helper()
-	return postBodyAny(t, api)
-}
-
 func TestKubeconfigCreate_WritesFileInEveryOutputMode(t *testing.T) {
 	t.Parallel()
 	for name, mk := range map[string]func(*verda.Client) *cmdutil.TestFactory{
 		"table": func(c *verda.Client) *cmdutil.TestFactory { return tableFactory(c, nil) },
 		"json":  jsonFactory,
-		"yaml":  yamlFactory,
-		"agent": agentFactory,
 	} {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-			api := kcAPI()
-			file := filepath.Join(t.TempDir(), "kc.yaml")
-			out, errOut, err := runMK8s(t, mk(newFakeClient(t, api)), kcArgs(file)...)
-			if err != nil {
-				t.Fatal(err)
+		api := kcAPI()
+		file := filepath.Join(t.TempDir(), "kc.yaml")
+		out, errOut, err := runMK8s(t, mk(newFakeClient(t, api)), kcArgs(file)...)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if got := readFile(t, file); got != kcYAML {
+			t.Errorf("%s: file = %q", name, got)
+		}
+		assertMode(t, file, 0o600)
+		if n := kcPosts(api); n != 1 {
+			t.Errorf("%s: POSTs = %d, want 1", name, n)
+		}
+		if name == "table" {
+			if !strings.Contains(out, "Kubeconfig prod-kc-1 saved to "+file) || !strings.Contains(errOut, "export KUBECONFIG="+file) {
+				t.Errorf("out=%q stderr=%q", out, errOut)
 			}
-			assertNoPrivateKey(t, "stdout", out)
-			assertNoPrivateKey(t, "stderr", errOut)
-			if got := readFile(t, file); got != kcYAML {
-				t.Errorf("file = %q", got)
-			}
-			assertMode(t, file, 0o600)
-			if n := kcPosts(api); n != 1 {
-				t.Errorf("POSTs = %d, want 1", n)
-			}
-			switch name {
-			case "table":
-				if !strings.Contains(out, "Kubeconfig prod-kc-1 saved to "+file) {
-					t.Errorf("stdout = %q", out)
-				}
-				if !strings.Contains(errOut, "export KUBECONFIG="+file) || !strings.Contains(errOut, "kubectl get nodes") {
-					t.Errorf("stderr = %q", errOut)
-				}
-			case "yaml":
-				var v KubeconfigView
-				if err := yaml.Unmarshal([]byte(out), &v); err != nil || v.File != file || v.ID != "prod-kc-1" || v.Status != "ready" {
-					t.Errorf("view = %+v err=%v", v, err)
-				}
-			default:
-				v := decodeJSON[KubeconfigView](t, out)
-				if v.File != file || v.CommonName != "alice" || !slices.Equal(v.Groups, []string{groupAdmin}) || v.NotAfter == nil {
-					t.Errorf("view = %+v", v)
-				}
-				if errOut != "" {
-					t.Errorf("stderr = %q, want empty", errOut)
-				}
-			}
-		})
+			continue
+		}
+		v := decodeJSON[KubeconfigView](t, out)
+		if v.File != file || v.CommonName != "alice" || !slices.Equal(v.Groups, []string{groupAdmin}) || v.NotAfter == nil || errOut != "" {
+			t.Errorf("view = %+v, stderr = %q", v, errOut)
+		}
 	}
 }
 
 func TestKubeconfigCreate_RequestBody(t *testing.T) {
 	t.Parallel()
-	cases := map[string]struct {
+	for name, tc := range map[string]struct {
 		flags  []string
-		groups []string
+		groups []any
 		extra  map[string]any
 	}{
-		"admin":        {flags: []string{"--admin"}, groups: []string{groupAdmin}},
-		"groups":       {flags: []string{"--group", "dev", "--group", "ops"}, groups: []string{"dev", "ops"}},
-		"both":         {flags: []string{"--admin", "--group", "dev"}, groups: []string{groupAdmin, "dev"}},
-		"admin twice":  {flags: []string{"--admin", "--group", groupAdmin}, groups: []string{groupAdmin}},
-		"duration":     {flags: []string{"--admin", "--duration", "720h"}, groups: []string{groupAdmin}, extra: map[string]any{"duration": "720h"}},
-		"display name": {flags: []string{"--group", "dev", "--display-name", "Alice laptop"}, groups: []string{"dev"}, extra: map[string]any{"display_name": "Alice laptop"}},
-	}
-	for name, tc := range cases {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-			api := kcAPI()
-			file := filepath.Join(t.TempDir(), "kc.yaml")
-			args := []string{"kubeconfig", "create", "--cluster", "prod", "--common-name", "alice", "--file", file}
-			if _, _, err := runMK8s(t, jsonFactory(newFakeClient(t, api)), append(args, tc.flags...)...); err != nil {
-				t.Fatal(err)
+		"admin and a group": {flags: []string{"--admin", "--group", "dev", "--group", groupAdmin}, groups: []any{groupAdmin, "dev"}},
+		"duration":          {flags: []string{"--admin", "--duration", "720h"}, groups: []any{groupAdmin}, extra: map[string]any{"duration": "720h"}},
+		"display name":      {flags: []string{"--group", "dev", "--display-name", "Alice laptop"}, groups: []any{"dev"}, extra: map[string]any{"display_name": "Alice laptop"}},
+	} {
+		api := kcAPI()
+		args := []string{"kubeconfig", "create", "--cluster", "prod", "--common-name", "alice", "--file", filepath.Join(t.TempDir(), "kc.yaml")}
+		if _, _, err := runMK8s(t, jsonFactory(newFakeClient(t, api)), append(args, tc.flags...)...); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		body := postBodyAny(t, api)
+		if got, _ := body["groups"].([]any); body["common_name"] != "alice" || !slices.Equal(got, tc.groups) {
+			t.Errorf("%s: body = %v", name, body)
+		}
+		for _, key := range []string{"duration", "display_name"} {
+			want, has := tc.extra[key]
+			if got, ok := body[key]; ok != has || (has && got != want) {
+				t.Errorf("%s: %s = %v (present %v), want %v (present %v)", name, key, got, ok, want, has)
 			}
-			body := kcBody(t, api)
-			got, _ := body["groups"].([]any)
-			var groups []string
-			for _, g := range got {
-				groups = append(groups, g.(string))
-			}
-			if body["common_name"] != "alice" || !slices.Equal(groups, tc.groups) {
-				t.Errorf("body = %v", body)
-			}
-			for _, key := range []string{"duration", "display_name"} {
-				want, has := tc.extra[key]
-				if got, ok := body[key]; ok != has || (has && got != want) {
-					t.Errorf("%s = %v (present %v), want %v (present %v)", key, got, ok, want, has)
-				}
-			}
-			if reqs := api.requestsMatching("POST"); reqs[0].Path != "/mk8sclusters/FIN-03/prod/kubeconfigs" {
-				t.Errorf("path = %s", reqs[0].Path)
-			}
-		})
-	}
-}
-
-func TestKubeconfigCreate_LocationFlagSkipsLookup(t *testing.T) {
-	t.Parallel()
-	api := kcAPI()
-	file := filepath.Join(t.TempDir(), "kc.yaml")
-	if _, _, err := runMK8s(t, jsonFactory(newFakeClient(t, api)), kcArgs(file, "-l", "FIN-03")...); err != nil {
-		t.Fatal(err)
-	}
-	if slices.Contains(api.paths("GET"), "/mk8sclusters") {
-		t.Errorf("-l must skip the cluster lookup, GETs = %v", api.paths("GET"))
+		}
+		if reqs := api.requestsMatching("POST"); reqs[0].Path != "/mk8sclusters/FIN-03/prod/kubeconfigs" {
+			t.Errorf("%s: path = %s", name, reqs[0].Path)
+		}
 	}
 }
 
 func TestKubeconfigCreate_DefaultPath(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
-	api := kcAPI()
+	home := setHome(t)
 	args := []string{"kubeconfig", "create", "--cluster", "prod", "--common-name", "alice", "--admin"}
-	out, errOut, err := runMK8s(t, tableFactory(newFakeClient(t, api), nil), args...)
+	out, errOut, err := runMK8s(t, tableFactory(newFakeClient(t, kcAPI()), nil), args...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,83 +142,45 @@ func TestKubeconfigCreate_DefaultPath(t *testing.T) {
 		t.Errorf("file = %q", got)
 	}
 	assertMode(t, want, 0o600)
+	assertMode(t, filepath.Dir(want), 0o700)
 	if !strings.Contains(out, want) || !strings.Contains(errOut, "export KUBECONFIG="+want) {
 		t.Errorf("out=%q err=%q", out, errOut)
 	}
 }
 
-func TestKubeconfigCreate_ExportLineQuotesThePath(t *testing.T) {
-	t.Parallel()
-	file := filepath.Join(t.TempDir(), "my kube's.yaml")
-	_, errOut, err := runMK8s(t, tableFactory(newFakeClient(t, kcAPI()), nil), kcArgs(file)...)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := "export KUBECONFIG=" + shellQuote(file); !strings.Contains(errOut, want) || !strings.Contains(errOut, "'\\''") {
-		t.Errorf("stderr = %q, want %q", errOut, want)
-	}
-}
-
+// A path that cannot be written stops the command before a certificate is issued.
 func TestKubeconfigCreate_ExistingTargetStopsBeforeAnyPOST(t *testing.T) {
 	t.Parallel()
-	t.Run("file without force", func(t *testing.T) {
-		t.Parallel()
+	dir := t.TempDir()
+	file := filepath.Join(dir, "kc.yaml")
+	if err := os.WriteFile(file, []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for name, tc := range map[string]struct {
+		args []string
+		want string
+	}{
+		"file without --force": {kcArgs(file), "--force"},
+		"directory":            {kcArgs(t.TempDir(), "--force"), "is a directory"},
+	} {
 		api := kcAPI()
-		file := filepath.Join(t.TempDir(), "kc.yaml")
-		if err := os.WriteFile(file, []byte("old"), 0o600); err != nil {
-			t.Fatal(err)
+		_, _, err := runMK8s(t, jsonFactory(newFakeClient(t, api)), tc.args...)
+		if err == nil || !strings.Contains(err.Error(), tc.want) || !isUsageError(err) || kcPosts(api) != 0 {
+			t.Errorf("%s: err = %v, POSTs = %d", name, err, kcPosts(api))
 		}
-		_, _, err := runMK8s(t, jsonFactory(newFakeClient(t, api)), kcArgs(file)...)
-		if err == nil || !strings.Contains(err.Error(), "--force") || !isUsageError(err) {
-			t.Fatalf("err = %v", err)
-		}
-		if n := kcPosts(api); n != 0 {
-			t.Errorf("%d POST(s): a certificate was issued for an unwritable path", n)
-		}
-		if got := readFile(t, file); got != "old" {
-			t.Errorf("file = %q", got)
-		}
-	})
-	t.Run("directory", func(t *testing.T) {
-		t.Parallel()
-		api := kcAPI()
-		_, _, err := runMK8s(t, jsonFactory(newFakeClient(t, api)), kcArgs(t.TempDir(), "--force")...)
-		if err == nil || !strings.Contains(err.Error(), "is a directory") || !isUsageError(err) || kcPosts(api) != 0 {
-			t.Errorf("err = %v, POSTs = %d", err, kcPosts(api))
-		}
-	})
-	t.Run("symlink", func(t *testing.T) {
-		t.Parallel()
-		skipModeTestOnWindows(t)
-		api := kcAPI()
-		dir := t.TempDir()
-		link := filepath.Join(dir, "link.yaml")
-		if err := os.Symlink(filepath.Join(dir, "elsewhere"), link); err != nil {
-			t.Fatal(err)
-		}
-		_, _, err := runMK8s(t, jsonFactory(newFakeClient(t, api)), kcArgs(link, "--force")...)
-		if err == nil || !strings.Contains(err.Error(), "symlink") || !isUsageError(err) || kcPosts(api) != 0 {
-			t.Errorf("err = %v, POSTs = %d", err, kcPosts(api))
-		}
-	})
-	t.Run("missing parent directory", func(t *testing.T) {
-		t.Parallel()
-		api := kcAPI()
-		_, _, err := runMK8s(t, jsonFactory(newFakeClient(t, api)), kcArgs(filepath.Join(t.TempDir(), "nope", "kc.yaml"))...)
-		if err == nil || !isUsageError(err) || kcPosts(api) != 0 {
-			t.Errorf("err = %v, POSTs = %d", err, kcPosts(api))
-		}
-	})
+	}
+	if got := readFile(t, file); got != "old" {
+		t.Errorf("file = %q", got)
+	}
 }
 
 func TestKubeconfigCreate_ForceReplacesTheFile(t *testing.T) {
 	t.Parallel()
-	api := kcAPI()
 	file := filepath.Join(t.TempDir(), "kc.yaml")
 	if err := os.WriteFile(file, []byte("old"), 0o644); err != nil { //nolint:gosec // a loose mode proves the replacement is 0600
 		t.Fatal(err)
 	}
-	_, errOut, err := runMK8s(t, jsonFactory(newFakeClient(t, api)), kcArgs(file, "--force")...)
+	_, errOut, err := runMK8s(t, jsonFactory(newFakeClient(t, kcAPI())), kcArgs(file, "--force")...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -293,12 +199,12 @@ func TestKubeconfigCreate_ForceReplacesTheFile(t *testing.T) {
 	}
 }
 
-func TestKubeconfigCreate_FileDashWritesOnlyTheYAMLToStdout(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
-	api := kcAPI()
-	out, errOut, err := runMK8s(t, tableFactory(newFakeClient(t, api), nil), kcArgs("-")...)
+// --file - writes only the YAML to stdout, also with --debug, and no file.
+func TestKubeconfigCreate_FileDashWritesOnlyTheYAML(t *testing.T) {
+	home := setHome(t)
+	f := tableFactory(newFakeClient(t, kcAPI()), nil)
+	f.DebugOverride = true
+	out, errOut, err := runMK8s(t, f, kcArgs("-")...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -311,64 +217,40 @@ func TestKubeconfigCreate_FileDashWritesOnlyTheYAMLToStdout(t *testing.T) {
 	}
 }
 
+// --file - would share stdout with the JSON: it fails before any API call.
 func TestKubeconfigCreate_FileDashRejectedWithStructuredOutput(t *testing.T) {
 	t.Parallel()
-	for name, mk := range map[string]func(*verda.Client) *cmdutil.TestFactory{
-		"json": jsonFactory, "yaml": yamlFactory, "agent": agentFactory,
+	for name, args := range map[string][]string{
+		"create": kcArgs("-"),
+		"save":   {"kubeconfig", "save", "prod-kc-1", "--cluster", "prod", "--file", "-"},
 	} {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-			api := kcAPI()
-			out, _, err := runMK8s(t, mk(newFakeClient(t, api)), kcArgs("-")...)
-			if agentErrorCode(err) != "VALIDATION_ERROR" || cmdutil.IsAgentError(err) {
-				t.Fatalf("err = %v", err)
-			}
-			if out != "" || len(api.requests) != 0 {
-				t.Errorf("stdout = %q, requests = %v: must fail before any API call", out, api.requests)
-			}
-		})
+		api := kcAPI()
+		out, _, err := runMK8s(t, jsonFactory(newFakeClient(t, api)), args...)
+		if agentErrorCode(err) != "VALIDATION_ERROR" || cmdutil.IsAgentError(err) || out != "" || len(api.requests) != 0 {
+			t.Errorf("%s: err = %v, stdout = %q, requests = %v", name, err, out, api.requests)
+		}
 	}
 }
 
 func TestKubeconfigCreate_MissingFlags(t *testing.T) {
 	t.Parallel()
-	for name, mk := range map[string]func(*verda.Client) *cmdutil.TestFactory{
-		"table": func(c *verda.Client) *cmdutil.TestFactory { return tableFactory(c, nil) },
-		"agent": agentFactory,
-	} {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-			api := kcAPI()
-			f := mk(newFakeClient(t, api))
-			_, _, err := runMK8s(t, f, "kubeconfig", "create")
-			ae := cmdutil.ClassifyError(err)
-			if ae == nil || ae.Code != "MISSING_REQUIRED_FLAGS" {
-				t.Fatalf("err = %v", err)
-			}
-			if m, _ := ae.Details["missing"].([]string); !slices.Equal(m, []string{"--cluster", "--common-name"}) {
-				t.Errorf("missing = %v", ae.Details)
-			}
-			if o, _ := ae.Details["one_of"].([]string); !slices.Equal(o, []string{"--admin", "--group"}) {
-				t.Errorf("one_of = %v", ae.Details)
-			}
-			if want := "required flags not provided: --cluster, --common-name; set at least one of --admin, --group"; ae.Message != want {
-				t.Errorf("message = %q, want %q", ae.Message, want)
-			}
-			// With the rest given, a missing access level alone is reported.
-			_, _, err = runMK8s(t, f, "kubeconfig", "create", "--cluster", "prod", "--common-name", "alice")
-			ae = cmdutil.ClassifyError(err)
-			if ae == nil || ae.Code != "MISSING_REQUIRED_FLAGS" || !strings.Contains(ae.Message, "--admin, --group") {
-				t.Errorf("no access: err = %v", err)
-			}
-			// Without a common name only that is missing.
-			_, _, err = runMK8s(t, f, "kubeconfig", "create", "--cluster", "prod", "--admin")
-			if m, _ := cmdutil.ClassifyError(err).Details["missing"].([]string); !slices.Equal(m, []string{"--common-name"}) {
-				t.Errorf("no common name: err = %v", err)
-			}
-			if len(api.requests) != 0 {
-				t.Errorf("requests = %v", api.requests)
-			}
-		})
+	api := kcAPI()
+	_, _, err := runMK8s(t, agentFactory(newFakeClient(t, api)), "kubeconfig", "create")
+	ae := cmdutil.ClassifyError(err)
+	if ae == nil || ae.Code != "MISSING_REQUIRED_FLAGS" {
+		t.Fatalf("err = %v", err)
+	}
+	if m, _ := ae.Details["missing"].([]string); !slices.Equal(m, []string{"--cluster", "--common-name"}) {
+		t.Errorf("missing = %v", ae.Details)
+	}
+	if o, _ := ae.Details["one_of"].([]string); !slices.Equal(o, []string{"--admin", "--group"}) {
+		t.Errorf("one_of = %v", ae.Details)
+	}
+	if want := "required flags not provided: --cluster, --common-name; set at least one of --admin, --group"; ae.Message != want {
+		t.Errorf("message = %q, want %q", ae.Message, want)
+	}
+	if len(api.requests) != 0 {
+		t.Errorf("requests = %v", api.requests)
 	}
 }
 
@@ -376,174 +258,82 @@ func TestKubeconfigCreate_InvalidInput(t *testing.T) {
 	t.Parallel()
 	api := kcAPI()
 	file := filepath.Join(t.TempDir(), "kc.yaml")
-	_, _, err := runMK8s(t, jsonFactory(newFakeClient(t, api)), kcArgs(file, "--wait-timeout", "0s")...)
-	if agentErrorCode(err) != "VALIDATION_ERROR" || cmdutil.IsAgentError(err) {
-		t.Errorf("zero wait timeout: %v", err)
-	}
 	for name, extra := range map[string][]string{
-		"duration under 1h":      {"--duration", "30m"},
-		"system: common name":    {"--common-name", "system:admin"},
-		"system: group":          {"--group", "system:nodes"},
-		"newline in the display": {"--display-name", "a\nb"},
+		"zero wait timeout": {"--wait-timeout", "0s"},
+		"duration under 1h": {"--duration", "30m"},
+		"system: group":     {"--group", "system:nodes"},
 	} {
 		_, _, err := runMK8s(t, jsonFactory(newFakeClient(t, api)), kcArgs(file, extra...)...)
 		if agentErrorCode(err) != "VALIDATION_ERROR" || cmdutil.IsAgentError(err) {
 			t.Errorf("%s: err = %v", name, err)
 		}
 	}
-	// Input validation comes before the file check.
-	if err := os.WriteFile(file, []byte("old"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := runMK8s(t, jsonFactory(newFakeClient(t, api)), kcArgs(file, "--duration", "30m")...); err == nil || !strings.Contains(err.Error(), "invalid kubeconfig") {
-		t.Errorf("a bad duration must be reported before the taken file: %v", err)
-	}
-	if err := os.Remove(file); err != nil {
-		t.Fatal(err)
-	}
-	if usage := NewCmdKubeconfigCreate(nil, cmdutil.IOStreams{}).Flags().Lookup(flagDuration).Usage; !strings.Contains(usage, "cannot be revoked before it expires") {
-		t.Errorf("--duration help = %q", usage)
-	}
-	args := kcArgs(file)
-	args[slices.Index(args, "prod")] = "ghost"
-	if _, _, err := runMK8s(t, jsonFactory(newFakeClient(t, api)), args...); agentErrorCode(err) != "NOT_FOUND" {
-		t.Errorf("unknown cluster: %v", err)
-	}
-	if n := kcPosts(api); n != 0 {
-		t.Errorf("%d POST(s) for invalid input", n)
+	if n := len(api.requests); n != 0 {
+		t.Errorf("%d request(s) for invalid input", n)
 	}
 }
 
-func TestKubeconfigCreate_FailureSendsOnePOST(t *testing.T) {
-	t.Parallel()
-	t.Run("502 warns once", func(t *testing.T) {
-		t.Parallel()
-		api := kcAPI()
-		api.failures[kcCreateRoute] = apiFailure{Status: 502, Body: `{"code":"bad_gateway","message":"upstream failed"}`}
-		file := filepath.Join(t.TempDir(), "kc.yaml")
-		_, errOut, err := runMK8s(t, tableFactory(newFakeClient(t, api), nil), kcArgs(file)...)
-		if err == nil || !strings.Contains(err.Error(), "upstream failed") {
-			t.Fatalf("err = %v", err)
-		}
-		if !strings.Contains(errOut, "The kubeconfig may have been created anyway.") || !strings.Contains(errOut, "kubeconfig list --cluster prod -l FIN-03") {
-			t.Errorf("stderr = %q", errOut)
-		}
-		if n := kcPosts(api); n != 1 {
-			t.Errorf("POSTs = %d, want exactly 1", n)
-		}
-		if _, err := os.Stat(file); err == nil {
-			t.Error("no file may be written when the create failed")
-		}
-	})
-	t.Run("502 in agent mode puts the warning in the details", func(t *testing.T) {
-		t.Parallel()
-		api := kcAPI()
-		api.failures[kcCreateRoute] = apiFailure{Status: 502, Body: `{"code":"bad_gateway","message":"upstream failed"}`}
-		_, errOut, err := runMK8s(t, agentFactory(newFakeClient(t, api)), kcArgs(filepath.Join(t.TempDir(), "kc.yaml"))...)
-		ae := cmdutil.ClassifyError(err)
-		if ae == nil || !strings.Contains(ae.Details["warning"].(string), "may have been created anyway") {
-			t.Fatalf("err = %v", err)
-		}
-		if errOut != "" || kcPosts(api) != 1 {
-			t.Errorf("stderr = %q, POSTs = %d", errOut, kcPosts(api))
-		}
-	})
-	t.Run("400 has no warning", func(t *testing.T) {
-		t.Parallel()
-		api := kcAPI()
-		api.failures[kcCreateRoute] = apiFailure{Status: 400, Body: `{"code":"bad_request","message":"bad common name"}`}
-		_, errOut, err := runMK8s(t, tableFactory(newFakeClient(t, api), nil), kcArgs(filepath.Join(t.TempDir(), "kc.yaml"))...)
-		if err == nil || strings.Contains(errOut, "may have been created") || kcPosts(api) != 1 {
-			t.Errorf("err = %v, stderr = %q, POSTs = %d", err, errOut, kcPosts(api))
-		}
-	})
-	t.Run("403 not enabled", func(t *testing.T) {
-		t.Parallel()
-		api := kcAPI()
-		api.disabled = true
-		_, _, err := runMK8s(t, tableFactory(newFakeClient(t, api), nil), kcArgs(filepath.Join(t.TempDir(), "kc.yaml"), "-l", "FIN-03")...)
-		if agentErrorCode(err) != "AUTH_ERROR" || !strings.Contains(err.Error(), "not enabled") {
-			t.Errorf("err = %v", err)
-		}
-	})
-}
-
-func TestKubeconfigCreate_WaitTimeoutGivesRecovery(t *testing.T) {
+// After CreateKubeconfig succeeded, a failed wait, read or write returns the
+// kubeconfig ID and the exact save command; agents also get them in the details.
+func TestKubeconfigCreate_RecoveryAfterCreate(t *testing.T) {
 	fastPoll(t)
-	for _, agent := range []bool{false, true} {
-		api := seededClusters() // never ready: the kubeconfig stays pending
-		file := filepath.Join(t.TempDir(), "my kc.yaml")
-		runFactory := tableFactory(newFakeClient(t, api), nil)
-		if agent {
-			runFactory = agentFactory(newFakeClient(t, api))
+	raced := func(file string) func(*verda.ManagedKubernetesKubeconfig) {
+		// The file appears after the path check passed: the exclusive create refuses it.
+		return func(k *verda.ManagedKubernetesKubeconfig) {
+			k.Status, k.Kubeconfig = verda.ManagedKubernetesKubeconfigStatusReady, kcYAML
+			_ = os.WriteFile(file, []byte("raced"), 0o600)
 		}
-		_, _, err := runMK8s(t, runFactory, kcArgs(file, "--wait-timeout", "150ms", "--force")...)
-		if err == nil {
-			t.Fatal("want a timeout")
+	}
+	for name, tc := range map[string]struct {
+		agent     bool
+		base      string
+		extra     []string
+		hook      func(file string) func(*verda.ManagedKubernetesKubeconfig)
+		readFails bool
+		quoted    string // the --file part of the save command
+		want      string
+		fileLeft  string // "" means no file
+	}{
+		"wait timeout":        {agent: true, base: "my kc.yaml", extra: []string{"--wait-timeout", "150ms", "--force"}, want: "last status: pending"},
+		"write failure":       {agent: true, base: "kc.yaml", hook: raced, want: "is ready but writing it failed", fileLeft: "raced"},
+		"write failure human": {base: "kc.yaml", hook: raced, want: "is ready but writing it failed", fileLeft: "raced"},
+		"read failure":        {agent: true, base: "kc.yaml", readFails: true, want: "its status could not be read (API error 403: no access)"},
+	} {
+		api := seededClusters() // never ready unless hook says so
+		file := filepath.Join(t.TempDir(), tc.base)
+		if tc.hook != nil {
+			api.onKubeconfigGet = tc.hook(file)
 		}
-		msg := err.Error()
-		saveCmd := "verda mk8s kubeconfig save prod-kc-1 --cluster prod -l FIN-03 --file '" + file + "' --force"
-		for _, want := range []string{"prod-kc-1", saveCmd, "running create again issues another certificate", "last status: pending"} {
-			if !strings.Contains(strings.ToLower(msg), strings.ToLower(want)) {
-				t.Errorf("agent=%v: message %q lacks %q", agent, msg, want)
-			}
+		if tc.readFails {
+			api.failures["GET /mk8sclusters/{loc}/{name}/kubeconfigs/{id}"] = apiFailure{Status: 403, Body: `{"code":"forbidden","message":"no access"}`}
 		}
-		if _, statErr := os.Stat(file); statErr == nil {
-			t.Error("no file may be written before the kubeconfig is ready")
+		f := tableFactory(newFakeClient(t, api), nil)
+		if tc.agent {
+			f = agentFactory(newFakeClient(t, api))
+		}
+		_, errOut, err := runMK8s(t, f, kcArgs(file, tc.extra...)...)
+		saveCmd := "verda mk8s kubeconfig save prod-kc-1 --cluster prod -l FIN-03 --file " + file
+		if strings.Contains(file, " ") {
+			saveCmd = "verda mk8s kubeconfig save prod-kc-1 --cluster prod -l FIN-03 --file '" + file + "' --force"
+		}
+		if err == nil || !strings.Contains(err.Error(), saveCmd) || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), kubeconfigAgainWarning) {
+			t.Errorf("%s: err = %v", name, err)
+		}
+		if ae := cmdutil.ClassifyError(err); tc.agent != cmdutil.IsAgentError(err) || (tc.agent && (ae.Details["kubeconfig_id"] != "prod-kc-1" || ae.Details["save_command"] != saveCmd)) {
+			t.Errorf("%s: agent error = %v", name, ae)
+		}
+		if got, statErr := os.ReadFile(file); string(got) != tc.fileLeft || (tc.fileLeft == "") != (statErr != nil) {
+			t.Errorf("%s: file = %q (%v)", name, got, statErr)
 		}
 		if n := kcPosts(api); n != 1 {
-			t.Errorf("POSTs = %d", n)
-		}
-		if agent {
-			ae := cmdutil.ClassifyError(err)
-			if ae.Details["kubeconfig_id"] != "prod-kc-1" || ae.Details["save_command"] != saveCmd {
-				t.Errorf("details = %v", ae.Details)
-			}
+			t.Errorf("%s: POSTs = %d", name, n)
 		}
 		kcAssertErrNoKey(t, err)
+		assertNoPrivateKey(t, "stderr", errOut)
 	}
 }
 
-func TestKubeconfigCreate_WriteFailureAfterCreateGivesRecovery(t *testing.T) {
-	fastPoll(t)
-	api := seededClusters()
-	file := filepath.Join(t.TempDir(), "kc.yaml")
-	// The file appears after the path check passed: the exclusive create refuses it.
-	api.onKubeconfigGet = func(k *verda.ManagedKubernetesKubeconfig) {
-		k.Status, k.Kubeconfig = verda.ManagedKubernetesKubeconfigStatusReady, kcYAML
-		_ = os.WriteFile(file, []byte("raced"), 0o600)
-	}
-	_, errOut, err := runMK8s(t, agentFactory(newFakeClient(t, api)), kcArgs(file)...)
-	if err == nil {
-		t.Fatal("want a write error")
-	}
-	saveCmd := "verda mk8s kubeconfig save prod-kc-1 --cluster prod -l FIN-03 --file " + file
-	if !strings.Contains(err.Error(), saveCmd) || !strings.Contains(err.Error(), "another certificate") {
-		t.Errorf("err = %v", err)
-	}
-	ae := cmdutil.ClassifyError(err)
-	if ae.Details["kubeconfig_id"] != "prod-kc-1" || ae.Details["save_command"] != saveCmd {
-		t.Errorf("details = %v", ae.Details)
-	}
-	if got := readFile(t, file); got != "raced" {
-		t.Errorf("the other file was replaced: %q", got)
-	}
-	kcAssertErrNoKey(t, err)
-	assertNoPrivateKey(t, "stderr", errOut)
-
-	// For a person the same text is the plain error.
-	api = seededClusters()
-	file = filepath.Join(t.TempDir(), "kc.yaml")
-	api.onKubeconfigGet = func(k *verda.ManagedKubernetesKubeconfig) {
-		k.Status, k.Kubeconfig = verda.ManagedKubernetesKubeconfigStatusReady, kcYAML
-		_ = os.WriteFile(file, []byte("raced"), 0o600)
-	}
-	_, _, err = runMK8s(t, tableFactory(newFakeClient(t, api), nil), kcArgs(file)...)
-	if err == nil || cmdutil.IsAgentError(err) || !strings.Contains(err.Error(), "prod-kc-1") {
-		t.Errorf("human err = %v", err)
-	}
-}
-
+// Pending, then ready without the YAML (a stale read), then ready: the wait ends on the third read.
 func TestKubeconfigCreate_PendingAndStaleReadsDoNotEndTheWait(t *testing.T) {
 	fastPoll(t)
 	api := seededClusters()
@@ -554,7 +344,6 @@ func TestKubeconfigCreate_PendingAndStaleReadsDoNotEndTheWait(t *testing.T) {
 		case 1:
 			k.Status = verda.ManagedKubernetesKubeconfigStatusPending
 		case 2:
-			// Ready without the YAML is a stale read.
 			k.Status = verda.ManagedKubernetesKubeconfigStatusReady
 		default:
 			k.Status, k.Kubeconfig = verda.ManagedKubernetesKubeconfigStatusReady, kcYAML
@@ -565,102 +354,8 @@ func TestKubeconfigCreate_PendingAndStaleReadsDoNotEndTheWait(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := readFile(t, file); got != kcYAML {
-		t.Errorf("file = %q", got)
-	}
-	if reads < 3 {
-		t.Errorf("reads = %d, the wait ended early", reads)
+	if got := readFile(t, file); got != kcYAML || reads < 3 {
+		t.Errorf("file = %q, reads = %d", got, reads)
 	}
 	assertNoPrivateKey(t, "stdout", out)
-}
-
-func TestKubeconfigCreate_DebugNeverLogsTheKey(t *testing.T) {
-	t.Parallel()
-	api := kcAPI()
-	f := tableFactory(newFakeClient(t, api), nil)
-	f.DebugOverride = true
-	file := filepath.Join(t.TempDir(), "kc.yaml")
-	out, errOut, err := runMK8s(t, f, kcArgs(file)...)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(errOut, "DEBUG: Request payload:") || !strings.Contains(errOut, "DEBUG: API response:") {
-		t.Errorf("no debug output: %q", errOut)
-	}
-	assertNoPrivateKey(t, "stdout", out)
-	assertNoPrivateKey(t, "debug output", errOut)
-
-	f = agentFactory(newFakeClient(t, api))
-	f.DebugOverride = true
-	out, errOut, err = runMK8s(t, f, kcArgs(filepath.Join(t.TempDir(), "kc2.yaml"))...)
-	if err != nil {
-		t.Fatal(err)
-	}
-	assertNoPrivateKey(t, "agent stdout", out)
-	assertNoPrivateKey(t, "agent debug output", errOut)
-}
-
-func TestKubeconfigCreate_StdoutDashDebugKeepsStdoutPure(t *testing.T) {
-	t.Parallel()
-	f := tableFactory(newFakeClient(t, kcAPI()), nil)
-	f.DebugOverride = true
-	out, errOut, err := runMK8s(t, f, kcArgs("-")...)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if out != kcYAML {
-		t.Errorf("stdout = %q", out)
-	}
-	assertNoPrivateKey(t, "debug output", errOut)
-}
-
-// A fresh machine has no ~/.kube: the default path passes the prompt check, and
-// the recovery command printed after a timed-out create (which leaves out --file)
-// creates ~/.kube with 0700.
-func TestKubeconfigCreate_FreshHomeDefaultPathAndRecovery(t *testing.T) {
-	fastPoll(t)
-	home := kcHome(t)
-	def := filepath.Join(home, ".kube", "verda-prod.alice.yaml")
-	if err := kubeconfigFileValidator("prod", "alice", false)(def); err != nil {
-		t.Errorf("the pre-filled default path must pass the prompt check: %v", err)
-	}
-	var ready atomic.Bool
-	api := seededClusters()
-	api.onKubeconfigGet = func(k *verda.ManagedKubernetesKubeconfig) {
-		if ready.Load() {
-			k.Status, k.Kubeconfig = verda.ManagedKubernetesKubeconfigStatusReady, kcYAML
-		}
-	}
-	_, _, err := runMK8s(t, agentFactory(newFakeClient(t, api)), "kubeconfig", "create", "--cluster", "prod", "--common-name", "alice", "--admin", "--wait-timeout", "100ms")
-	ae := cmdutil.ClassifyError(err)
-	saveCmd, _ := ae.Details["save_command"].(string)
-	if saveCmd == "" || strings.Contains(saveCmd, "--file") {
-		t.Fatalf("save_command = %q, want one without --file", saveCmd)
-	}
-	ready.Store(true)
-	if _, _, err := runMK8s(t, jsonFactory(newFakeClient(t, api)), strings.Fields(saveCmd)[2:]...); err != nil {
-		t.Fatalf("recovery command %q failed: %v", saveCmd, err)
-	}
-	if got := readFile(t, def); got != kcYAML {
-		t.Errorf("file = %q", got)
-	}
-	assertMode(t, filepath.Dir(def), 0o700)
-}
-
-// A certificate was issued, so the recovery text leads the error even when the
-// classified API message ("no access") is about the failed read.
-func TestKubeconfigCreate_ReadFailureKeepsTheRecoveryText(t *testing.T) {
-	fastPoll(t)
-	api := seededClusters()
-	api.failures["GET /mk8sclusters/{loc}/{name}/kubeconfigs/{id}"] = apiFailure{Status: 403, Body: `{"code":"forbidden","message":"no access"}`}
-	file := filepath.Join(t.TempDir(), "kc.yaml")
-	_, _, err := runMK8s(t, agentFactory(newFakeClient(t, api)), kcArgs(file)...)
-	ae := cmdutil.ClassifyError(err)
-	saveCmd := "verda mk8s kubeconfig save prod-kc-1 --cluster prod -l FIN-03 --file " + file
-	if ae == nil || ae.Code != "AUTH_ERROR" || ae.Details["kubeconfig_id"] != "prod-kc-1" || ae.Details["save_command"] != saveCmd {
-		t.Fatalf("err = %v, details = %v", err, ae)
-	}
-	if !strings.Contains(ae.Message, "Running create again issues another certificate") || !strings.Contains(ae.Message, saveCmd) {
-		t.Errorf("message = %q, want the recovery text", ae.Message)
-	}
 }

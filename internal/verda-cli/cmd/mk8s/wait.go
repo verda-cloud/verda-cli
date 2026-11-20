@@ -21,6 +21,7 @@ import (
 	"io"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -29,23 +30,18 @@ import (
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
 
-// maxReadFailures is how many reads in a row may fail before a wait gives up.
-// One 502 from a load balancer must not fail a 15-minute wait.
+// maxReadFailures: reads in a row that may fail; one 502 from a load balancer must not fail a 15-minute wait.
 const maxReadFailures = 3
 
-// pollInterval is the time between reads while --wait runs; a var so tests can shorten it.
+// pollInterval is a var so tests can shorten it.
 var pollInterval = 5 * time.Second
-
-var errWaitTimeout = errors.New("timed out waiting")
 
 // pollReadError marks reads that kept failing, so the failure is not mistaken for a timeout.
 type pollReadError struct{ err error }
 
 func (e *pollReadError) Error() string { return e.err.Error() }
-func (e *pollReadError) Unwrap() error { return e.err }
 
-// fatalRead: a read that retrying cannot fix (bad request, no access). A 404
-// is not fatal: right after a create the read can lag behind.
+// fatalRead: retrying cannot fix it. A 404 is not fatal: right after a create the read can lag behind.
 func fatalRead(err error) bool {
 	apiErr, ok := errors.AsType[*verda.APIError](err)
 	if !ok || apiErr.StatusCode < http.StatusBadRequest || apiErr.StatusCode >= http.StatusInternalServerError {
@@ -58,9 +54,8 @@ func fatalRead(err error) bool {
 	return true
 }
 
-// waitFor polls get until check reports done. Each read has its own --timeout;
-// the whole wait ends after timeout. It returns the last resource read and one
-// of: nil (done), a *pollReadError (reads kept failing), or errWaitTimeout.
+// waitFor: each read has its own --timeout; the whole wait ends after timeout.
+// It returns the last read and nil (done), a *pollReadError or a timeout error.
 func waitFor[T any](
 	ctx context.Context, f cmdutil.Factory, w io.Writer, timeout time.Duration,
 	get func(context.Context) (*T, error), check func(*T) (status string, done bool),
@@ -73,11 +68,11 @@ func waitFor[T any](
 		defer cancel()
 		v, err := get(readCtx)
 		if err != nil {
-			// The whole wait ran out during this read: that is a timeout, not a failed read.
+			// The whole wait ran out during this read: a timeout, not a failed read.
 			if ctx.Err() != nil {
 				return status, false, nil
 			}
-			// Until a first read works, a 404 is a read lagging behind the create: wait it out.
+			// Until a first read works, a 404 is a read lagging behind the create.
 			if apiErr, ok := errors.AsType[*verda.APIError](err); ok && apiErr.StatusCode == http.StatusNotFound && last == nil {
 				return status, false, nil
 			}
@@ -94,17 +89,10 @@ func waitFor[T any](
 		return status, done, nil
 	}
 	_, err := cmdutil.Poll(ctx, w, pollInterval, cmdutil.WaitOptions{Wait: true, Timeout: timeout}, pollFn)
-	if readErr, ok := errors.AsType[*pollReadError](err); ok {
-		return last, readErr
-	}
-	if err != nil {
-		return last, errWaitTimeout
-	}
-	return last, nil
+	return last, err
 }
 
-// waitWriter is where the wait's spinner line goes: stderr, and only for a
-// human at a terminal, so stdout and structured output stay clean.
+// waitWriter: the spinner line goes to stderr, and only for a human at a terminal.
 func waitWriter(f cmdutil.Factory, ioStreams cmdutil.IOStreams) io.Writer {
 	if f.OutputFormat() == outputTable && !f.AgentMode() && cmdutil.IsStderrTerminal() {
 		return ioStreams.ErrOut
@@ -112,22 +100,19 @@ func waitWriter(f cmdutil.Factory, ioStreams cmdutil.IOStreams) io.Writer {
 	return nil
 }
 
-// clusterReady: the cluster is usable once it is running and has an endpoint.
 func clusterReady(c *verda.ManagedKubernetesCluster) (status string, done bool) {
 	return c.Phase, c.Phase == verda.ManagedKubernetesClusterPhaseRunning && c.ExternalEndpoint != ""
 }
 
-// waitFailureInfo describes what a failed wait was waiting for.
 type waitFailureInfo struct {
 	Subject     string // for example "cluster prod in FIN-03"
 	Timeout     time.Duration
-	LastSeen    string // what the last read showed
-	TimeoutTail string // what the user should know or do after a timeout
-	ReadNote    string // optional: what the user should know when the reads kept failing
+	LastSeen    string
+	TimeoutTail string // what to know or do after a timeout
+	ReadNote    string // optional, after failed reads
 	CheckCmd    string
 }
 
-// waitFailure turns the error of waitFor into the message the command returns.
 func waitFailure(err error, w *waitFailureInfo) error {
 	if readErr, ok := errors.AsType[*pollReadError](err); ok {
 		note := ""
@@ -139,7 +124,6 @@ func waitFailure(err error, w *waitFailureInfo) error {
 	return fmt.Errorf("timed out after %s waiting for %s (%s). %s", w.Timeout, w.Subject, w.LastSeen, w.TimeoutTail)
 }
 
-// poolReasons lists the distinct error reasons of a pool, in order.
 func poolReasons(p *verda.ManagedKubernetesNodePool) []string {
 	var reasons []string
 	for i := range p.Errors {
@@ -150,8 +134,7 @@ func poolReasons(p *verda.ManagedKubernetesNodePool) []string {
 	return reasons
 }
 
-// poolStatus is the one-line state shown while waiting: the state, the error
-// reasons while the pool is degraded, and ready/desired workers.
+// poolStatus is the line shown while waiting; reasons only while degraded.
 func poolStatus(p *verda.ManagedKubernetesNodePool) string {
 	s := p.State
 	if reasons := poolReasons(p); p.State == verda.ManagedKubernetesNodePoolStateDegraded && len(reasons) > 0 {
@@ -160,16 +143,14 @@ func poolStatus(p *verda.ManagedKubernetesNodePool) string {
 	return fmt.Sprintf("%s, %d/%d workers ready", s, p.ReadyReplicas, p.Replicas)
 }
 
-// poolCreated is done when the pool is active with the requested number of
-// ready workers. Comparing with the requested count, not the count read, keeps
-// a stale first read from ending the wait.
+// poolCreated and poolScaled compare with the requested count, not the count
+// read, so a stale first read cannot end the wait.
 func poolCreated(want int) func(*verda.ManagedKubernetesNodePool) (string, bool) {
 	return func(p *verda.ManagedKubernetesNodePool) (string, bool) {
 		return poolStatus(p), p.State == verda.ManagedKubernetesNodePoolStateActive && p.ReadyReplicas == want
 	}
 }
 
-// poolScaled is done when the API reports the new count, all of it ready, and the pool active.
 func poolScaled(want int) func(*verda.ManagedKubernetesNodePool) (string, bool) {
 	return func(p *verda.ManagedKubernetesNodePool) (string, bool) {
 		done := p.State == verda.ManagedKubernetesNodePoolStateActive && p.Replicas == want && p.ReadyReplicas == want
@@ -177,7 +158,7 @@ func poolScaled(want int) func(*verda.ManagedKubernetesNodePool) (string, bool) 
 	}
 }
 
-// writeResult writes a structured result and returns waitErr, so a failed wait
+// writeResult returns waitErr after the structured result, so a failed wait
 // still leaves the result on stdout. It reports false for table output.
 func writeResult(f cmdutil.Factory, ioStreams cmdutil.IOStreams, result any, waitErr error) (written bool, err error) {
 	wrote, err := cmdutil.WriteStructured(ioStreams.Out, f.OutputFormat(), result)
@@ -190,7 +171,6 @@ func writeResult(f cmdutil.Factory, ioStreams cmdutil.IOStreams, result any, wai
 	return true, waitErr
 }
 
-// waitForPool polls the pool until done. It returns the last pool read.
 func waitForPool(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client *verda.Client, t *clusterTarget, name string, done func(*verda.ManagedKubernetesNodePool) (string, bool), timeout time.Duration) (*verda.ManagedKubernetesNodePool, error) {
 	if f.OutputFormat() == outputTable {
 		_, _ = fmt.Fprintf(ioStreams.ErrOut, "Node pool %s accepted; waiting for its workers (Ctrl+C stops waiting, the pool stays).\n", name)
@@ -201,7 +181,6 @@ func waitForPool(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStr
 		}, done)
 }
 
-// poolWaitKind says which change a pool wait was for: its timeout text differs.
 type poolWaitKind int
 
 const (
@@ -211,9 +190,8 @@ const (
 	poolWaitSettle
 )
 
-// poolWaitFailure is the error of a pool wait that did not finish. When workers
-// are being created, a timeout also says they keep billing and how to stop
-// them: delete the pool after a create, scale back to previous after a scale-up.
+// poolWaitFailure: while workers are being created, a timeout says they keep
+// billing and how to stop them (delete after a create, scale back after a scale-up).
 func poolWaitFailure(err error, kind poolWaitKind, t *clusterTarget, accepted, last *verda.ManagedKubernetesNodePool, timeout time.Duration, previous int) error {
 	seen := accepted
 	if last != nil {
@@ -221,7 +199,7 @@ func poolWaitFailure(err error, kind poolWaitKind, t *clusterTarget, accepted, l
 	}
 	describe := poolDescribeCmd(t, accepted.Name)
 	subject := fmt.Sprintf("node pool %s in cluster %s (%s)", accepted.Name, t.Name, t.Location)
-	creating := poolBackendKeepsTrying + " To stop: `" + poolDeleteCmd(t, accepted.Name) + "`. Check with `" + describe + "`"
+	creating := poolBackendKeepsTrying + " To stop: `" + poolCmd("delete", t, accepted.Name) + "`. Check with `" + describe + "`"
 	info := waitFailureInfo{Subject: subject, Timeout: timeout, LastSeen: poolSeen(seen), CheckCmd: describe}
 	switch kind {
 	case poolWaitScaleDown:
@@ -233,7 +211,7 @@ func poolWaitFailure(err error, kind poolWaitKind, t *clusterTarget, accepted, l
 		info.ReadNote = poolBackendKeepsTrying
 	case poolWaitScaleUp:
 		info.Subject = "scaling of " + subject
-		info.TimeoutTail = poolBackendKeepsTrying + " To stop, scale back: `" + poolScaleCmd(t, accepted.Name, previous) + " --yes`. Check with `" + describe + "`"
+		info.TimeoutTail = poolBackendKeepsTrying + " To stop, scale back: `" + poolCmd("scale", t, accepted.Name) + " --replicas " + strconv.Itoa(previous) + " --yes`. Check with `" + describe + "`"
 		info.ReadNote = poolBackendKeepsTrying
 	default:
 		info.TimeoutTail, info.ReadNote = creating, poolBackendKeepsTrying
@@ -241,7 +219,6 @@ func poolWaitFailure(err error, kind poolWaitKind, t *clusterTarget, accepted, l
 	return waitFailure(err, &info)
 }
 
-// poolSeen is what a timeout message says about the last read: state, ready/desired, error reasons.
 func poolSeen(p *verda.ManagedKubernetesNodePool) string {
 	s := fmt.Sprintf("last state: %s, %d/%d workers ready", p.State, p.ReadyReplicas, p.Replicas)
 	if reasons := poolReasons(p); len(reasons) > 0 {
@@ -250,8 +227,7 @@ func poolSeen(p *verda.ManagedKubernetesNodePool) string {
 	return s
 }
 
-// kubeconfigReady: the YAML exists only once the kubeconfig is ready. Both are
-// checked, so a read that says ready without the YAML does not end the wait.
+// kubeconfigReady checks the YAML too: a read can say ready before it has it.
 func kubeconfigReady(k *verda.ManagedKubernetesKubeconfig) (status string, done bool) {
 	return k.Status, k.Status == verda.ManagedKubernetesKubeconfigStatusReady && k.Kubeconfig != ""
 }

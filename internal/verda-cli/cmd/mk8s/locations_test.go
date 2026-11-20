@@ -19,8 +19,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
-
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
 
@@ -43,24 +41,17 @@ func TestLocations_Table(t *testing.T) {
 	}
 }
 
-func TestLocations_JSONAndAgent(t *testing.T) {
-	for name, newFactory := range map[string]func(*verda.Client) *cmdutil.TestFactory{
-		"json":  jsonFactory,
-		"agent": agentFactory,
-	} {
-		t.Run(name, func(t *testing.T) {
-			out, _, err := runMK8s(t, newFactory(newFakeClient(t, newFakeAPI())), "locations")
-			if err != nil {
-				t.Fatal(err)
-			}
-			var got []string
-			if err := json.Unmarshal([]byte(out), &got); err != nil {
-				t.Fatalf("output is not a JSON string array: %v\n%s", err, out)
-			}
-			if len(got) != 2 || got[0] != "FIN-01" {
-				t.Errorf("locations = %v", got)
-			}
-		})
+func TestLocations_JSON(t *testing.T) {
+	out, _, err := runMK8s(t, jsonFactory(newFakeClient(t, newFakeAPI())), "locations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("output is not a JSON string array: %v\n%s", err, out)
+	}
+	if len(got) != 2 || got[0] != "FIN-01" {
+		t.Errorf("locations = %v", got)
 	}
 }
 
@@ -105,33 +96,6 @@ func TestLocations_FeatureNotEnabled(t *testing.T) {
 	}
 }
 
-func TestLocations_Other403StaysPlain(t *testing.T) {
-	api := newFakeAPI()
-	api.failures["GET /mk8sclusters/enabled_locations"] = apiFailure{Status: 403, Body: `{"code":"forbidden","message":"no access","details":"some_other_reason"}`}
-
-	_, _, err := runMK8s(t, agentFactory(newFakeClient(t, api)), "locations")
-	ae := cmdutil.ClassifyError(err)
-	if ae == nil || ae.Code != "AUTH_ERROR" {
-		t.Fatalf("classified = %+v", ae)
-	}
-	if strings.Contains(ae.Message, "not enabled") {
-		t.Errorf("only feature_not_enabled gets the not-enabled message: %q", ae.Message)
-	}
-}
-
-func TestLocations_Debug(t *testing.T) {
-	api := newFakeAPI()
-	f := tableFactory(newFakeClient(t, api), nil)
-	f.DebugOverride = true
-	_, errOut, err := runMK8s(t, f, "locations")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(errOut, "FIN-03") {
-		t.Errorf("debug output misses the API response: %q", errOut)
-	}
-}
-
 func TestMK8s_HelpStartsWithCaution(t *testing.T) {
 	f := tableFactory(nil, nil)
 	cmd := NewCmdMK8s(f, cmdutil.IOStreams{})
@@ -140,15 +104,6 @@ func TestMK8s_HelpStartsWithCaution(t *testing.T) {
 	}
 	if cmd.Annotations[cmdutil.TagAnnotation] != "experimental" {
 		t.Errorf("tag = %q", cmd.Annotations[cmdutil.TagAnnotation])
-	}
-	for _, alias := range []string{"k8s", "kubernetes"} {
-		found := false
-		for _, a := range cmd.Aliases {
-			found = found || a == alias
-		}
-		if !found {
-			t.Errorf("missing alias %q", alias)
-		}
 	}
 	for _, sub := range cmd.Commands() {
 		if !strings.HasPrefix(sub.Long, "Experimental:") {

@@ -22,13 +22,18 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
 
+	"github.com/verda-cloud/verda-cli/pkg/tui"
 	tuitest "github.com/verda-cloud/verda-cli/pkg/tui/testing"
+	"github.com/verda-cloud/verda-cli/pkg/tui/wizard"
 
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
@@ -45,8 +50,6 @@ type recordedRequest struct {
 type apiFailure struct {
 	Status int
 	Body   string
-	// Times is how many requests fail before the route works again; 0 means always.
-	Times int
 }
 
 // fakeAPI is an in-memory mk8s API. Pools and kubeconfigs are keyed by cluster name.
@@ -159,14 +162,6 @@ func (a *fakeAPI) handler() http.Handler {
 	route := func(pattern string, h http.HandlerFunc) {
 		mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
 			if fl, ok := a.failures[pattern]; ok {
-				if fl.Times > 0 {
-					fl.Times--
-					if fl.Times == 0 {
-						delete(a.failures, pattern)
-					} else {
-						a.failures[pattern] = fl
-					}
-				}
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(fl.Status)
 				_, _ = io.WriteString(w, fl.Body)
@@ -222,9 +217,6 @@ func (a *fakeAPI) handler() http.Handler {
 	})
 
 	route("GET /mk8sclusters/{loc}/{name}/pools", func(w http.ResponseWriter, r *http.Request) {
-		if a.clusterOr404(w, r) < 0 {
-			return
-		}
 		pools := a.pools[r.PathValue("name")]
 		if pools == nil {
 			pools = []verda.ManagedKubernetesNodePool{}
@@ -233,9 +225,6 @@ func (a *fakeAPI) handler() http.Handler {
 	})
 	route("POST /mk8sclusters/{loc}/{name}/pools", a.createPool)
 	route("GET /mk8sclusters/{loc}/{name}/pools/{pool}", func(w http.ResponseWriter, r *http.Request) {
-		if a.clusterOr404(w, r) < 0 {
-			return
-		}
 		i := a.findPool(r.PathValue("name"), r.PathValue("pool"))
 		if i < 0 {
 			notFound(w, "node pool")
@@ -248,9 +237,6 @@ func (a *fakeAPI) handler() http.Handler {
 	})
 	route("PATCH /mk8sclusters/{loc}/{name}/pools/{pool}", a.updatePool)
 	route("DELETE /mk8sclusters/{loc}/{name}/pools/{pool}", func(w http.ResponseWriter, r *http.Request) {
-		if a.clusterOr404(w, r) < 0 {
-			return
-		}
 		cluster := r.PathValue("name")
 		i := a.findPool(cluster, r.PathValue("pool"))
 		if i < 0 {
@@ -282,10 +268,6 @@ func (a *fakeAPI) handler() http.Handler {
 func (a *fakeAPI) createCluster(w http.ResponseWriter, r *http.Request) {
 	var req verda.CreateManagedKubernetesClusterRequest
 	_ = json.NewDecoder(r.Body).Decode(&req)
-	if a.findCluster("", req.Name) >= 0 {
-		writeJSON(w, http.StatusConflict, map[string]string{"code": "cluster_already_exists", "message": "cluster already exists"})
-		return
-	}
 	c := verda.ManagedKubernetesCluster{
 		Name: req.Name, KubernetesVersion: req.KubernetesVersion, Location: req.Location,
 		NetworkID: req.NetworkID, SubnetID: req.SubnetID, PodCIDR: req.PodCIDR, ServiceCIDR: req.ServiceCIDR,
@@ -296,21 +278,9 @@ func (a *fakeAPI) createCluster(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *fakeAPI) createPool(w http.ResponseWriter, r *http.Request) {
-	if a.clusterOr404(w, r) < 0 {
-		return
-	}
 	cluster := r.PathValue("name")
 	var req verda.CreateManagedKubernetesNodePoolRequest
 	_ = json.NewDecoder(r.Body).Decode(&req)
-	// Pool names are unique in the project, not only in the cluster.
-	for _, pools := range a.pools {
-		for i := range pools {
-			if pools[i].Name == req.Name {
-				writeJSON(w, http.StatusConflict, map[string]string{"code": "conflict", "message": "node pool already exists", "details": "pool_already_exists"})
-				return
-			}
-		}
-	}
 	replicas := 1
 	if req.Replicas != nil {
 		replicas = *req.Replicas
@@ -324,9 +294,6 @@ func (a *fakeAPI) createPool(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *fakeAPI) updatePool(w http.ResponseWriter, r *http.Request) {
-	if a.clusterOr404(w, r) < 0 {
-		return
-	}
 	cluster := r.PathValue("name")
 	i := a.findPool(cluster, r.PathValue("pool"))
 	if i < 0 {
@@ -343,9 +310,6 @@ func (a *fakeAPI) updatePool(w http.ResponseWriter, r *http.Request) {
 
 // createKubeconfig answers pending with a server-chosen ID, as the API does.
 func (a *fakeAPI) createKubeconfig(w http.ResponseWriter, r *http.Request) {
-	if a.clusterOr404(w, r) < 0 {
-		return
-	}
 	cluster := r.PathValue("name")
 	var req verda.CreateManagedKubernetesKubeconfigRequest
 	_ = json.NewDecoder(r.Body).Decode(&req)
@@ -443,19 +407,12 @@ func (a *fakeAPI) networkRoutes(route routeFunc) {
 		writeJSON(w, http.StatusOK, networks)
 	})
 	route("GET /private-networks/{id}/subnets", func(w http.ResponseWriter, r *http.Request) {
-		subnets := a.subnets[r.PathValue("id")]
-		if subnets == nil {
-			subnets = []verda.Subnet{}
-		}
-		writeJSON(w, http.StatusOK, subnets)
+		writeJSON(w, http.StatusOK, a.subnets[r.PathValue("id")])
 	})
 }
 
 func (a *fakeAPI) kubeconfigRoutes(route routeFunc) {
 	route("GET /mk8sclusters/{loc}/{name}/kubeconfigs", func(w http.ResponseWriter, r *http.Request) {
-		if a.clusterOr404(w, r) < 0 {
-			return
-		}
 		list := make([]verda.ManagedKubernetesKubeconfig, 0, len(a.kubeconfigs[r.PathValue("name")]))
 		for _, k := range a.kubeconfigs[r.PathValue("name")] {
 			k.Kubeconfig = "" // the list never carries the YAML
@@ -465,9 +422,6 @@ func (a *fakeAPI) kubeconfigRoutes(route routeFunc) {
 	})
 	route("POST /mk8sclusters/{loc}/{name}/kubeconfigs", a.createKubeconfig)
 	route("GET /mk8sclusters/{loc}/{name}/kubeconfigs/{id}", func(w http.ResponseWriter, r *http.Request) {
-		if a.clusterOr404(w, r) < 0 {
-			return
-		}
 		i := a.findKubeconfig(r.PathValue("name"), r.PathValue("id"))
 		if i < 0 {
 			notFound(w, "kubeconfig")
@@ -479,9 +433,6 @@ func (a *fakeAPI) kubeconfigRoutes(route routeFunc) {
 		writeJSON(w, http.StatusOK, a.kubeconfigs[r.PathValue("name")][i])
 	})
 	route("DELETE /mk8sclusters/{loc}/{name}/kubeconfigs/{id}", func(w http.ResponseWriter, r *http.Request) {
-		if a.clusterOr404(w, r) < 0 {
-			return
-		}
 		cluster := r.PathValue("name")
 		i := a.findKubeconfig(cluster, r.PathValue("id"))
 		if i < 0 {
@@ -491,4 +442,235 @@ func (a *fakeAPI) kubeconfigRoutes(route routeFunc) {
 		a.kubeconfigs[cluster] = append(a.kubeconfigs[cluster][:i], a.kubeconfigs[cluster][i+1:]...)
 		w.WriteHeader(http.StatusNoContent)
 	})
+}
+
+// TestMain makes every test start off a terminal, whatever runs the tests; withTerminal opts in.
+func TestMain(m *testing.M) {
+	isInteractiveTerminal = func() bool { return false }
+	os.Exit(m.Run())
+}
+
+// addCluster seeds a cluster; a running one has an endpoint, like the API.
+func (a *fakeAPI) addCluster(name, location, phase string) {
+	c := verda.ManagedKubernetesCluster{
+		Name:              name,
+		KubernetesVersion: "1.37.0",
+		Location:          location,
+		NetworkID:         "pn-1",
+		SubnetID:          "sn-1",
+		PodCIDR:           "10.100.0.0/16",
+		ServiceCIDR:       "10.200.0.0/16",
+		Phase:             phase,
+		CreatedAt:         testCreated,
+	}
+	if phase == verda.ManagedKubernetesClusterPhaseRunning {
+		c.ExternalEndpoint = "https://" + name + ".example.test:6443"
+	}
+	a.clusters = append(a.clusters, c)
+}
+
+func (a *fakeAPI) addPool(cluster, name, state string, replicas, ready int) {
+	a.pools[cluster] = append(a.pools[cluster], verda.ManagedKubernetesNodePool{
+		Name:          name,
+		Replicas:      replicas,
+		ReadyReplicas: ready,
+		InstanceType:  "1V100.6V",
+		SSHKeyIDs:     []string{"key-1"},
+		State:         state,
+		CreatedAt:     testCreated,
+	})
+}
+
+// paths returns the path of every recorded request with this method, in order.
+func (a *fakeAPI) paths(method string) []string {
+	reqs := a.requestsMatching(method)
+	out := make([]string, 0, len(reqs))
+	for _, r := range reqs {
+		out = append(out, r.Path)
+	}
+	return out
+}
+
+// cancelPrompter answers Select or Confirm with an error (Esc, Ctrl+C) when set.
+type cancelPrompter struct {
+	*tuitest.Prompter
+	selectErr  error
+	confirmErr error
+}
+
+func (p *cancelPrompter) Select(ctx context.Context, msg string, labels []string, opts ...tui.SelectOption) (int, error) {
+	if p.selectErr != nil {
+		return -1, p.selectErr
+	}
+	return p.Prompter.Select(ctx, msg, labels, opts...)
+}
+
+func (p *cancelPrompter) Confirm(ctx context.Context, msg string, opts ...tui.ConfirmOption) (bool, error) {
+	if p.confirmErr != nil {
+		return false, p.confirmErr
+	}
+	return p.Prompter.Confirm(ctx, msg, opts...)
+}
+
+// agentErrorCode is the code main reports, so an API 404 counts as NOT_FOUND.
+func agentErrorCode(err error) string {
+	if ae := cmdutil.ClassifyError(err); ae != nil {
+		return ae.Code
+	}
+	return ""
+}
+
+// isUsageError: VALIDATION_ERROR for agents, and not an AgentError, which main prints as JSON for people too.
+func isUsageError(err error) bool {
+	return agentErrorCode(err) == "VALIDATION_ERROR" && !cmdutil.IsAgentError(err)
+}
+
+func decodeJSON[T any](t *testing.T, s string) T {
+	t.Helper()
+	var v T
+	if err := json.Unmarshal([]byte(s), &v); err != nil {
+		t.Fatalf("decode %q: %v", s, err)
+	}
+	return v
+}
+
+func conditionReady() verda.ManagedKubernetesCondition {
+	return verda.ManagedKubernetesCondition{Type: "Ready", Status: "True", Reason: "AllGood", Message: "all components ready", LastTransitionTime: testCreated}
+}
+
+func errInterrupted() error { return tui.ErrInterrupted }
+
+func (a *fakeAPI) addNetwork(id, name string) {
+	a.networks = append(a.networks, verda.PrivateNetwork{ID: id, Name: name, Mode: verda.NetworkModeCustom, CreatedAt: testCreated})
+}
+
+func (a *fakeAPI) addSubnet(networkID, id, name, location, cidr string) {
+	a.subnets[networkID] = append(a.subnets[networkID], verda.Subnet{
+		ID: id, Name: name, CIDR: cidr, Location: verda.Location{Code: location}, CreatedAt: testCreated,
+	})
+}
+
+func confirmYes() *tuitest.Prompter { return tuitest.New().AddConfirm(true) }
+
+func confirmNo() *tuitest.Prompter { return tuitest.New().AddConfirm(false) }
+
+// textCancelPrompter answers TextInput with Esc.
+type textCancelPrompter struct{ *tuitest.Prompter }
+
+func (p *textCancelPrompter) TextInput(context.Context, string, ...tui.TextInputOption) (string, error) {
+	return "", context.Canceled
+}
+
+// pickerAnswers queues Select answers (indices) for a picker.
+func pickerAnswers(indices ...int) *tuitest.Prompter {
+	p := tuitest.New()
+	for _, i := range indices {
+		p.AddSelect(i)
+	}
+	return p
+}
+
+// poolWizardAPI has two clusters, instance types per location and two SSH keys.
+func poolWizardAPI() *fakeAPI {
+	api := seededClusters()
+	api.availability["FIN-03"] = []string{"2A100.80S", "1V100.6V", "CPU.4V.16G"}
+	api.availability["FIN-01"] = []string{"1A100.22V"}
+	api.sshKeys = []verda.SSHKey{
+		{ID: "key-1", Name: "laptop", CreatedAt: testCreated},
+		{ID: "key-2", Name: "ci", CreatedAt: testCreated},
+	}
+	return api
+}
+
+func postBodyAny(t *testing.T, api *fakeAPI) map[string]any {
+	t.Helper()
+	reqs := api.requestsMatching("POST")
+	if len(reqs) != 1 {
+		t.Fatalf("want one POST, got %v", reqs)
+	}
+	return decodeJSON[map[string]any](t, reqs[0].Body)
+}
+
+// addKubeconfig seeds a kubeconfig of a cluster.
+func (a *fakeAPI) addKubeconfig(cluster string, k verda.ManagedKubernetesKubeconfig) {
+	a.kubeconfigs[cluster] = append(a.kubeconfigs[cluster], k)
+}
+
+// setHome points HOME (USERPROFILE on Windows) at a new temp dir and returns it.
+func setHome(t *testing.T) string {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	return home
+}
+
+func seededClusters() *fakeAPI {
+	api := newFakeAPI()
+	api.addCluster("prod", "FIN-03", "running")
+	api.addCluster("staging", "FIN-01", "provisioning")
+	return api
+}
+
+// fastPoll shortens the wait loop. Never call t.Parallel in or under a test that
+// uses it, withTerminal or withWizardAnswers: they change package variables.
+func fastPoll(t *testing.T) {
+	t.Helper()
+	orig := pollInterval
+	pollInterval = 5 * time.Millisecond
+	t.Cleanup(func() { pollInterval = orig })
+}
+
+// withWizardAnswers makes the wizard take canned answers instead of a terminal.
+func withWizardAnswers(t *testing.T, results ...wizard.TestResult) {
+	t.Helper()
+	orig := newWizardEngine
+	newWizardEngine = func(cmdutil.Factory, cmdutil.IOStreams) *wizard.Engine {
+		return wizard.NewEngine(nil, nil, wizard.WithOutput(io.Discard), wizard.WithTestResults(results...))
+	}
+	t.Cleanup(func() { newWizardEngine = orig })
+}
+
+// poolAPI has the clusters of seededClusters and two pools in "prod": workers (3/3, active) and gpu (1/2, degraded).
+func poolAPI() *fakeAPI {
+	api := seededClusters()
+	api.addPool("prod", "workers", "active", 3, 3)
+	api.addPool("prod", "gpu", "degraded", 2, 1)
+	api.pools["prod"][1].Errors = []verda.ManagedKubernetesNodePoolError{
+		{Reason: "insufficient_capacity", Message: "no free 1V100.6V", Since: testCreated},
+	}
+	return api
+}
+
+func readFile(t *testing.T, path string) string {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return string(b)
+}
+
+// assertMode checks the POSIX mode; Windows has none, so only that check is skipped.
+func assertMode(t *testing.T, path string, want os.FileMode) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		return
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat %s: %v", path, err)
+	}
+	if got := info.Mode().Perm(); got != want {
+		t.Errorf("%s mode = %o, want %o", path, got, want)
+	}
+}
+
+func assertNoPrivateKey(t *testing.T, label string, outs ...string) {
+	t.Helper()
+	for _, s := range outs {
+		if strings.Contains(s, kcPrivateKeyMarker) || strings.Contains(s, "client-key-data") || strings.Contains(s, "apiVersion: v1") {
+			t.Errorf("%s: the private key reached the output:\n%s", label, s)
+		}
+	}
 }

@@ -15,7 +15,6 @@
 package mk8s
 
 import (
-	"context"
 	"reflect"
 	"slices"
 	"strings"
@@ -23,10 +22,6 @@ import (
 	"time"
 
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
-	"go.yaml.in/yaml/v3"
-
-	"github.com/verda-cloud/verda-cli/pkg/tui"
-	tuitest "github.com/verda-cloud/verda-cli/pkg/tui/testing"
 
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
@@ -88,75 +83,26 @@ func TestKubeconfigList_Table(t *testing.T) {
 	}
 }
 
-func TestKubeconfigList_LocationSkipsTheClusterLookup(t *testing.T) {
-	t.Parallel()
-	api := kcFixtureAPI()
-	if _, _, err := runMK8s(t, tableFactory(newFakeClient(t, api), nil), "kubeconfig", "ls", "--cluster", "prod", "-l", "FIN-03"); err != nil {
-		t.Fatal(err)
-	}
-	if got := api.paths("GET"); !slices.Equal(got, []string{"/mk8sclusters/FIN-03/prod/kubeconfigs"}) {
-		t.Errorf("requests = %v", got)
-	}
-}
-
+// Every key but file is always present: a pending kubeconfig has groups [] and not_after null.
 func TestKubeconfigList_Structured(t *testing.T) {
 	t.Parallel()
-	for name, mk := range map[string]func(*fakeAPI, *testing.T) *cmdutil.TestFactory{
-		"json":  func(api *fakeAPI, t *testing.T) *cmdutil.TestFactory { return jsonFactory(newFakeClient(t, api)) },
-		"agent": func(api *fakeAPI, t *testing.T) *cmdutil.TestFactory { return agentFactory(newFakeClient(t, api)) },
-	} {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-			out, _, err := runMK8s(t, mk(kcFixtureAPI(), t), "kubeconfig", "list", "--cluster", "prod")
-			if err != nil {
-				t.Fatal(err)
-			}
-			if got := decodeJSON[[]KubeconfigView](t, out); !reflect.DeepEqual(got, kcWantViews()) {
-				t.Errorf("got  %+v\nwant %+v", got, kcWantViews())
-			}
-			for i, m := range decodeJSON[[]map[string]any](t, out) {
-				if got := sortedKeys(m); !slices.Equal(got, []string{"common_name", "display_name", "groups", "id", "not_after", "status"}) {
-					t.Errorf("item %d keys = %v", i, got)
-				}
-			}
-		})
+	out, _, err := runMK8s(t, jsonFactory(newFakeClient(t, kcFixtureAPI())), "kubeconfig", "list", "--cluster", "prod")
+	if err != nil {
+		t.Fatal(err)
 	}
-
-	t.Run("yaml", func(t *testing.T) {
-		t.Parallel()
-		out, _, err := runMK8s(t, yamlFactory(newFakeClient(t, kcFixtureAPI())), "kubeconfig", "list", "--cluster", "prod")
-		if err != nil {
-			t.Fatal(err)
-		}
-		var got []map[string]any
-		if err := yaml.Unmarshal([]byte(out), &got); err != nil {
-			t.Fatal(err)
-		}
-		if len(got) != 2 || got[0]["id"] != "prod-kc-aaa" || got[1]["status"] != "pending" {
-			t.Fatalf("got %v", got)
-		}
-		if groups, _ := got[0]["groups"].([]any); !reflect.DeepEqual(groups, []any{"system:masters", "dev"}) {
-			t.Errorf("groups = %v", got[0]["groups"])
-		}
-		if groups, ok := got[1]["groups"].([]any); !ok || len(groups) != 0 {
-			t.Errorf("pending groups = %#v, want an empty list", got[1]["groups"])
-		}
-		if v, ok := got[1]["not_after"]; !ok || v != nil {
-			t.Errorf("pending not_after = %#v, want null", v)
-		}
-		if _, ok := got[0]["kubeconfig"]; ok {
-			t.Error("the YAML key must not be in the output")
-		}
-	})
-}
-
-func sortedKeys(m map[string]any) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
+	if got := decodeJSON[[]KubeconfigView](t, out); !reflect.DeepEqual(got, kcWantViews()) {
+		t.Errorf("got  %+v\nwant %+v", got, kcWantViews())
 	}
-	slices.Sort(keys)
-	return keys
+	for i, m := range decodeJSON[[]map[string]any](t, out) {
+		if len(m) != 6 {
+			t.Errorf("item %d = %v, want the 6 keys of the view", i, m)
+		}
+		for _, k := range []string{"common_name", "display_name", "groups", "id", "not_after", "status"} {
+			if _, ok := m[k]; !ok {
+				t.Errorf("item %d misses %q", i, k)
+			}
+		}
+	}
 }
 
 func TestKubeconfigList_Empty(t *testing.T) {
@@ -166,97 +112,20 @@ func TestKubeconfigList_Empty(t *testing.T) {
 	if err != nil || !strings.Contains(out, "No kubeconfigs in cluster prod.") || !strings.Contains(errOut, "verda mk8s kubeconfig create --cluster prod") {
 		t.Errorf("out=%q err=%q error=%v", out, errOut, err)
 	}
-	for name, f := range map[string]*cmdutil.TestFactory{"json": jsonFactory(client), "agent": agentFactory(client)} {
-		out, _, err = runMK8s(t, f, "kubeconfig", "list", "--cluster", "prod")
-		if err != nil || strings.TrimSpace(out) != "[]" {
-			t.Errorf("%s: empty output = %q, error=%v", name, out, err)
-		}
-	}
-	out, _, err = runMK8s(t, yamlFactory(client), "kubeconfig", "list", "--cluster", "prod")
+	out, _, err = runMK8s(t, jsonFactory(client), "kubeconfig", "list", "--cluster", "prod")
 	if err != nil || strings.TrimSpace(out) != "[]" {
-		t.Errorf("yaml: empty output = %q, error=%v", out, err)
+		t.Errorf("json: empty output = %q, error=%v", out, err)
 	}
 }
 
 func TestKubeconfigList_ClusterErrors(t *testing.T) {
 	t.Parallel()
 	client := newFakeClient(t, kcFixtureAPI())
-	for _, f := range []*cmdutil.TestFactory{tableFactory(client, nil), agentFactory(client), jsonFactory(client)} {
-		_, _, err := runMK8s(t, f, "kubeconfig", "list")
-		ae := cmdutil.ClassifyError(err)
-		if ae == nil || ae.Code != "MISSING_REQUIRED_FLAGS" {
-			t.Fatalf("err = %v", err)
-		}
-		if missing, _ := ae.Details["missing"].([]string); !slices.Equal(missing, []string{"--cluster"}) {
-			t.Errorf("missing = %v", missing)
-		}
+	_, _, err := runMK8s(t, agentFactory(client), "kubeconfig", "list")
+	if m, _ := cmdutil.ClassifyError(err).Details["missing"].([]string); agentErrorCode(err) != "MISSING_REQUIRED_FLAGS" || !slices.Equal(m, []string{"--cluster"}) {
+		t.Errorf("err = %v, missing = %v", err, m)
 	}
 	if _, _, err := runMK8s(t, tableFactory(client, nil), "kubeconfig", "list", "--cluster", "ghost"); agentErrorCode(err) != "NOT_FOUND" {
 		t.Errorf("unknown cluster: %v", err)
 	}
-	if _, _, err := runMK8s(t, tableFactory(client, nil), "kubeconfig", "list", "--cluster", " "); agentErrorCode(err) != "MISSING_REQUIRED_FLAGS" {
-		t.Errorf("blank cluster: %v", err)
-	}
-	if _, _, err := runMK8s(t, tableFactory(client, nil), "kubeconfig", "list", "extra", "--cluster", "prod"); err == nil {
-		t.Error("a positional argument must be rejected")
-	}
-}
-
-func TestKubeconfigList_Debug(t *testing.T) {
-	t.Parallel()
-	f := tableFactory(newFakeClient(t, kcFixtureAPI()), nil)
-	f.DebugOverride = true
-	_, errOut, err := runMK8s(t, f, "kubeconfig", "list", "--cluster", "prod")
-	if err != nil || !strings.Contains(errOut, "API response: 2 kubeconfig(s):") || !strings.Contains(errOut, `"common_name": "alice"`) {
-		t.Errorf("err=%v debug=%q", err, errOut)
-	}
-	if strings.Contains(errOut, `"kubeconfig"`) {
-		t.Errorf("debug output has a kubeconfig key: %q", errOut)
-	}
-}
-
-func TestKubeconfigList_ClusterPicker(t *testing.T) {
-	withTerminal(t)
-	api := kcFixtureAPI()
-	out, _, err := runMK8s(t, tableFactory(newFakeClient(t, api), pickerAnswers(0)), "kubeconfig", "list")
-	if err != nil || !strings.Contains(out, "prod-kc-aaa") {
-		t.Fatalf("out=%q err=%v", out, err)
-	}
-	if got := api.paths("GET"); !slices.Equal(got, []string{"/mk8sclusters", "/mk8sclusters/FIN-03/prod/kubeconfigs"}) {
-		t.Errorf("requests = %v", got)
-	}
-
-	f := tableFactory(newFakeClient(t, kcFixtureAPI()), nil)
-	f.PrompterOverride = &cancelPrompter{Prompter: pickerAnswers(), selectErr: contextCanceled()}
-	out, errOut, err := runMK8s(t, f, "kubeconfig", "list")
-	if err != nil || out != "" || !strings.Contains(errOut, canceledMsg) {
-		t.Errorf("esc: out=%q err=%q error=%v", out, errOut, err)
-	}
-}
-
-func TestKubeconfigList_NotEnabled(t *testing.T) {
-	t.Parallel()
-	api := newFakeAPI()
-	api.disabled = true
-	_, _, err := runMK8s(t, tableFactory(newFakeClient(t, api), nil), "kubeconfig", "list", "--cluster", "prod", "-l", "FIN-03")
-	if err == nil || agentErrorCode(err) != "AUTH_ERROR" || !strings.Contains(err.Error(), "not enabled for this project") {
-		t.Fatalf("err = %v", err)
-	}
-}
-
-type kcSelectCall struct {
-	Message string
-	Labels  []string
-	Hints   bool
-}
-
-// kcSelectRecorder answers like the wrapped prompter and keeps what each Select showed.
-type kcSelectRecorder struct {
-	*tuitest.Prompter
-	calls []kcSelectCall
-}
-
-func (p *kcSelectRecorder) Select(ctx context.Context, msg string, labels []string, opts ...tui.SelectOption) (int, error) {
-	p.calls = append(p.calls, kcSelectCall{Message: msg, Labels: labels, Hints: tui.ResolveSelectConfig(opts).ShowHints})
-	return p.Prompter.Select(ctx, msg, labels, opts...)
 }

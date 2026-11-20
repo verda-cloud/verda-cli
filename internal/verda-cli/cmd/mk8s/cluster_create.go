@@ -16,7 +16,6 @@ package mk8s
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -52,7 +51,7 @@ type clusterCreateOptions struct {
 	ServiceCIDR string
 	Wait        cmdutil.WaitOptions
 
-	// The CIDR flags have defaults, so the wizard needs to know if the user set them.
+	// The CIDR flags have defaults, so the wizard needs Changed.
 	podCIDRSet, serviceCIDRSet bool
 }
 
@@ -133,7 +132,6 @@ func (o *clusterCreateOptions) trim() {
 	}
 }
 
-// missing lists the required flags that are empty.
 func (o *clusterCreateOptions) missing() []string {
 	var m []string
 	for _, r := range []struct{ flag, value string }{
@@ -176,10 +174,7 @@ func runClusterCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.I
 	}
 	if len(missing) > 0 {
 		flow := buildClusterCreateFlow(opts, newWizardCache(f, client))
-		if err := newWizardEngine(f, ioStreams).Run(cmd.Context(), flow); err != nil {
-			if stop, ok := errors.AsType[*stopError](err); ok {
-				return stop
-			}
+		if err := runWizard(cmd.Context(), f, ioStreams, flow); err != nil {
 			return err
 		}
 		opts.trim()
@@ -194,9 +189,7 @@ func runClusterCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.I
 	}
 
 	cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), "Request payload:", req)
-	ctx, cancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
-	defer cancel()
-	cluster, err := cmdutil.WithSpinner(ctx, f.Status(), "Creating cluster...", func(ctx context.Context) (*verda.ManagedKubernetesCluster, error) {
+	cluster, err := apiCall(cmd.Context(), f, "Creating cluster...", func(ctx context.Context) (*verda.ManagedKubernetesCluster, error) {
 		return client.ManagedKubernetes.Create(ctx, req)
 	})
 	if err != nil {
@@ -223,8 +216,6 @@ func confirmClusterCreate(ctx context.Context, f cmdutil.Factory, ioStreams cmdu
 	return askConfirm(ctx, ioStreams, f.Prompter(), "Create cluster "+req.Name+"?")
 }
 
-// waitForCluster polls until the cluster is ready and updates result. Its
-// error says what was last seen and how to check later.
 func waitForCluster(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client *verda.Client, created *verda.ManagedKubernetesCluster, timeout time.Duration, result *ClusterCreateResult) error {
 	name, location := created.Name, created.Location
 	if f.OutputFormat() == outputTable {

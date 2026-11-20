@@ -62,17 +62,13 @@ func NewCmdNodePoolDelete(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra
 }
 
 func runNodePoolDelete(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, scope *poolScope, args []string, yes bool) error {
-	if err := checkPoolTarget(f, cmd, scope, args); err != nil {
+	if err := scope.check(f, cmd, args, argPool); err != nil {
 		return err
 	}
 	if err := checkConfirmed(f, yes, "delete"); err != nil {
 		return err
 	}
-	client, err := f.VerdaClient()
-	if err != nil {
-		return err
-	}
-	target, err := scope.resolve(cmd, f, ioStreams, client)
+	client, target, err := scope.connect(cmd, f, ioStreams)
 	if err != nil || target == nil {
 		return err
 	}
@@ -93,13 +89,10 @@ func runNodePoolDelete(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.
 	}
 
 	cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), "Delete node pool:", map[string]string{"name": name, "cluster": target.Name, "location": target.Location})
-	ctx, cancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
-	defer cancel()
-	err = cmdutil.RunWithSpinner(ctx, f.Status(), "Deleting node pool...", func(ctx context.Context) error {
+	if err := apiRun(cmd.Context(), f, "Deleting node pool...", func(ctx context.Context) error {
 		return client.ManagedKubernetes.DeleteNodePool(ctx, target.Location, target.Name, name)
-	})
-	if err != nil {
-		return mapErr(err)
+	}); err != nil {
+		return err
 	}
 
 	result := ActionResult{Resource: kindNodePool, Name: name, Location: target.Location, Cluster: target.Name, Action: "delete", Status: statusAccepted}
@@ -110,7 +103,7 @@ func runNodePoolDelete(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.
 	return nil
 }
 
-// poolToDelete is args[0], or the pool the user picks; "" means canceled or no pool.
+// poolToDelete: "" means canceled or no pool.
 func poolToDelete(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client *verda.Client, t *clusterTarget, args []string) (string, error) {
 	if len(args) > 0 {
 		return strings.TrimSpace(args[0]), nil

@@ -125,13 +125,11 @@ func runClusterUpgrade(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.
 
 	req := verda.UpdateManagedKubernetesClusterRequest{KubernetesVersion: opts.Version}
 	cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), "Request payload:", req)
-	ctx, cancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
-	defer cancel()
-	updated, err := cmdutil.WithSpinner(ctx, f.Status(), "Upgrading cluster...", func(ctx context.Context) (*verda.ManagedKubernetesCluster, error) {
+	updated, err := apiCall(cmd.Context(), f, "Upgrading cluster...", func(ctx context.Context) (*verda.ManagedKubernetesCluster, error) {
 		return client.ManagedKubernetes.Update(ctx, current.Location, current.Name, req)
 	})
 	if err != nil {
-		return mapErr(err)
+		return err
 	}
 	cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), "API response:", newClusterView(updated))
 
@@ -146,8 +144,6 @@ func runClusterUpgrade(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.
 	return nil
 }
 
-// upgradeMissing lists the arguments an upgrade needs that were not given;
-// without a terminal that includes the version, which a person is asked for.
 func upgradeMissing(f cmdutil.Factory, name string, given bool, version string) []string {
 	var missing []string
 	if clusterArgMissing(f, name, given) {
@@ -159,7 +155,7 @@ func upgradeMissing(f cmdutil.Factory, name string, given bool, version string) 
 	return missing
 }
 
-// askVersion prompts for the new version. ok is false when the user canceled.
+// askVersion: ok is false when the user canceled.
 func askVersion(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, current *verda.ManagedKubernetesCluster) (version string, ok bool, err error) {
 	v, err := f.Prompter().TextInput(ctx, fmt.Sprintf("New Kubernetes version (cluster %s runs %s)", current.Name, current.KubernetesVersion),
 		tui.WithPlaceholder("1.38.0"),

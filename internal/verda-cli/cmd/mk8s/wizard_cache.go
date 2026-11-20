@@ -46,16 +46,11 @@ func newWizardCache(f cmdutil.Factory, client *verda.Client) *wizardCache {
 	return &wizardCache{f: f, client: client, subnets: map[string][]verda.Subnet{}, types: map[string][]string{}}
 }
 
-// wizardCall bounds one lookup by --timeout and shows the spinner.
-func wizardCall[T any](ctx context.Context, c *wizardCache, msg string, fn func(context.Context) (T, error)) (T, error) {
-	return apiCall(ctx, c.f, msg, fn)
-}
-
 func (c *wizardCache) enabledLocations(ctx context.Context) ([]string, error) {
 	if c.haveLocation {
 		return c.locations, nil
 	}
-	res, err := wizardCall(ctx, c, "Loading locations...", func(ctx context.Context) (*verda.ManagedKubernetesEnabledLocations, error) {
+	res, err := apiCall(ctx, c.f, "Loading locations...", func(ctx context.Context) (*verda.ManagedKubernetesEnabledLocations, error) {
 		return c.client.ManagedKubernetes.GetEnabledLocations(ctx)
 	})
 	if err != nil {
@@ -69,7 +64,7 @@ func (c *wizardCache) privateNetworks(ctx context.Context) ([]verda.PrivateNetwo
 	if c.haveNetworks {
 		return c.networks, nil
 	}
-	networks, err := wizardCall(ctx, c, "Loading private networks...", func(ctx context.Context) ([]verda.PrivateNetwork, error) {
+	networks, err := apiCall(ctx, c.f, "Loading private networks...", func(ctx context.Context) ([]verda.PrivateNetwork, error) {
 		return c.client.PrivateNetworks.Get(ctx)
 	})
 	if err != nil {
@@ -83,7 +78,7 @@ func (c *wizardCache) networkSubnets(ctx context.Context, networkID string) ([]v
 	if s, ok := c.subnets[networkID]; ok {
 		return s, nil
 	}
-	subnets, err := wizardCall(ctx, c, "Loading subnets...", func(ctx context.Context) ([]verda.Subnet, error) {
+	subnets, err := apiCall(ctx, c.f, "Loading subnets...", func(ctx context.Context) ([]verda.Subnet, error) {
 		return c.client.PrivateNetworks.GetSubnets(ctx, networkID)
 	})
 	if err != nil {
@@ -93,7 +88,7 @@ func (c *wizardCache) networkSubnets(ctx context.Context, networkID string) ([]v
 	return subnets, nil
 }
 
-// networkName is the name of a network the wizard has already listed, else the ID.
+// networkName: the name of a network the wizard has listed, else the ID.
 func (c *wizardCache) networkName(id string) string {
 	for i := range c.networks {
 		if c.networks[i].ID == id {
@@ -103,8 +98,7 @@ func (c *wizardCache) networkName(id string) string {
 	return id
 }
 
-// stopError ends a wizard before any create call. The engine wraps loader
-// errors with the step name; callers unwrap a stopError to show its text as written.
+// stopError ends a wizard before any create call; runWizard shows its text as written.
 type stopError struct{ msg string }
 
 func (e *stopError) Error() string { return e.msg }
@@ -115,9 +109,7 @@ func (c *wizardCache) clusterList(ctx context.Context) ([]verda.ManagedKubernete
 	if c.haveClusters {
 		return c.clusters, nil
 	}
-	clusters, err := wizardCall(ctx, c, "Loading clusters...", func(ctx context.Context) ([]verda.ManagedKubernetesCluster, error) {
-		return c.client.ManagedKubernetes.List(ctx)
-	})
+	clusters, err := listClusters(ctx, c.f, c.client)
 	if err != nil {
 		return nil, err
 	}
@@ -125,7 +117,6 @@ func (c *wizardCache) clusterList(ctx context.Context) ([]verda.ManagedKubernete
 	return c.clusters, nil
 }
 
-// clusterLocation is the location of a cluster the wizard has listed, or "".
 func (c *wizardCache) clusterLocation(name string) string {
 	for i := range c.clusters {
 		if c.clusters[i].Name == name {
@@ -141,7 +132,7 @@ func (c *wizardCache) instanceTypes(ctx context.Context, location string) ([]str
 	if t, ok := c.types[location]; ok {
 		return t, nil
 	}
-	avail, err := wizardCall(ctx, c, "Loading instance types...", func(ctx context.Context) ([]verda.LocationAvailability, error) {
+	avail, err := apiCall(ctx, c.f, "Loading instance types...", func(ctx context.Context) ([]verda.LocationAvailability, error) {
 		return c.client.InstanceAvailability.GetAllAvailabilities(ctx, false, location)
 	})
 	if err != nil {
@@ -163,7 +154,7 @@ func (c *wizardCache) sshKeyList(ctx context.Context) ([]verda.SSHKey, error) {
 	if c.haveKeys {
 		return c.sshKeys, nil
 	}
-	keys, err := wizardCall(ctx, c, "Loading SSH keys...", func(ctx context.Context) ([]verda.SSHKey, error) {
+	keys, err := apiCall(ctx, c.f, "Loading SSH keys...", func(ctx context.Context) ([]verda.SSHKey, error) {
 		return c.client.SSHKeys.GetAllSSHKeys(ctx)
 	})
 	if err != nil {

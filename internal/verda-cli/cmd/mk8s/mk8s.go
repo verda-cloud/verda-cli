@@ -28,16 +28,13 @@ import (
 const (
 	outputTable = "table"
 
-	// Results of a command that only accepts a request, or that waited for it.
 	statusAccepted  = "accepted"
 	statusCompleted = "completed"
-	// statusUnchanged: the resource already had the requested state, nothing was sent.
-	statusUnchanged = "unchanged"
+	statusUnchanged = "unchanged" // nothing was sent
 
 	timeLayout = "2006-01-02 15:04"
 
-	// experimentalCaution starts the Long help of every mk8s command; the line
-	// break keeps it within 80 columns like the rest of the help.
+	// experimentalCaution starts every Long help; the line break keeps 80 columns.
 	experimentalCaution = "Experimental: the managed Kubernetes API may change in incompatible ways.\n" +
 		"Commands, flags and output may change without a deprecation period."
 
@@ -48,7 +45,6 @@ const (
 	waitTimeUsage = "Maximum time to wait with --wait"
 )
 
-// longDesc prefixes the experimental caution to a command's long description.
 func longDesc(s string) string {
 	return experimentalCaution + "\n\n" + cmdutil.LongDesc(s)
 }
@@ -108,12 +104,11 @@ func NewCmdMK8s(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
 	return cmd
 }
 
-// isInteractiveTerminal: prompts need stdin, stdout and stderr on a TTY; a var so tests can fake one.
+// isInteractiveTerminal: stdin, stdout and stderr on a TTY; a var so tests can fake one.
 var isInteractiveTerminal = func() bool {
 	return term.IsTerminal(os.Stdin.Fd()) && cmdutil.IsStdoutTerminal() && cmdutil.IsStderrTerminal()
 }
 
-// interactiveTTY: prompts only on a terminal, outside agent mode, with table output.
 func interactiveTTY(f cmdutil.Factory) bool {
 	return isInteractiveTerminal() && !f.AgentMode() && f.OutputFormat() == outputTable
 }

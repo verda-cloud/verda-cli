@@ -15,13 +15,11 @@
 package mk8s
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
-	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
 
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
@@ -79,13 +77,9 @@ func runClusterDescribe(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil
 	}
 	view := ClusterDescribeView{ClusterView: newClusterView(cluster)}
 
-	poolCtx, poolCancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
-	defer poolCancel()
-	pools, poolErr := cmdutil.WithSpinner(poolCtx, f.Status(), "Loading node pools...", func(ctx context.Context) ([]verda.ManagedKubernetesNodePool, error) {
-		return client.ManagedKubernetes.ListNodePools(ctx, target.Location, target.Name)
-	})
+	pools, poolErr := listPools(cmd.Context(), f, client, target)
 	if poolErr != nil {
-		view.NodePoolsError = mapErr(poolErr).Error()
+		view.NodePoolsError = poolErr.Error()
 		_, _ = fmt.Fprintf(ioStreams.ErrOut, "Warning: could not load the node pools of cluster %s: %s\n", target.Name, view.NodePoolsError)
 	} else {
 		views := newPoolSummaryViews(pools)

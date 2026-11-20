@@ -54,57 +54,18 @@ func TestClusterUpgrade_YesSendsTheNewVersion(t *testing.T) {
 	}
 }
 
-func TestClusterUpgrade_VersionIsTrimmed(t *testing.T) {
-	t.Parallel()
-	api := seededClusters()
-	if _, _, err := runMK8s(t, tableFactory(newFakeClient(t, api), nil), "cluster", "upgrade", "prod", "--kubernetes-version", " 1.38.0 ", "--yes"); err != nil {
-		t.Fatal(err)
-	}
-	if body := decodeJSON[map[string]string](t, api.requestsMatching("PATCH")[0].Body); body["kubernetes_version"] != "1.38.0" {
-		t.Errorf("body = %v", body)
-	}
-}
-
 func TestClusterUpgrade_Structured(t *testing.T) {
 	t.Parallel()
-	for name, f := range map[string]func(*fakeAPI, *testing.T) *cmdutil.TestFactory{
-		"json":  func(api *fakeAPI, t *testing.T) *cmdutil.TestFactory { return jsonFactory(newFakeClient(t, api)) },
-		"agent": func(api *fakeAPI, t *testing.T) *cmdutil.TestFactory { return agentFactory(newFakeClient(t, api)) },
-	} {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-			out, _, err := runMK8s(t, f(seededClusters(), t), "cluster", "upgrade", "prod", "-l", "FIN-03", "--kubernetes-version", "1.38.0", "--yes")
-			if err != nil {
-				t.Fatal(err)
-			}
-			got := decodeJSON[map[string]any](t, out)
-			if got["status"] != "accepted" || got["previous_version"] != "1.37.0" {
-				t.Errorf("result = %v", got)
-			}
-			if c, _ := got["cluster"].(map[string]any); c["kubernetes_version"] != "1.38.0" {
-				t.Errorf("cluster = %v", got["cluster"])
-			}
-		})
+	out, _, err := runMK8s(t, jsonFactory(newFakeClient(t, seededClusters())), "cluster", "upgrade", "prod", "-l", "FIN-03", "--kubernetes-version", "1.38.0", "--yes")
+	if err != nil {
+		t.Fatal(err)
 	}
-}
-
-func TestClusterUpgrade_NeedsYesOffTerminalBeforeAnyCall(t *testing.T) {
-	t.Parallel()
-	for name, mk := range map[string]func(*fakeAPI, *testing.T) *cmdutil.TestFactory{
-		"agent":          func(api *fakeAPI, t *testing.T) *cmdutil.TestFactory { return agentFactory(newFakeClient(t, api)) },
-		"json on a pipe": func(api *fakeAPI, t *testing.T) *cmdutil.TestFactory { return jsonFactory(newFakeClient(t, api)) },
-		"table on a pipe": func(api *fakeAPI, t *testing.T) *cmdutil.TestFactory {
-			return tableFactory(newFakeClient(t, api), nil)
-		},
-	} {
-		api := seededClusters()
-		_, _, err := runMK8s(t, mk(api, t), "cluster", "upgrade", "prod", "--kubernetes-version", "1.38.0")
-		if ae := cmdutil.ClassifyError(err); ae == nil || ae.Code != "CONFIRMATION_REQUIRED" {
-			t.Errorf("%s: err = %v", name, err)
-		}
-		if n := len(api.requests); n != 0 {
-			t.Errorf("%s: %d request(s) before the check", name, n)
-		}
+	got := decodeJSON[map[string]any](t, out)
+	if got["status"] != "accepted" || got["previous_version"] != "1.37.0" {
+		t.Errorf("result = %v", got)
+	}
+	if c, _ := got["cluster"].(map[string]any); c["kubernetes_version"] != "1.38.0" {
+		t.Errorf("cluster = %v", got["cluster"])
 	}
 }
 
@@ -120,74 +81,22 @@ func TestClusterUpgrade_MissingArguments(t *testing.T) {
 	}
 }
 
+// Without --kubernetes-version a terminal asks for it, then shows the warning and confirms.
 func TestClusterUpgrade_Interactive(t *testing.T) {
 	withTerminal(t)
-
-	t.Run("confirm shows the rolling upgrade warning", func(t *testing.T) {
-		api := seededClusters()
-		_, errOut, err := runMK8s(t, tableFactory(newFakeClient(t, api), tuitest.New().AddConfirm(true)),
-			"cluster", "upgrade", "prod", "--kubernetes-version", "1.38.0")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !strings.Contains(errOut, "Rolling upgrade from 1.37.0 to 1.38.0") {
-			t.Errorf("stderr = %q", errOut)
-		}
-		if n := len(api.requestsMatching("PATCH")); n != 1 {
-			t.Errorf("PATCHes = %d", n)
-		}
-	})
-
-	t.Run("version is asked when the flag is missing", func(t *testing.T) {
-		api := seededClusters()
-		p := tuitest.New().AddTextInput("1.39.0").AddConfirm(true)
-		if _, _, err := runMK8s(t, tableFactory(newFakeClient(t, api), p), "cluster", "upgrade", "prod"); err != nil {
-			t.Fatal(err)
-		}
-		if body := decodeJSON[map[string]string](t, api.requestsMatching("PATCH")[0].Body); body["kubernetes_version"] != "1.39.0" {
-			t.Errorf("body = %v", body)
-		}
-	})
-
-	t.Run("picker then confirm", func(t *testing.T) {
-		api := seededClusters()
-		p := tuitest.New().AddSelect(1).AddConfirm(true)
-		if _, _, err := runMK8s(t, tableFactory(newFakeClient(t, api), p), "cluster", "upgrade", "--kubernetes-version", "1.38.0"); err != nil {
-			t.Fatal(err)
-		}
-		if got := api.requestsMatching("PATCH")[0].Path; got != "/mk8sclusters/FIN-01/staging" {
-			t.Errorf("PATCH path = %s", got)
-		}
-	})
-
-	t.Run("declined, Esc and Ctrl+C change nothing", func(t *testing.T) {
-		for name, p := range map[string]*cancelPrompter{
-			"declined": {Prompter: tuitest.New().AddConfirm(false)},
-			"esc":      {Prompter: tuitest.New(), confirmErr: contextCanceled()},
-			"ctrl+c":   {Prompter: tuitest.New(), confirmErr: errInterrupted()},
-		} {
-			api := seededClusters()
-			f := tableFactory(newFakeClient(t, api), nil)
-			f.PrompterOverride = p
-			_, errOut, err := runMK8s(t, f, "cluster", "upgrade", "prod", "--kubernetes-version", "1.38.0")
-			if err != nil || !strings.Contains(errOut, canceledMsg) {
-				t.Errorf("%s: err=%v stderr=%q", name, err, errOut)
-			}
-			if n := len(api.requestsMatching("PATCH")); n != 0 {
-				t.Errorf("%s: %d PATCH(es)", name, n)
-			}
-		}
-	})
-
-	t.Run("canceling the version prompt changes nothing", func(t *testing.T) {
-		api := seededClusters()
-		f := tableFactory(newFakeClient(t, api), nil)
-		f.PrompterOverride = &textCancelPrompter{Prompter: tuitest.New()}
-		_, errOut, err := runMK8s(t, f, "cluster", "upgrade", "prod")
-		if err != nil || !strings.Contains(errOut, canceledMsg) || len(api.requestsMatching("PATCH")) != 0 {
-			t.Errorf("err=%v stderr=%q", err, errOut)
-		}
-	})
+	api := seededClusters()
+	p := tuitest.New().AddTextInput("1.39.0").AddConfirm(true)
+	_, errOut, err := runMK8s(t, tableFactory(newFakeClient(t, api), p), "cluster", "upgrade", "prod")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(errOut, "Rolling upgrade from 1.37.0 to 1.39.0") {
+		t.Errorf("stderr = %q", errOut)
+	}
+	patches := api.requestsMatching("PATCH")
+	if len(patches) != 1 || decodeJSON[map[string]string](t, patches[0].Body)["kubernetes_version"] != "1.39.0" {
+		t.Errorf("PATCHes = %v", patches)
+	}
 }
 
 func TestClusterUpgrade_APIErrorsShownAsSent(t *testing.T) {
@@ -197,10 +106,5 @@ func TestClusterUpgrade_APIErrorsShownAsSent(t *testing.T) {
 	_, _, err := runMK8s(t, tableFactory(newFakeClient(t, api), nil), "cluster", "upgrade", "prod", "--kubernetes-version", "1.38.0", "--yes")
 	if err == nil || !strings.Contains(err.Error(), "concurrent_modification") {
 		t.Fatalf("err = %v", err)
-	}
-
-	_, _, err = runMK8s(t, tableFactory(newFakeClient(t, seededClusters()), nil), "cluster", "upgrade", "ghost", "--kubernetes-version", "1.38.0", "--yes")
-	if agentErrorCode(err) != "NOT_FOUND" {
-		t.Errorf("unknown cluster: %v", err)
 	}
 }

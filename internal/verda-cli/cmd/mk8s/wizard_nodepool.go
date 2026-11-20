@@ -34,22 +34,14 @@ func validateReplicas(s string) error {
 	return nil
 }
 
-func validateName(s string) error {
-	if s == "" {
-		return errors.New("name must not be empty")
-	}
-	return nil
-}
-
 // buildNodePoolCreateFlow asks for every value the flags did not give. The
 // cluster is already known when it came from --cluster.
 func buildNodePoolCreateFlow(opts *nodePoolCreateOptions, cache *wizardCache) *wizard.Flow {
-	clusterSet, nameSet, typeSet := opts.Cluster != "", opts.Name != "", opts.InstanceType != ""
+	clusterSet := opts.Cluster != ""
 	// -l as the user gave it. The cluster step sets the location from the
 	// cluster it picks, and going Back must undo that, not keep it.
 	locationFlag := opts.Location
 	keysSet, replicasSet := len(opts.SSHKeys) > 0, opts.replicasSet
-	text := func(v any) string { s, _ := v.(string); return strings.TrimSpace(s) }
 
 	return &wizard.Flow{
 		Name:   "mk8s-node-pool-create",
@@ -62,7 +54,7 @@ func buildNodePoolCreateFlow(opts *nodePoolCreateOptions, cache *wizardCache) *w
 				Required:    true,
 				Loader:      clusterLoader(locationFlag, cache),
 				Setter: func(v any) {
-					opts.Cluster = text(v)
+					opts.Cluster = wizardText(v)
 					if locationFlag == "" {
 						opts.Location = cache.clusterLocation(opts.Cluster)
 					}
@@ -74,29 +66,8 @@ func buildNodePoolCreateFlow(opts *nodePoolCreateOptions, cache *wizardCache) *w
 				IsSet: func() bool { return clusterSet },
 				Value: func() any { return opts.Cluster },
 			},
-			{
-				Name:        flagName,
-				Description: "Node pool name (unique in the project, not only in the cluster)",
-				Prompt:      wizard.TextInputPrompt,
-				Required:    true,
-				Validate:    func(v any) error { return validateName(text(v)) },
-				Setter:      func(v any) { opts.Name = text(v) },
-				Resetter:    func() { opts.Name = "" },
-				IsSet:       func() bool { return nameSet },
-				Value:       func() any { return opts.Name },
-			},
-			{
-				Name:        flagInstanceType,
-				Description: "Instance type",
-				Prompt:      wizard.SelectPrompt,
-				Required:    true,
-				DependsOn:   []string{flagCluster},
-				Loader:      instanceTypeLoader(opts, cache),
-				Setter:      func(v any) { opts.InstanceType = text(v) },
-				Resetter:    func() { opts.InstanceType = "" },
-				IsSet:       func() bool { return typeSet },
-				Value:       func() any { return opts.InstanceType },
-			},
+			textStep(flagName, "Node pool name (unique in the project, not only in the cluster)", &opts.Name, opts.Name != "", validateName),
+			selectStep(flagInstanceType, "Instance type", &opts.InstanceType, opts.InstanceType != "", instanceTypeLoader(opts, cache), flagCluster),
 			{
 				Name:        flagSSHKey,
 				Description: "SSH keys for the workers",
@@ -114,8 +85,8 @@ func buildNodePoolCreateFlow(opts *nodePoolCreateOptions, cache *wizardCache) *w
 				Description: "Number of workers",
 				Prompt:      wizard.TextInputPrompt,
 				Default:     func(map[string]any) any { return strconv.Itoa(defaultPoolReplicas) },
-				Validate:    func(v any) error { return validateReplicas(text(v)) },
-				Setter:      func(v any) { opts.Replicas, _ = strconv.Atoi(text(v)) },
+				Validate:    func(v any) error { return validateReplicas(wizardText(v)) },
+				Setter:      func(v any) { opts.Replicas, _ = strconv.Atoi(wizardText(v)) },
 				Resetter:    func() { opts.Replicas = defaultPoolReplicas },
 				IsSet:       func() bool { return replicasSet },
 				Value:       func() any { return strconv.Itoa(opts.Replicas) },
@@ -124,7 +95,6 @@ func buildNodePoolCreateFlow(opts *nodePoolCreateOptions, cache *wizardCache) *w
 	}
 }
 
-// clusterLoader lists the clusters, only those in -l when it is given.
 func clusterLoader(locationFlag string, cache *wizardCache) wizard.LoaderFunc {
 	return func(ctx context.Context, _ tui.Prompter, _ tui.Status, _ *wizard.Store) ([]wizard.Choice, error) {
 		clusters, err := cache.clusterList(ctx)
@@ -164,8 +134,6 @@ func instanceTypeRank(t string) int {
 	return n
 }
 
-// instanceTypeLoader lists the types for the cluster's location, smallest
-// first so Enter on the first row picks the cheapest, with no prices.
 func instanceTypeLoader(opts *nodePoolCreateOptions, cache *wizardCache) wizard.LoaderFunc {
 	return func(ctx context.Context, _ tui.Prompter, _ tui.Status, _ *wizard.Store) ([]wizard.Choice, error) {
 		types, err := cache.instanceTypes(ctx, opts.Location)

@@ -36,7 +36,7 @@ const (
 	revokeNote = "A downloaded certificate cannot be revoked before it expires; deleting the kubeconfig does not disable it."
 )
 
-// currentUserName is the OS user name that pre-fills the common name; a var so tests can set it.
+// currentUserName pre-fills the common name; a var so tests can set it.
 var currentUserName = func() string {
 	if u, err := user.Current(); err == nil && u.Username != "" {
 		// Windows gives DOMAIN\user.
@@ -45,8 +45,7 @@ var currentUserName = func() string {
 	return os.Getenv("USER")
 }
 
-// kubeconfigAsker asks the prompts of `kubeconfig create`. Each ask reports
-// ok=false after printing "Canceled." when the user pressed Esc or Ctrl+C.
+// kubeconfigAsker: each ask reports ok=false after "Canceled." on Esc or Ctrl+C.
 type kubeconfigAsker struct {
 	ctx       context.Context
 	ioStreams cmdutil.IOStreams
@@ -71,7 +70,6 @@ func (a *kubeconfigAsker) selectOne(msg string, labels []string) (idx int, ok bo
 	return idx, true, nil
 }
 
-// canceled turns a prompt error into (false, nil) for Esc and Ctrl+C, else (false, err).
 func (a *kubeconfigAsker) canceled(err error) (ok bool, retErr error) {
 	if !cmdutil.IsPromptCancel(err) {
 		return false, err
@@ -80,8 +78,7 @@ func (a *kubeconfigAsker) canceled(err error) (ok bool, retErr error) {
 	return false, nil
 }
 
-// promptKubeconfigCreate asks, in prompt order, for each value its flag did not
-// give. It reports false when the user canceled.
+// promptKubeconfigCreate asks for each value its flag did not give; false means canceled.
 func promptKubeconfigCreate(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *kubeconfigCreateOptions, t *clusterTarget) (bool, error) {
 	a := &kubeconfigAsker{ctx: ctx, ioStreams: ioStreams, prompter: f.Prompter()}
 	steps := []func() (bool, error){
@@ -155,7 +152,7 @@ func (a *kubeconfigAsker) askDisplayName(opts *kubeconfigCreateOptions) (bool, e
 	return ok, err
 }
 
-// askDuration shows the API default as a hint only: an empty answer leaves duration out.
+// askDuration: the API default is a hint only; an empty answer leaves duration out.
 func (a *kubeconfigAsker) askDuration(opts *kubeconfigCreateOptions) (bool, error) {
 	if opts.durationSet {
 		return true, nil
@@ -167,7 +164,6 @@ func (a *kubeconfigAsker) askDuration(opts *kubeconfigCreateOptions) (bool, erro
 	return ok, err
 }
 
-// validateDurationInput applies the request's duration rule; empty leaves the API default.
 func validateDurationInput(s string) error {
 	req := verda.CreateManagedKubernetesKubeconfigRequest{CommonName: "x", Duration: strings.TrimSpace(s)}
 	if err := req.Validate(); err != nil {
@@ -192,8 +188,7 @@ func (a *kubeconfigAsker) askFile(opts *kubeconfigCreateOptions, t *clusterTarge
 	return true, nil
 }
 
-// kubeconfigFileValidator checks the typed path with the same rules as the write.
-// "-" is refused: it would print the private key on the terminal.
+// kubeconfigFileValidator refuses "-": it would print the private key on the terminal.
 func kubeconfigFileValidator(cluster, commonName string, force bool) func(string) error {
 	return func(s string) error {
 		s = strings.TrimSpace(s)
@@ -208,8 +203,7 @@ func kubeconfigFileValidator(cluster, commonName string, force bool) func(string
 	}
 }
 
-// confirmKubeconfigCreate prints the summary and asks. adminFlag: --admin was
-// given, so the access prompt (which prints the note itself) did not run.
+// confirmKubeconfigCreate: adminFlag means the access prompt, which prints the note, did not run.
 func confirmKubeconfigCreate(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, t *clusterTarget, req *verda.CreateManagedKubernetesKubeconfigRequest, dest *kubeconfigDest, adminFlag bool) (bool, error) {
 	display, duration, file := req.DisplayName, req.Duration, dest.path()
 	if display == "" {

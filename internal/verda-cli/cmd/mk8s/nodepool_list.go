@@ -56,14 +56,10 @@ func NewCmdNodePoolList(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.C
 }
 
 func runNodePoolList(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, scope *poolScope) error {
-	if missing := scope.missing(f, cmd); len(missing) > 0 {
-		return cmdutil.NewMissingFlagsError(missing)
-	}
-	client, err := f.VerdaClient()
-	if err != nil {
+	if err := scope.check(f, cmd, nil, ""); err != nil {
 		return err
 	}
-	target, err := scope.resolve(cmd, f, ioStreams, client)
+	client, target, err := scope.connect(cmd, f, ioStreams)
 	if err != nil || target == nil {
 		return err
 	}

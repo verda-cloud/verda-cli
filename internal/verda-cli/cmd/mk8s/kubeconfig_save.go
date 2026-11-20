@@ -32,14 +32,12 @@ const (
 	flagFile  = "file"
 	flagForce = "force"
 
-	// kubeconfigStdout as --file writes the YAML to stdout.
 	kubeconfigStdout = "-"
 )
 
 // shellSafe leaves out ':', the separator of a KUBECONFIG list.
 var shellSafe = regexp.MustCompile(`^[A-Za-z0-9_@%+=,./-]+$`)
 
-// shellQuote quotes s for a POSIX shell only when it has characters the shell would interpret.
 func shellQuote(s string) string {
 	if shellSafe.MatchString(s) {
 		return s
@@ -47,7 +45,6 @@ func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
-// kubeconfigFileFlags are --file and --force, shared by create and save.
 type kubeconfigFileFlags struct {
 	File  string
 	Force bool
@@ -70,17 +67,13 @@ func (k *kubeconfigFileFlags) validate(cmd *cobra.Command, f cmdutil.Factory) er
 	return nil
 }
 
-// kubeconfigDest is where the YAML goes: a checked file, or stdout.
 type kubeconfigDest struct {
-	stdout bool
-	target kubeconfigTarget
-	// replaced is set by write when an existing file was replaced.
-	replaced bool
+	stdout   bool
+	target   kubeconfigTarget
+	replaced bool // set by write
 }
 
-// destination resolves --file for a cluster and common name and checks the
-// target, so a path that cannot be written fails before a certificate is
-// issued. A bad path is a usage error.
+// destination checks the target before a certificate is issued; a bad path is a usage error.
 func (k *kubeconfigFileFlags) destination(cmd *cobra.Command, cluster, commonName string) (*kubeconfigDest, error) {
 	if k.File == kubeconfigStdout {
 		return &kubeconfigDest{stdout: true}, nil
@@ -95,7 +88,6 @@ func (k *kubeconfigFileFlags) destination(cmd *cobra.Command, cluster, commonNam
 	return &kubeconfigDest{target: target}, nil
 }
 
-// path is the file written, or - for stdout.
 func (d *kubeconfigDest) path() string {
 	if d.stdout {
 		return kubeconfigStdout
@@ -121,9 +113,8 @@ func kubeconfigListCmd(t *clusterTarget) string {
 	return fmt.Sprintf("verda mk8s kubeconfig list --cluster %s -l %s", shellQuote(t.Name), shellQuote(t.Location))
 }
 
-// kubeconfigSaveCmd is the command that writes a ready kubeconfig, for recovery
-// messages. The default path is left out (save derives it and creates ~/.kube),
-// and so is stdout: a recovery command must not print the key.
+// kubeconfigSaveCmd leaves out the default path (save derives it) and stdout:
+// a recovery command must not print the key.
 func kubeconfigSaveCmd(t *clusterTarget, id string, d *kubeconfigDest, force bool) string {
 	s := fmt.Sprintf("verda mk8s kubeconfig save %s --cluster %s -l %s", shellQuote(id), shellQuote(t.Name), shellQuote(t.Location))
 	if !d.stdout && !d.target.defaultDir {
@@ -135,11 +126,8 @@ func kubeconfigSaveCmd(t *clusterTarget, id string, d *kubeconfigDest, force boo
 	return s
 }
 
-// reportKubeconfigWritten prints the result after the YAML was written: a
-// KubeconfigView for structured output (never the YAML), a short text and the
-// KUBECONFIG hint for people. earlierStillValid adds the hint that a file's
-// earlier kubeconfig is a different credential that still works: only create
-// issues a new certificate, save rewrites the one it was asked for.
+// reportKubeconfigWritten never prints the YAML. earlierStillValid: only create
+// replaces a file's kubeconfig with a different credential.
 func reportKubeconfigWritten(f cmdutil.Factory, ioStreams cmdutil.IOStreams, t *clusterTarget, d *kubeconfigDest, k *verda.ManagedKubernetesKubeconfig, earlierStillValid bool) error {
 	file := ""
 	if !d.stdout {
@@ -225,15 +213,10 @@ func runKubeconfigSave(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.
 	if err := opts.validate(cmd, f); err != nil {
 		return err
 	}
-	opts.Cluster, opts.Location = strings.TrimSpace(opts.Cluster), strings.TrimSpace(opts.Location)
-	if err := checkKubeconfigTarget(f, cmd, &opts.poolScope, args); err != nil {
+	if err := opts.check(f, cmd, args, argKubeconfigRef); err != nil {
 		return err
 	}
-	client, err := f.VerdaClient()
-	if err != nil {
-		return err
-	}
-	target, err := opts.resolve(cmd, f, ioStreams, client)
+	client, target, err := opts.connect(cmd, f, ioStreams)
 	if err != nil || target == nil {
 		return err
 	}
@@ -261,7 +244,6 @@ func runKubeconfigSave(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.
 	return reportKubeconfigWritten(f, ioStreams, target, dest, k, false)
 }
 
-// notReadyError is the one "not ready" message of save: not ready, or ready without its content yet.
 func notReadyError(k *verda.ManagedKubernetesKubeconfig) error {
 	detail := "status " + k.Status
 	if k.Status == verda.ManagedKubernetesKubeconfigStatusReady {

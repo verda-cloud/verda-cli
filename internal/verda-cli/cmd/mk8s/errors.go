@@ -35,25 +35,23 @@ const (
 	notEnabledMessage = "Managed Kubernetes is not enabled for this project."
 )
 
-// What a create makes, for the "may have been created" warning.
 const (
 	kindCluster    = "cluster"
 	kindNodePool   = "node pool"
 	kindKubeconfig = "kubeconfig"
 )
 
-// SDK error texts that tell where a failed request stopped. The SDK wraps
-// these errors as plain strings, so there is no type to match.
+// SDK error texts that tell where a failed request stopped: the SDK wraps them
+// as plain strings, so there is no type to match.
 const (
 	sdkAuthFailed       = "failed to get authentication token"
 	sdkResponseUnread   = "failed to read response body"
 	sdkResponseUnparsed = "failed to unmarshal response"
 )
 
-// mapErr turns a 403 whose reason is feature_not_enabled into the "not enabled"
-// message, still AUTH_ERROR (exit 3) through ClassifyError. It returns a plain
-// APIError, not an AgentError: main prints AgentErrors as JSON even for humans.
-// Every other error is shown as the API sent it.
+// mapErr turns a 403 feature_not_enabled into the "not enabled" message, still
+// AUTH_ERROR through ClassifyError. It is a plain APIError, not an AgentError:
+// main prints AgentErrors as JSON even for humans.
 func mapErr(err error) error {
 	if apiErr, ok := errors.AsType[*verda.APIError](err); ok && apiErr.StatusCode == http.StatusForbidden &&
 		(strings.Contains(apiErr.Code, reasonFeatureNotEnabled) || strings.Contains(apiErr.Details, reasonFeatureNotEnabled)) {
@@ -62,11 +60,9 @@ func mapErr(err error) error {
 	return err
 }
 
-// createMayHaveSucceeded reports whether the API may have saved the object
-// although the call failed: the request was sent and the answer is a 5xx, a
-// 408, a timeout, a dropped or unreadable response. A 4xx (429 too) means
-// nothing was created, and so does an error before the request left (a failed
-// token fetch, no connection, a validation error).
+// createMayHaveSucceeded: the request was sent and the answer is a 5xx, a 408,
+// a timeout, a dropped or unreadable response. A 4xx (429 too) or an error
+// before the request left means nothing was created.
 func createMayHaveSucceeded(err error) bool {
 	if neverSent(err) {
 		return false
@@ -84,7 +80,6 @@ func createMayHaveSucceeded(err error) bool {
 		strings.Contains(msg, sdkResponseUnparsed)
 }
 
-// neverSent: the failure came before the create request reached the server.
 func neverSent(err error) bool {
 	// A 5xx from the token endpoint is not a 5xx from the create.
 	if strings.Contains(err.Error(), sdkAuthFailed) {
@@ -94,7 +89,6 @@ func neverSent(err error) bool {
 	return errors.As(err, &opErr) && opErr.Op == "dial"
 }
 
-// createWarning is the "may have been created anyway" text.
 func createWarning(kind, listCmd string) string {
 	w := fmt.Sprintf("The %s may have been created anyway. Before running create again, check `%s`.", kind, listCmd)
 	if kind == kindKubeconfig {
@@ -103,10 +97,9 @@ func createWarning(kind, listCmd string) string {
 	return w
 }
 
-// createFailed returns the error of a failed create. When the create may have
-// been saved anyway it adds the warning: in the agent error details, or on
-// stderr for humans. Creates are never retried: the API can save an object and
-// still fail the answer, and a retry would make a second one.
+// createFailed adds the "may have been created" warning to the agent error
+// details, or prints it on stderr for humans. Creates are never retried: the
+// API can save an object and still fail the answer.
 func createFailed(f cmdutil.Factory, ioStreams cmdutil.IOStreams, kind, listCmd string, err error) error {
 	err = mapErr(err)
 	if !createMayHaveSucceeded(err) {

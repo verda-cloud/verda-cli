@@ -36,7 +36,6 @@ const (
 	flagDisplayName = "display-name"
 	flagDuration    = "duration"
 
-	// groupAdmin is the group that grants cluster-admin.
 	groupAdmin = "system:masters"
 
 	defaultKubeconfigWaitTimeout = 3 * time.Minute
@@ -157,7 +156,7 @@ func cleanGroups(in []string) []string {
 
 func (o *kubeconfigCreateOptions) hasAccess() bool { return o.Admin || len(o.Groups) > 0 }
 
-// groups is the access to request: the admin group first, then --group values.
+// groups: the admin group first, then --group values.
 func (o *kubeconfigCreateOptions) groups() []string {
 	if !o.Admin {
 		return slices.Clone(o.Groups)
@@ -175,10 +174,9 @@ func (o *kubeconfigCreateOptions) request() verda.CreateManagedKubernetesKubecon
 	}
 }
 
-// missingError is the error for what a script must give, or nil. A terminal
-// asks instead, except for a blank --cluster, which no command accepts.
+// missingError: a terminal asks instead, except for a blank --cluster, which no command accepts.
 func (o *kubeconfigCreateOptions) missingError(f cmdutil.Factory, cmd *cobra.Command) error {
-	missing := o.missing(f, cmd)
+	missing := o.missing(f, cmd, nil, "")
 	if !interactiveTTY(f) {
 		if o.CommonName == "" {
 			missing = append(missing, "--"+flagCommonName)
@@ -204,8 +202,7 @@ func runKubeconfigCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmduti
 	if err := opts.missingError(f, cmd); err != nil {
 		return err
 	}
-	// Cheap input checks first, then the file, then whatever prompts or calls the
-	// API. On a terminal the request and the default path are known only after the prompts.
+	// Input, then the file, then prompts and calls: no certificate is issued for a path that fails.
 	interactive := interactiveTTY(f)
 	var (
 		req  verda.CreateManagedKubernetesKubeconfigRequest
@@ -222,11 +219,7 @@ func runKubeconfigCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmduti
 	} else if req, dest, err = opts.scriptedInput(cmd); err != nil {
 		return err
 	}
-	client, err := f.VerdaClient()
-	if err != nil {
-		return err
-	}
-	target, err := opts.resolve(cmd, f, ioStreams, client)
+	client, target, err := opts.connect(cmd, f, ioStreams)
 	if err != nil || target == nil {
 		return err
 	}
@@ -248,8 +241,7 @@ func runKubeconfigCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmduti
 	return createKubeconfig(cmd, f, ioStreams, client, target, opts, &req, dest)
 }
 
-// scriptedInput validates everything a script gave, before any API call: the
-// request, then the file (the cluster name is the one given, names are exact).
+// scriptedInput checks the request, then the file, before any API call.
 func (o *kubeconfigCreateOptions) scriptedInput(cmd *cobra.Command) (verda.CreateManagedKubernetesKubeconfigRequest, *kubeconfigDest, error) {
 	req, err := o.validRequest(cmd)
 	if err != nil {
@@ -259,7 +251,6 @@ func (o *kubeconfigCreateOptions) scriptedInput(cmd *cobra.Command) (verda.Creat
 	return req, dest, err
 }
 
-// validRequest builds the request and rejects what the API would refuse.
 func (o *kubeconfigCreateOptions) validRequest(cmd *cobra.Command) (verda.CreateManagedKubernetesKubeconfigRequest, error) {
 	req := o.request()
 	if err := req.Validate(); err != nil {
@@ -270,9 +261,7 @@ func (o *kubeconfigCreateOptions) validRequest(cmd *cobra.Command) (verda.Create
 
 func createKubeconfig(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client *verda.Client, target *clusterTarget, opts *kubeconfigCreateOptions, req *verda.CreateManagedKubernetesKubeconfigRequest, dest *kubeconfigDest) error {
 	cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), "Request payload:", req)
-	ctx, cancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
-	defer cancel()
-	created, err := cmdutil.WithSpinner(ctx, f.Status(), "Creating kubeconfig...", func(ctx context.Context) (*verda.ManagedKubernetesKubeconfig, error) {
+	created, err := apiCall(cmd.Context(), f, "Creating kubeconfig...", func(ctx context.Context) (*verda.ManagedKubernetesKubeconfig, error) {
 		return client.ManagedKubernetes.CreateKubeconfig(ctx, target.Location, target.Name, *req)
 	})
 	if err != nil {
@@ -292,8 +281,7 @@ func createKubeconfig(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.I
 	return reportKubeconfigWritten(f, ioStreams, target, dest, ready, dest.replaced)
 }
 
-// waitForKubeconfig polls until the kubeconfig is ready with its YAML. It
-// returns the last read, which holds the YAML: keep it out of every output.
+// waitForKubeconfig returns the last read, which holds the YAML: keep it out of every output.
 func waitForKubeconfig(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client *verda.Client, t *clusterTarget, id string, timeout time.Duration) (*verda.ManagedKubernetesKubeconfig, error) {
 	if f.OutputFormat() == outputTable {
 		_, _ = fmt.Fprintf(ioStreams.ErrOut, "Kubeconfig %s created; waiting until it is ready (Ctrl+C stops waiting, the kubeconfig stays).\n", id)
@@ -304,7 +292,6 @@ func waitForKubeconfig(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil
 		}, kubeconfigReady)
 }
 
-// kubeconfigWaitError says what to do after a wait that did not end in a ready kubeconfig.
 func kubeconfigWaitError(err error, t *clusterTarget, created, last *verda.ManagedKubernetesKubeconfig, timeout time.Duration, saveCmd string) error {
 	subject := fmt.Sprintf("kubeconfig %s of cluster %s (%s)", created.ID, t.Name, t.Location)
 	tail := fmt.Sprintf("Run `%s` once it is ready. %s", saveCmd, kubeconfigAgainWarning)
@@ -318,8 +305,7 @@ func kubeconfigWaitError(err error, t *clusterTarget, created, last *verda.Manag
 	return fmt.Errorf("timed out after %s waiting for %s to become ready (last status: %s). It was created and is still being issued. %s", timeout, subject, seen, tail)
 }
 
-// kubeconfigRecovery adds the kubeconfig ID and the save command to the agent
-// error details; people get them in the message.
+// kubeconfigRecovery: agents get the ID and the save command in the details, people in the message.
 func kubeconfigRecovery(f cmdutil.Factory, err error, id, saveCmd string) error {
 	if !f.AgentMode() {
 		return err

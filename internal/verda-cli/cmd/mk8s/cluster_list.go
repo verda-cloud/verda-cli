@@ -85,9 +85,8 @@ func runClusterList(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOS
 	return nil
 }
 
-// clusterTableWidth is the terminal width the table must fit in. The
-// endpoint is long (it holds the project ID), so the column is dropped when the
-// rows would wrap; list -o json and describe always show it.
+// clusterTableWidth: the endpoint holds the project ID, so its column is
+// dropped when a row is wider; -o json and describe always show it.
 const clusterTableWidth = 120
 
 func writeClusterTable(w io.Writer, views []ClusterView, now time.Time, withEndpoint bool) error {

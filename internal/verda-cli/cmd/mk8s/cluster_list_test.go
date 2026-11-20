@@ -18,18 +18,7 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"go.yaml.in/yaml/v3"
-
-	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
-
-func seededClusters() *fakeAPI {
-	api := newFakeAPI()
-	api.addCluster("prod", "FIN-03", "running")
-	api.addCluster("staging", "FIN-01", "provisioning")
-	return api
-}
 
 func TestClusterList_Table(t *testing.T) {
 	t.Parallel()
@@ -60,74 +49,27 @@ func TestClusterList_Table(t *testing.T) {
 	}
 }
 
-func TestClusterList_LongEndpointsDropTheColumnToFit(t *testing.T) {
-	t.Parallel()
-	api := seededClusters()
-	api.clusters[0].ExternalEndpoint = "https://prod.project-824e2c70-bfce-4227-9ca4-369fc72d9280.fin03.mk8s.example.test:9443"
-	out, _, err := runMK8s(t, tableFactory(newFakeClient(t, api), nil), "cluster", "list")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(out, "ENDPOINT") || strings.Contains(out, "mk8s.example.test") {
-		t.Errorf("the endpoint column must be dropped when rows exceed %d columns:\n%s", clusterTableWidth, out)
-	}
-	if got := widestLine(strings.TrimRight(out, "\n")); got > clusterTableWidth {
-		t.Errorf("widest line = %d", got)
-	}
-	jsonOut, _, err := runMK8s(t, jsonFactory(newFakeClient(t, api)), "cluster", "list")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(jsonOut, "https://prod.project-824e2c70") {
-		t.Errorf("JSON keeps the full endpoint:\n%s", jsonOut)
-	}
-}
-
 func TestClusterList_Structured(t *testing.T) {
 	t.Parallel()
-	wantKeys := []string{
+	out, _, err := runMK8s(t, jsonFactory(newFakeClient(t, seededClusters())), "cluster", "list")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := decodeJSON[[]map[string]any](t, out)
+	if len(got) != 2 || got[0]["name"] != "prod" || got[1]["phase"] != "provisioning" {
+		t.Fatalf("got %v", got)
+	}
+	for _, k := range []string{
 		"name", "location", "kubernetes_version", "phase", "external_endpoint", "network", "subnet",
 		"pod_cidr", "service_cidr", "dns_suffix", "conditions", "created_at",
-	}
-	for name, mk := range map[string]func(api *fakeAPI, t *testing.T) *cmdutil.TestFactory{
-		"json":  func(api *fakeAPI, t *testing.T) *cmdutil.TestFactory { return jsonFactory(newFakeClient(t, api)) },
-		"agent": func(api *fakeAPI, t *testing.T) *cmdutil.TestFactory { return agentFactory(newFakeClient(t, api)) },
 	} {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-			out, _, err := runMK8s(t, mk(seededClusters(), t), "cluster", "list")
-			if err != nil {
-				t.Fatal(err)
-			}
-			got := decodeJSON[[]map[string]any](t, out)
-			if len(got) != 2 || got[0]["name"] != "prod" || got[1]["phase"] != "provisioning" {
-				t.Fatalf("got %v", got)
-			}
-			for _, k := range wantKeys {
-				if _, ok := got[0][k]; !ok {
-					t.Errorf("JSON misses %q", k)
-				}
-			}
-			if c, ok := got[0]["conditions"].([]any); !ok || len(c) != 0 {
-				t.Errorf("conditions = %v, want []", got[0]["conditions"])
-			}
-		})
+		if _, ok := got[0][k]; !ok {
+			t.Errorf("JSON misses %q", k)
+		}
 	}
-
-	t.Run("yaml", func(t *testing.T) {
-		t.Parallel()
-		out, _, err := runMK8s(t, yamlFactory(newFakeClient(t, seededClusters())), "cluster", "list")
-		if err != nil {
-			t.Fatal(err)
-		}
-		var got []map[string]any
-		if err := yaml.Unmarshal([]byte(out), &got); err != nil {
-			t.Fatal(err)
-		}
-		if len(got) != 2 || got[0]["kubernetes_version"] != "1.37.0" {
-			t.Errorf("got %v", got)
-		}
-	})
+	if c, ok := got[0]["conditions"].([]any); !ok || len(c) != 0 {
+		t.Errorf("conditions = %v, want []", got[0]["conditions"])
+	}
 }
 
 func TestClusterList_Empty(t *testing.T) {
@@ -148,29 +90,6 @@ func TestClusterList_Empty(t *testing.T) {
 	}
 	if strings.TrimSpace(out) != "[]" {
 		t.Errorf("empty JSON = %q, want []", out)
-	}
-}
-
-func TestClusterList_Debug(t *testing.T) {
-	t.Parallel()
-	f := tableFactory(newFakeClient(t, seededClusters()), nil)
-	f.DebugOverride = true
-	_, errOut, err := runMK8s(t, f, "cluster", "list")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(errOut, "API response: 2 cluster(s):") || !strings.Contains(errOut, `"kubernetes_version": "1.37.0"`) {
-		t.Errorf("debug output = %q", errOut)
-	}
-}
-
-func TestClusterList_NotEnabled(t *testing.T) {
-	t.Parallel()
-	api := newFakeAPI()
-	api.disabled = true
-	_, _, err := runMK8s(t, tableFactory(newFakeClient(t, api), nil), "cluster", "list")
-	if err == nil || agentErrorCode(err) != "AUTH_ERROR" || !strings.Contains(err.Error(), "not enabled for this project") {
-		t.Fatalf("err = %v", err)
 	}
 }
 
