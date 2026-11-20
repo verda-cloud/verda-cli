@@ -57,6 +57,7 @@ type agentErrorEnvelope struct {
 // WriteAgentError writes a structured JSON error to w.
 func WriteAgentError(w io.Writer, ae *AgentError) {
 	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
 	enc.SetIndent("", "  ")
 	_ = enc.Encode(agentErrorEnvelope{Error: ae})
 }
@@ -72,13 +73,19 @@ func NewMissingFlagsError(missing []string) *AgentError {
 }
 
 // NewMissingOneOfFlagsError: missing lists required flags; at least one of oneOf must also be set.
+// The message names both.
 func NewMissingOneOfFlagsError(missing, oneOf []string) *AgentError {
 	if missing == nil {
 		missing = []string{}
 	}
+	msg := "required flags not provided: "
+	if len(missing) > 0 {
+		msg += strings.Join(missing, ", ") + "; "
+	}
+	msg += "set at least one of " + strings.Join(oneOf, ", ")
 	return &AgentError{
 		Code:     "MISSING_REQUIRED_FLAGS",
-		Message:  "required flags not provided: set at least one of " + strings.Join(oneOf, ", "),
+		Message:  msg,
 		Details:  map[string]any{"missing": missing, "one_of": oneOf},
 		ExitCode: ExitBadArgs,
 	}

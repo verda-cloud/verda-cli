@@ -35,8 +35,11 @@ func TestAgentError_Error(t *testing.T) {
 
 func TestWriteAgentError(t *testing.T) {
 	var buf bytes.Buffer
-	ae := NewMissingFlagsError([]string{"--foo", "--bar"})
+	ae := NewMissingFlagsError([]string{"--foo", "--bar", "<pool>"})
 	WriteAgentError(&buf, ae)
+	if !strings.Contains(buf.String(), `"<pool>"`) {
+		t.Errorf("placeholder must not be HTML-escaped: %s", buf.String())
+	}
 
 	var envelope struct {
 		Error struct {
@@ -52,8 +55,8 @@ func TestWriteAgentError(t *testing.T) {
 		t.Errorf("code = %q, want MISSING_REQUIRED_FLAGS", envelope.Error.Code)
 	}
 	missing, ok := envelope.Error.Details["missing"].([]any)
-	if !ok || len(missing) != 2 {
-		t.Errorf("missing = %v, want [--foo, --bar]", envelope.Error.Details["missing"])
+	if !ok || len(missing) != 3 {
+		t.Errorf("missing = %v, want [--foo, --bar, <pool>]", envelope.Error.Details["missing"])
 	}
 }
 
