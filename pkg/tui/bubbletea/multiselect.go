@@ -38,6 +38,7 @@ type multiSelectModel struct {
 	max         int
 	minErr      func(min int) string // resolved: caller override or library default
 	maxErr      func(max int) string // resolved: caller override or library default
+	backItem    bool                 // last choice is a back action, not a selectable value
 	showHints   bool
 	customHints []string                       // nil = derive from bindings
 	bindings    []KeyBinding[multiSelectModel] // resolved (defaults + overrides + extras)
@@ -101,6 +102,9 @@ func DefaultMultiSelectBindings() []KeyBinding[multiSelectModel] {
 					return nil, true
 				}
 				idx := m.matched[m.cursor]
+				if m.isBack(idx) {
+					return nil, true
+				}
 				if m.selected[idx] {
 					delete(m.selected, idx)
 					m.err = ""
@@ -139,6 +143,10 @@ func DefaultMultiSelectBindings() []KeyBinding[multiSelectModel] {
 			Match: MatchKey(tea.KeyEnter),
 			Label: func(*multiSelectModel) string { return "enter confirm" },
 			Handle: func(m *multiSelectModel, _ tea.KeyPressMsg) (tea.Cmd, bool) {
+				if len(m.matched) > 0 && m.isBack(m.matched[m.cursor]) {
+					m.aborted = true
+					return func() tea.Msg { return GoBackMsg{} }, true
+				}
 				if m.min > 0 && len(m.selected) < m.min {
 					m.err = m.minErr(m.min)
 					return nil, true
@@ -207,7 +215,7 @@ func newMultiSelectModel(prompt string, choices []string, cfg tui.MultiSelectCon
 	}
 	selected := make(map[int]bool)
 	for _, idx := range cfg.Defaults {
-		if idx >= 0 && idx < len(choices) {
+		if idx >= 0 && idx < len(choices) && (!cfg.BackItem || idx != len(choices)-1) {
 			selected[idx] = true
 		}
 	}
@@ -247,10 +255,15 @@ func newMultiSelectModel(prompt string, choices []string, cfg tui.MultiSelectCon
 		max:         cfg.Max,
 		minErr:      minErr,
 		maxErr:      maxErr,
+		backItem:    cfg.BackItem,
 		showHints:   cfg.ShowHints,
 		customHints: cfg.Hints,
 		bindings:    bindings,
 	}
+}
+
+func (m *multiSelectModel) isBack(idx int) bool {
+	return m.backItem && idx == len(m.choices)-1
 }
 
 func (m *multiSelectModel) refilter() {
@@ -284,7 +297,7 @@ func (m *multiSelectModel) moveDown() {
 func (m *multiSelectModel) toggleAll() {
 	allSelected := true
 	for _, idx := range m.matched {
-		if !m.selected[idx] {
+		if !m.isBack(idx) && !m.selected[idx] {
 			allSelected = false
 			break
 		}
@@ -295,6 +308,9 @@ func (m *multiSelectModel) toggleAll() {
 		}
 	} else {
 		for _, idx := range m.matched {
+			if m.isBack(idx) {
+				continue
+			}
 			if m.max > 0 && len(m.selected) >= m.max {
 				m.err = m.maxErr(m.max)
 				return
@@ -374,6 +390,14 @@ func (m multiSelectModel) View() tea.View {
 			cur := "  "
 			if i == m.cursor {
 				cur = cursorStyle.Render("> ")
+			}
+			if m.isBack(idx) {
+				label := dimStyle.Render(m.choices[idx])
+				if i == m.cursor {
+					label = selectedStyle.Render(m.choices[idx])
+				}
+				fmt.Fprintf(&b, "  %s    %s\n", cur, label)
+				continue
 			}
 			check := uncheckStyle.Render("[ ]")
 			label := dimStyle.Render(m.choices[idx])

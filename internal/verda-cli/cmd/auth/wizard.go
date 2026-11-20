@@ -18,7 +18,6 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/verda-cloud/verda-cli/pkg/tui/bubbletea"
 	"github.com/verda-cloud/verda-cli/pkg/tui/wizard"
 )
 
@@ -35,7 +34,6 @@ func buildLoginFlow(opts *loginOptions) *wizard.Flow {
 		Name: "auth-login",
 		Layout: []wizard.ViewDef{
 			{ID: "progress", View: wizard.NewProgressView(wizard.WithProgressPercent())},
-			{ID: "hints", View: wizard.NewHintBarView(wizard.WithHintStyle(bubbletea.HintStyle()))},
 		},
 		Steps: []wizard.Step{
 			loginStepProfile(opts),

@@ -65,6 +65,7 @@ type stepRuntime struct {
 	choices     []Choice // cached loader results
 	loaded      bool     // true if loader has been called (distinguishes nil from not-loaded)
 	rewindCount int      // how many times auto-rewind has targeted this step
+	prior       any      // answer to pre-fill after a user-initiated back; consumed by the next completion
 }
 
 // maxRewindsPerStep is the maximum number of times the engine will auto-rewind
@@ -292,6 +293,13 @@ func (e *Engine) runPersistentProgram(ctx context.Context) error {
 // create their own tea.Programs (spinners, sub-flow prompts) without stdin
 // conflicts.
 func (e *Engine) runPerPromptProgram(ctx context.Context) error {
+	defer func() {
+		if e.program != nil && e.progErrCh != nil {
+			e.program.Quit()
+			<-e.progErrCh
+			e.program = nil
+		}
+	}()
 	return e.stepLoop(ctx)
 }
 
@@ -495,9 +503,11 @@ func (e *Engine) handlePromptResult(result promptResult, step Step, choices []Ch
 	// Convert indices to values for multiselect.
 	if step.Prompt == MultiSelectPrompt {
 		if indices, ok := value.([]int); ok {
-			values := make([]string, len(indices))
-			for i, idx := range indices {
-				values[i] = choices[idx].Value
+			values := make([]string, 0, len(indices))
+			for _, idx := range indices {
+				if idx >= 0 && idx < len(choices) {
+					values = append(values, choices[idx].Value)
+				}
 			}
 			value = values
 		}
@@ -541,6 +551,20 @@ func (e *Engine) handlePromptResult(result promptResult, step Step, choices []Ch
 	return true, nil
 }
 
+// promptDefault returns the value to pre-fill: the answer the user gave before
+// going back, else the step's Default.
+func (e *Engine) promptDefault(step Step) (any, bool) {
+	if e.current < len(e.steps) {
+		if prior := e.steps[e.current].prior; prior != nil {
+			return prior, true
+		}
+	}
+	if step.Default == nil {
+		return nil, false
+	}
+	return step.Default(e.store.Collected()), true
+}
+
 // buildPromptModel creates the appropriate PromptModel for a step.
 func (e *Engine) buildPromptModel(step Step, choices []Choice, canGoBack bool) bubbletea.PromptModel {
 	switch step.Prompt {
@@ -550,9 +574,8 @@ func (e *Engine) buildPromptModel(step Step, choices []Choice, canGoBack bool) b
 			labels = append(labels, backLabel)
 		}
 		var opts []tui.SelectOption
-		if step.Default != nil {
-			col := e.store.Collected()
-			if defVal, ok := step.Default(col).(string); ok {
+		if def, ok := e.promptDefault(step); ok {
+			if defVal, ok := def.(string); ok {
 				for i, c := range choices {
 					if c.Value == defVal {
 						opts = append(opts, tui.WithSelectDefault(i))
@@ -565,19 +588,19 @@ func (e *Engine) buildPromptModel(step Step, choices []Choice, canGoBack bool) b
 		return bubbletea.NewSelectPrompt(promptLabel(step), labels, cfg)
 	case MultiSelectPrompt:
 		labels := choiceLabels(choices)
+		var opts []tui.MultiSelectOption
 		if canGoBack {
 			labels = append(labels, backLabel)
+			opts = append(opts, tui.WithMultiSelectBackItem())
 		}
-		var opts []tui.MultiSelectOption
 		if step.Required {
 			opts = append(opts, tui.WithMinSelections(1))
 		}
 		if step.MinError != nil {
 			opts = append(opts, tui.WithMinSelectionsError(step.MinError))
 		}
-		if step.Default != nil {
-			col := e.store.Collected()
-			if defVals, ok := step.Default(col).([]string); ok && len(defVals) > 0 {
+		if def, ok := e.promptDefault(step); ok {
+			if defVals, ok := def.([]string); ok && len(defVals) > 0 {
 				valSet := make(map[string]bool, len(defVals))
 				for _, v := range defVals {
 					valSet[v] = true
@@ -597,9 +620,8 @@ func (e *Engine) buildPromptModel(step Step, choices []Choice, canGoBack bool) b
 		return bubbletea.NewMultiSelectPrompt(promptLabel(step), labels, cfg)
 	case TextInputPrompt:
 		var opts []tui.TextInputOption
-		if step.Default != nil {
-			col := e.store.Collected()
-			if d, ok := step.Default(col).(string); ok && d != "" {
+		if def, ok := e.promptDefault(step); ok {
+			if d, ok := def.(string); ok && d != "" {
 				opts = append(opts, tui.WithDefault(d))
 			}
 		}
@@ -618,9 +640,8 @@ func (e *Engine) buildPromptModel(step Step, choices []Choice, canGoBack bool) b
 		return bubbletea.NewTextInputPrompt(promptLabel(step), cfg)
 	case ConfirmPrompt:
 		var opts []tui.ConfirmOption
-		if step.Default != nil {
-			col := e.store.Collected()
-			if d, ok := step.Default(col).(bool); ok {
+		if def, ok := e.promptDefault(step); ok {
+			if d, ok := def.(bool); ok {
 				opts = append(opts, tui.WithConfirmDefault(d))
 			}
 		}
@@ -707,6 +728,7 @@ func (e *Engine) transition(idx int, newState stepState, value any) {
 	rt.value = value
 	rt.choices = nil // invalidate cached choices
 	rt.loaded = false
+	rt.prior = nil
 	// Only forward progress clears the auto-rewind guard. Resetting it on
 	// every transition was self-defeating: the rewind that follows an empty
 	// loader resets the very step that counted the attempt, so the guard
@@ -735,13 +757,17 @@ func (e *Engine) resetRange(from, to int) {
 
 // --- Navigation ---
 
-// rewindOne goes back to the nearest editable prior step, clearing everything between.
+// rewindOne goes back to the nearest editable prior step, clearing everything
+// between. The step landed on keeps its answer as a pre-filled default; its
+// loader still re-runs and the store value is cleared, so dependents never see it.
 func (e *Engine) rewindOne() {
 	from := e.current
 	e.current--
 	for e.current >= 0 {
 		if e.isEditable(e.current) {
+			prior := e.steps[e.current].value
 			e.resetRange(e.current, from+1) // +1 to include the abandoned step
+			e.steps[e.current].prior = prior
 			return
 		}
 		e.current--

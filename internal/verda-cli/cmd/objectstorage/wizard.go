@@ -20,7 +20,6 @@ import (
 	"strings"
 
 	"github.com/verda-cloud/verda-cli/pkg/tui"
-	"github.com/verda-cloud/verda-cli/pkg/tui/bubbletea"
 	"github.com/verda-cloud/verda-cli/pkg/tui/wizard"
 
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/options"
@@ -43,7 +42,6 @@ func buildConfigureFlow(opts *configureOptions) *wizard.Flow {
 		Name: "s3-configure",
 		Layout: []wizard.ViewDef{
 			{ID: "progress", View: wizard.NewProgressView(wizard.WithProgressPercent())},
-			{ID: "hints", View: wizard.NewHintBarView(wizard.WithHintStyle(bubbletea.HintStyle()))},
 		},
 		Steps: []wizard.Step{
 			configureStepProfile(opts),

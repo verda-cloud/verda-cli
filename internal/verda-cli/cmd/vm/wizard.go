@@ -22,7 +22,6 @@ import (
 	"strings"
 
 	"github.com/verda-cloud/verda-cli/pkg/tui"
-	"github.com/verda-cloud/verda-cli/pkg/tui/bubbletea"
 	"github.com/verda-cloud/verda-cli/pkg/tui/wizard"
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
 
@@ -169,14 +168,13 @@ func buildCreateFlow(ctx context.Context, getClient clientFunc, opts *createOpti
 		)
 	}
 
-	layout := []wizard.ViewDef{
-		{ID: "hints", View: wizard.NewHintBarView(wizard.WithHintStyle(bubbletea.HintStyle()))},
-	}
+	// Non-nil: a nil Layout selects the default progress view.
+	layout := []wizard.ViewDef{}
 	if mode == WizardModeDeploy {
-		layout = append([]wizard.ViewDef{
-			{ID: "progress", View: wizard.NewProgressView(wizard.WithProgressPercent())},
-			{ID: "summary", View: newSummaryView(ctx, getClient, cache, opts)},
-		}, layout...)
+		layout = append(layout,
+			wizard.ViewDef{ID: "progress", View: wizard.NewProgressView(wizard.WithProgressPercent())},
+			wizard.ViewDef{ID: "summary", View: newSummaryView(ctx, getClient, cache, opts)},
+		)
 	}
 
 	return &wizard.Flow{
