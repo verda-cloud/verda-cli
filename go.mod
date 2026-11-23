@@ -8,7 +8,7 @@ require (
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
 	github.com/spf13/viper v1.21.0
-	github.com/verda-cloud/verdacloud-sdk-go v1.9.0
+	github.com/verda-cloud/verdacloud-sdk-go v1.9.2-0.20261123115313-522026f3cbd0
 	go.yaml.in/yaml/v3 v3.0.5
 )
 
@@ -25,6 +25,8 @@ require (
 	github.com/charmbracelet/x/term v0.2.2
 	github.com/google/go-containerregistry v0.21.5
 	github.com/mark3labs/mcp-go v0.47.0
+	github.com/pelletier/go-toml/v2 v2.2.4
+	github.com/tailscale/hujson v0.0.0-20260727124030-b80ff77dac4f
 	go.uber.org/zap v1.27.1
 	gopkg.in/ini.v1 v1.67.1
 )
@@ -80,7 +82,6 @@ require (
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.1.1 // indirect
-	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/sagikazarmark/locafero v0.11.0 // indirect
 	github.com/sirupsen/logrus v1.9.4 // indirect

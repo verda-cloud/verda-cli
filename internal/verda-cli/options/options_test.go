@@ -47,6 +47,25 @@ verda_token = dev-token
 	}
 }
 
+func TestLoadSharedCredentialsInferenceBaseURL(t *testing.T) {
+	t.Parallel()
+
+	path := writeCredentialsFile(t, `
+[staging]
+verda_client_id = id
+verda_client_secret = secret
+verda_inference_base_url = https://inference.staging.example
+`)
+
+	creds, err := loadSharedCredentials(path, "staging")
+	if err != nil {
+		t.Fatalf("loadSharedCredentials() returned error: %v", err)
+	}
+	if creds.InferenceBaseURL != "https://inference.staging.example" {
+		t.Fatalf("InferenceBaseURL = %q", creds.InferenceBaseURL)
+	}
+}
+
 func TestOptionsCompleteLoadsSharedCredentials(t *testing.T) {
 	t.Parallel()
 

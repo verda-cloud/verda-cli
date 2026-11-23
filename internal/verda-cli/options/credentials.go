@@ -28,6 +28,8 @@ type SharedCredentials struct {
 	ClientID     string
 	ClientSecret string
 	BearerToken  string
+	// InferenceBaseURL (verda_inference_base_url) points `verda inference setup` at a non-production endpoint.
+	InferenceBaseURL string
 }
 
 // DefaultCredentialsFilePath returns the default shared credentials path.
@@ -89,6 +91,8 @@ func loadSharedCredentials(path, profile string) (*SharedCredentials, error) {
 		BaseURL:      strings.TrimSpace(section.Key("verda_base_url").String()),
 		ClientID:     strings.TrimSpace(section.Key("verda_client_id").String()),
 		ClientSecret: strings.TrimSpace(section.Key("verda_client_secret").String()),
+
+		InferenceBaseURL: strings.TrimSpace(section.Key("verda_inference_base_url").String()),
 	}
 
 	switch {

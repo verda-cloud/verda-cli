@@ -14,7 +14,7 @@ Do NOT write code until you have completed all steps below. No exceptions.
 3. `cmd/<domain>/README.md` in the target command directory — usage examples, flags, architecture
 4. `.ai/skills/new-command.md` if adding or modifying a command
 
-Per-command docs exist in: `auth`, `vm`, `template`, `volume`, `sshkey`, `startupscript`, `update`, `settings`. For commands without docs, read the source files directly.
+Per-command docs exist in: `auth`, `vm`, `template`, `volume`, `sshkey`, `startupscript`, `update`, `settings`, `inference`. For commands without docs, read the source files directly.
 
 **Step 2 — Verify** (always):
 5. Run `make test` to confirm the repo is green before you start

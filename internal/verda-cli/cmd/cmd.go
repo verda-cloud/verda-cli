@@ -31,6 +31,7 @@ import (
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/cost"
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/doctor"
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/images"
+	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/inference"
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/instancetypes"
 	"github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/locations"
 	mcpcmd "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/mcp"
@@ -165,6 +166,12 @@ func NewRootCommand(ioStreams cmdutil.IOStreams) (*cobra.Command, *clioptions.Op
 			Commands: []*cobra.Command{
 				serverless.NewCmdContainer(f, ioStreams),
 				serverless.NewCmdBatchjob(f, ioStreams),
+			},
+		},
+		cmdutil.CommandGroup{
+			Message: "Inference Commands:",
+			Commands: []*cobra.Command{
+				inference.NewCmdInference(f, ioStreams),
 			},
 		},
 		cmdutil.CommandGroup{
