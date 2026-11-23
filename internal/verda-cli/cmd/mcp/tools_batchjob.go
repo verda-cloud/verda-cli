@@ -65,10 +65,11 @@ func (s *Server) registerBatchjobTools() {
 
 	s.mcpServer.AddTool(
 		mcp.NewTool("batchjob_action",
-			mcp.WithDescription("Run a lifecycle action on a batch-job deployment: pause, resume, purge_queue or delete. purge_queue and delete are destructive and REQUIRE confirm: true. pause, resume and purge_queue return status \"accepted\" (the API accepted the action); there is no wait for batch jobs, use describe_batchjob to observe the status. delete waits server-side for timeout_ms (default 60 s) and returns \"completed\", or \"accepted\" with timeout_ms 0."),
+			mcp.WithDescription("Run a lifecycle action on a batch-job deployment: pause, resume, purge_queue or delete. purge_queue and delete are destructive and REQUIRE confirm: true. Returns status \"accepted\" (the API accepted the action) unless wait: true, which for pause polls until the job reports paused and for resume until it reports ready or running (up to 5 min), then returns \"completed\" plus deployment_status; purge_queue is always \"accepted\". delete waits server-side for timeout_ms (default 60 s) and returns \"completed\", or \"accepted\" with timeout_ms 0."),
 			mcp.WithString("name", mcp.Required(), mcp.Description("Deployment name")),
 			mcp.WithString("action", mcp.Required(), mcp.Description("One of: pause, resume, purge_queue, delete")),
 			mcp.WithBoolean("confirm", mcp.Description("Set true to confirm destructive actions (purge_queue, delete). Not needed for pause/resume.")),
+			mcp.WithBoolean("wait", mcp.Description("pause/resume only: poll until the job reports paused, or ready/running (default false)")),
 			mcp.WithNumber("timeout_ms", mcp.Description("delete only: server-side wait in ms, 0 returns immediately, max 300000 (default 60000)")),
 		),
 		s.handleBatchjobAction,
@@ -185,17 +186,28 @@ func (s *Server) handleCreateBatchjob(ctx context.Context, req mcp.CallToolReque
 	return jsonResult(view)
 }
 
+// Job statuses from GET /job-deployments/{name}/status (OpenAPI
+// GetScaledJobStatusResponseDto: ready, running, paused, terminating). The SDK
+// has no constants for them; they differ from the container vocabulary (no
+// healthy: an idle job is ready). terminating is not a wait target.
+const (
+	jobStatusReady   = "ready"   // deployed, idle, waiting for queue messages
+	jobStatusRunning = "running" // replicas processing jobs
+	jobStatusPaused  = "paused"  // paused via the pause endpoint
+)
+
 // batchjobActions mirrors cmd/serverless/batchjob_actions.go: no restart;
-// purge-queue is destructive, pause and resume are not. No expectStatus: the
-// job status vocabulary is unverified on staging, so no verb offers wait.
-// Once verified, set expectStatus here and drop the wait rejection below.
+// purge-queue is destructive, pause and resume are not. A resumed job is
+// ready when idle or running when the queue has work: either ends the wait.
 var batchjobActions = map[string]deploymentAction{
 	"pause": {
+		expectStatuses: []string{jobStatusPaused},
 		exec: func(ctx context.Context, c *verda.Client, name string) error {
 			return c.ServerlessJobs.PauseJobDeployment(ctx, name)
 		},
 	},
 	"resume": {
+		expectStatuses: []string{jobStatusReady, jobStatusRunning},
 		exec: func(ctx context.Context, c *verda.Client, name string) error {
 			return c.ServerlessJobs.ResumeJobDeployment(ctx, name)
 		},
@@ -214,9 +226,6 @@ func (s *Server) handleBatchjobAction(ctx context.Context, req mcp.CallToolReque
 	in, action, err := parseActionArgs(args(req), batchjobActions)
 	if err != nil {
 		return toolErrorResult(err), nil
-	}
-	if in.wait {
-		return toolErrorResult(invalidArgError("wait", "not supported for batch-job actions; observe the status with describe_batchjob")), nil
 	}
 
 	client, err := s.verdaClient()

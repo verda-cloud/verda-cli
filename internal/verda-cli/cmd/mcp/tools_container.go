@@ -314,9 +314,9 @@ func (s *Server) handleCreateContainer(ctx context.Context, req mcp.CallToolRequ
 
 // deploymentAction describes a lifecycle verb; delete is handled apart (timeout_ms, server-side wait).
 type deploymentAction struct {
-	expectStatus string // polled target when wait=true; empty = never polled
-	destructive  bool   // requires confirm=true
-	exec         func(ctx context.Context, c *verda.Client, name string) error
+	expectStatuses []string // any of these ends wait=true; empty = never polled
+	destructive    bool     // requires confirm=true
+	exec           func(ctx context.Context, c *verda.Client, name string) error
 }
 
 // containerActions mirrors cmd/serverless/container_actions.go: restart and
@@ -324,13 +324,13 @@ type deploymentAction struct {
 // resume are not. Keep both in sync.
 var containerActions = map[string]deploymentAction{
 	"pause": {
-		expectStatus: verda.ContainerDeploymentStatusPaused,
+		expectStatuses: []string{verda.ContainerDeploymentStatusPaused},
 		exec: func(ctx context.Context, c *verda.Client, name string) error {
 			return c.ContainerDeployments.PauseDeployment(ctx, name)
 		},
 	},
 	"resume": {
-		expectStatus: verda.ContainerDeploymentStatusHealthy,
+		expectStatuses: []string{verda.ContainerDeploymentStatusHealthy},
 		exec: func(ctx context.Context, c *verda.Client, name string) error {
 			return c.ContainerDeployments.ResumeDeployment(ctx, name)
 		},
@@ -415,8 +415,8 @@ func (s *Server) handleContainerAction(ctx context.Context, req mcp.CallToolRequ
 // actionResult reports accepted, or completed after wait: true observed the expected status.
 func (s *Server) actionResult(ctx context.Context, in *actionArgs, action *deploymentAction, read func(ctx context.Context) (string, error)) (*mcp.CallToolResult, error) {
 	result := map[string]any{"name": in.name, "action": in.action, "status": statusAccepted}
-	if in.wait && action.expectStatus != "" {
-		st, err := waitForStatus(ctx, action.expectStatus, deploymentWaitTimeout, read)
+	if in.wait && len(action.expectStatuses) > 0 {
+		st, err := waitForStatus(ctx, action.expectStatuses, deploymentWaitTimeout, read)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("action %q was accepted but the wait failed: %v", in.action, err)), nil
 		}

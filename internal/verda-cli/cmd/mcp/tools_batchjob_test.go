@@ -46,7 +46,7 @@ func TestCreateBatchjobConfirmGateAndWire(t *testing.T) {
 	}
 
 	out := parseSuccess(t, call(t, s.handleCreateBatchjob, "create_batchjob", batchjobCreateArgs(nil)))
-	if out["name"] != "nightly" || out["status"] != mockapi.JobStatusHealthy {
+	if out["name"] != "nightly" || out["status"] != mockapi.JobStatusReady {
 		t.Fatalf("create result = %v", out)
 	}
 	b := mock.JobCreateBodies()[0]
@@ -97,9 +97,9 @@ func TestBatchjobActions(t *testing.T) {
 		t.Fatal("refused actions must have zero side effects")
 	}
 
-	out := parseSuccess(t, call(t, s.handleBatchjobAction, "batchjob_action", map[string]any{"name": "nightly", "action": "pause"}))
-	if out["status"] != statusAccepted || mock.JobStatus("nightly") != mockapi.JobStatusPaused {
-		t.Fatalf("pause = %v, mock status %q", out, mock.JobStatus("nightly"))
+	out := parseSuccess(t, call(t, s.handleBatchjobAction, "batchjob_action", map[string]any{"name": "nightly", "action": "pause", "wait": true}))
+	if out["status"] != statusCompleted || out["deployment_status"] != mockapi.JobStatusPaused {
+		t.Fatalf("pause wait = %v", out)
 	}
 	out = parseSuccess(t, call(t, s.handleBatchjobAction, "batchjob_action", map[string]any{"name": "nightly", "action": "purge_queue", "confirm": true}))
 	if out["status"] != statusAccepted {
@@ -123,7 +123,7 @@ func TestListAndDescribeBatchjob(t *testing.T) {
 	}
 
 	out := parseSuccess(t, call(t, s.handleDescribeBatchjob, "describe_batchjob", map[string]any{"name": "nightly"}))
-	if out["status"] != mockapi.JobStatusHealthy {
+	if out["status"] != mockapi.JobStatusReady {
 		t.Errorf("status = %v", out["status"])
 	}
 	if got := dig(t, out, "scaling", "deadline_seconds"); got != float64(1800) {

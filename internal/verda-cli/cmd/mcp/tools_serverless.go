@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -191,10 +192,10 @@ func setSeconds(dst *time.Duration, v *int) {
 	}
 }
 
-// waitForStatus polls read until it reports want; the last observed status is
+// waitForStatus polls read until it reports one of want; the last observed status is
 // returned with any error. Like scaling.Wait, a transient read failure is "not
 // yet" (the deadline bounds retries); a permanent 4xx ends the wait at once.
-func waitForStatus(ctx context.Context, want string, timeout time.Duration, read func(ctx context.Context) (string, error)) (string, error) {
+func waitForStatus(ctx context.Context, want []string, timeout time.Duration, read func(ctx context.Context) (string, error)) (string, error) {
 	last := "unknown"
 	return cmdutil.Poll(ctx, nil, deploymentPollInterval, cmdutil.WaitOptions{Wait: true, Timeout: timeout},
 		func(ctx context.Context) (string, bool, error) {
@@ -206,7 +207,7 @@ func waitForStatus(ctx context.Context, want string, timeout time.Duration, read
 				return last, false, nil //nolint:nilerr // intentional: transient read failure is "not yet"
 			}
 			last = s
-			return s, s == want, nil
+			return s, slices.Contains(want, s), nil
 		})
 }
 

@@ -323,14 +323,19 @@ func TestBatchjobActionFailures(t *testing.T) {
 	if out["status"] != statusAccepted || mock.JobStatus("nightly") != mockapi.JobStatusPaused {
 		t.Fatalf("pause without wait = %v, mock status %q", out, mock.JobStatus("nightly"))
 	}
-	out = parseSuccess(t, call(t, s.handleBatchjobAction, "batchjob_action", map[string]any{"name": "nightly", "action": "resume"}))
-	if out["status"] != statusAccepted || mock.JobStatus("nightly") != mockapi.JobStatusHealthy {
-		t.Fatalf("resume = %v, mock status %q", out, mock.JobStatus("nightly"))
+	// A resumed job is "ready" when idle (the job vocabulary has no "healthy").
+	out = parseSuccess(t, call(t, s.handleBatchjobAction, "batchjob_action", map[string]any{"name": "nightly", "action": "resume", "wait": true}))
+	if out["status"] != statusCompleted || out["deployment_status"] != mockapi.JobStatusReady {
+		t.Fatalf("resume wait = %v", out)
 	}
-	// No wait for jobs until the status vocabulary is verified on staging.
-	assertFieldError(t, call(t, s.handleBatchjobAction, "batchjob_action", map[string]any{"name": "nightly", "action": "resume", "wait": true}), "wait")
-	if n := mock.RequestCount(http.MethodPost, "/job-deployments/nightly/resume"); n != 1 {
-		t.Errorf("a rejected wait must not run the action; resumes = %d", n)
+	if n := mock.RequestCount(http.MethodGet, "/job-deployments/nightly/status"); n == 0 {
+		t.Error("wait=true must poll the job status route")
+	}
+	// "running" is also a resumed job: the wait must accept it.
+	mock.SetJobStatus("nightly", mockapi.JobStatusRunning)
+	out = parseSuccess(t, call(t, s.handleBatchjobAction, "batchjob_action", map[string]any{"name": "nightly", "action": "resume", "wait": true}))
+	if out["status"] != statusCompleted || out["deployment_status"] != mockapi.JobStatusRunning {
+		t.Fatalf("resume wait on a running job = %v", out)
 	}
 	out = parseSuccess(t, call(t, s.handleBatchjobAction, "batchjob_action", map[string]any{"name": "nightly", "action": "delete", "confirm": true, "timeout_ms": float64(0)}))
 	if out["status"] != statusAccepted {

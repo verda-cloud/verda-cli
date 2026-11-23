@@ -24,9 +24,11 @@ import (
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
 )
 
-// Job deployment statuses as the /job-deployments/{name}/status route reports them.
+// Job deployment statuses as GET /job-deployments/{name}/status reports them
+// (GetScaledJobStatusResponseDto: ready, running, paused, terminating).
 const (
-	JobStatusHealthy = "healthy"
+	JobStatusReady   = "ready"
+	JobStatusRunning = "running"
 	JobStatusPaused  = "paused"
 )
 
@@ -42,11 +44,11 @@ func (s *Server) registerJobRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /job-deployments/{name}", s.handleDeleteJob)
 	mux.HandleFunc("GET /job-deployments/{name}/status", s.handleJobStatus)
 	mux.HandleFunc("POST /job-deployments/{name}/pause", s.jobAction(JobStatusPaused))
-	mux.HandleFunc("POST /job-deployments/{name}/resume", s.jobAction(JobStatusHealthy))
+	mux.HandleFunc("POST /job-deployments/{name}/resume", s.jobAction(JobStatusReady))
 	mux.HandleFunc("POST /job-deployments/{name}/purge-queue", s.jobAction(""))
 }
 
-// SeedJobDeployment stores a healthy job deployment with a 30 min deadline.
+// SeedJobDeployment stores a ready (idle) job deployment with a 30 min deadline.
 func (s *Server) SeedJobDeployment(name string) verda.JobDeployment {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -62,7 +64,7 @@ func (s *Server) SeedJobDeployment(name string) verda.JobDeployment {
 		}},
 		Scaling: &verda.JobScalingOptions{MaxReplicaCount: 3, QueueMessageTTLSeconds: 300, DeadlineSeconds: 1800},
 	}
-	s.jobs[name] = &jobFixture{job: job, status: JobStatusHealthy}
+	s.jobs[name] = &jobFixture{job: job, status: JobStatusReady}
 	return job
 }
 
@@ -140,7 +142,7 @@ func (s *Server) handleCreateJob(w http.ResponseWriter, r *http.Request) {
 			VolumeMounts: c.VolumeMounts,
 		})
 	}
-	s.jobs[req.Name] = &jobFixture{job: job, status: JobStatusHealthy}
+	s.jobs[req.Name] = &jobFixture{job: job, status: JobStatusReady}
 	writeJSON(w, http.StatusOK, job)
 }
 
@@ -179,9 +181,18 @@ func (s *Server) jobAction(newStatus string) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		if newStatus != "" {
+		// Resume only moves a paused job to ready; a running job stays running,
+		// as in production, so tests can assert the wait accepts both.
+		if newStatus != "" && (newStatus != JobStatusReady || j.status == JobStatusPaused) {
 			j.status = newStatus
 		}
 		writeJSON(w, http.StatusOK, map[string]any{})
 	}
+}
+
+// SetJobStatus overrides the status a seeded job deployment reports.
+func (s *Server) SetJobStatus(name, status string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.jobs[name].status = status
 }
