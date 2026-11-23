@@ -29,8 +29,8 @@ import (
 
 // This file holds step builders and helpers shared between the container and
 // batchjob create wizards. Each builder takes a pointer to the field it
-// mutates so the same step definition drives both `containerCreateOptions`
-// and `batchjobCreateOptions` without an interface layer.
+// mutates so the same step definition drives both `ContainerCreateOptions`
+// and `BatchjobCreateOptions` without an interface layer.
 
 // --- Deployment name ---
 

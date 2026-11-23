@@ -71,12 +71,20 @@ func NewLazyServer(getClient clientFunc) *Server {
 // serverInstructions carries the confirm gate and the error envelope — the two
 // contracts that decide whether an agent spends money correctly. It is prompt
 // context in every session, so keep it short.
-const serverInstructions = `Verda Cloud: GPU/CPU instances, volumes, SSH keys, object storage.
+const serverInstructions = `Verda Cloud: GPU/CPU instances, volumes, SSH keys, serverless containers
+and batch jobs.
 
 CONFIRM GATE — tools that create billing or destructive changes (create_vm,
-create_volume, and vm_action with shutdown/force_shutdown/hibernate/delete)
-refuse to run unless you pass confirm: true. Show the user the exact target and
-its cost first, then retry with confirm. A refused call has no side effects.
+create_volume, vm_action with shutdown/force_shutdown/hibernate/delete,
+create_container, create_batchjob, scale_container, container_action and
+batchjob_action with restart/purge_queue/delete, unset_container_env, and the
+delete_secret / delete_file_secret / delete_registry_credentials tools) refuse
+to run unless you pass confirm: true. Show the user the exact target and its
+cost first, then retry with confirm. A refused call has no side effects.
+
+SECRETS — no tool returns a secret value, and none creates one: secrets and
+registry credentials are created with the verda CLI or the web console. Put
+sensitive values in env_secrets, never in env.
 
 ERRORS — a failed tool returns isError with a JSON text payload:
   {"error": {"code": "...", "message": "...", "details": {...}}}
@@ -118,6 +126,9 @@ func newServer(getClient clientFunc) *Server {
 	s.registerVMTools()
 	s.registerSSHTools()
 	s.registerVolumeTools()
+	s.registerServerlessCatalogTools()
+	s.registerContainerTools()
+	s.registerBatchjobTools()
 
 	return s
 }
@@ -348,4 +359,40 @@ func jsonTypeName(v any) string {
 	default:
 		return fmt.Sprintf("%T", v)
 	}
+}
+
+// optionalIntPtr is optionalInt with presence: nil when absent. Needed where 0
+// is a legal value (min_replicas 0, a trigger turned off) and must be told
+// apart from "not passed, keep the default".
+func optionalIntPtr(a map[string]any, name string) (*int, error) {
+	v, ok := a[name]
+	if !ok || v == nil {
+		return nil, nil //nolint:nilnil // nil pointer is the "absent" signal; callers branch on it
+	}
+	i, err := strictInt(a, name, v)
+	if err != nil {
+		return nil, err
+	}
+	return &i, nil
+}
+
+// optionalFloatPtr extracts an optional non-negative number; nil when absent.
+func optionalFloatPtr(a map[string]any, name string) (*float64, error) {
+	v, ok := a[name]
+	if !ok || v == nil {
+		return nil, nil //nolint:nilnil // nil pointer is the "absent" signal; callers branch on it
+	}
+	var f float64
+	switch n := v.(type) {
+	case float64:
+		f = n
+	case int:
+		f = float64(n)
+	default:
+		return nil, invalidArgError(name, "must be a number, got "+jsonTypeName(v))
+	}
+	if f < 0 {
+		return nil, invalidArgError(name, "must not be negative")
+	}
+	return &f, nil
 }

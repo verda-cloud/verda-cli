@@ -342,7 +342,7 @@ func (o *containerScaleOptions) change(fs *pflag.FlagSet) (*scaling.Change, erro
 	case fs.Changed("queue-load"):
 		c.QueueLoad = new(o.QueueLoad)
 	case fs.Changed("queue-preset"):
-		n, err := resolveQueueLoad(o.QueuePreset, 0)
+		n, err := ResolveQueueLoad(o.QueuePreset, 0)
 		if err != nil {
 			return nil, cmdutil.NewValidationError("--queue-preset", err.Error())
 		}
@@ -536,7 +536,7 @@ func queueLoadLabel(q *verda.QueueLoadTrigger) string {
 	if q == nil {
 		return "-"
 	}
-	name := presetCustom
+	name := PresetCustom
 	for _, p := range queuePresets {
 		if float64(p.threshold) == q.Threshold {
 			name = p.name

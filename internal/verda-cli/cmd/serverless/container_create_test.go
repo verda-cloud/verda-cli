@@ -29,8 +29,8 @@ import (
 )
 
 // validOpts returns defaults that satisfy validate(); tests tweak one field each.
-func validOpts() *containerCreateOptions {
-	return &containerCreateOptions{
+func validOpts() *ContainerCreateOptions {
+	return &ContainerCreateOptions{
 		Name:            "my-endpoint",
 		Image:           "ghcr.io/org/app:v1.2",
 		Compute:         "RTX4500Ada",
@@ -40,7 +40,7 @@ func validOpts() *containerCreateOptions {
 		MinReplicas:     0,
 		MaxReplicas:     3,
 		Concurrency:     1,
-		QueuePreset:     presetBalanced,
+		QueuePreset:     PresetBalanced,
 		ScaleDownDelay:  300 * time.Second,
 		RequestTTL:      300 * time.Second,
 	}
@@ -48,7 +48,7 @@ func validOpts() *containerCreateOptions {
 
 // validOpts mirrors the create defaults; the SDK validates requests before sending.
 func TestContainerRequest_DefaultsPassSDKValidation(t *testing.T) {
-	req, err := validOpts().request()
+	req, err := validOpts().Request()
 	if err != nil {
 		t.Fatalf("request: %v", err)
 	}
@@ -59,7 +59,7 @@ func TestContainerRequest_DefaultsPassSDKValidation(t *testing.T) {
 
 func TestContainerRequest_HappyPath(t *testing.T) {
 	opts := validOpts()
-	req, err := opts.request()
+	req, err := opts.Request()
 	if err != nil {
 		t.Fatalf("request: %v", err)
 	}
@@ -112,7 +112,7 @@ func TestContainerRequest_HappyPath(t *testing.T) {
 func TestContainerRequest_RejectsLatest(t *testing.T) {
 	opts := validOpts()
 	opts.Image = "ghcr.io/org/app:latest"
-	_, err := opts.request()
+	_, err := opts.Request()
 	if err == nil || !strings.Contains(err.Error(), "latest") {
 		t.Fatalf("expected :latest rejection, got %v", err)
 	}
@@ -125,22 +125,22 @@ func TestContainerRequest_PresetMapping(t *testing.T) {
 		wantLoad  float64
 		expectErr bool
 	}{
-		{presetInstant, 0, queueLoadInstant, false},
-		{presetBalanced, 0, queueLoadBalanced, false},
-		{presetCostSaver, 0, queueLoadCostSaver, false},
+		{PresetInstant, 0, queueLoadInstant, false},
+		{PresetBalanced, 0, queueLoadBalanced, false},
+		{PresetCostSaver, 0, queueLoadCostSaver, false},
 		{"", 0, queueLoadBalanced, false}, // empty defaults to balanced
-		{presetCustom, 42, 42, false},
+		{PresetCustom, 42, 42, false},
 		{"", 17, 17, false}, // --queue-load alone implies custom
-		{presetCustom, 0, 0, true},
+		{PresetCustom, 0, 0, true},
 		{"unknown", 0, 0, true},
-		{presetCustom, 1001, 0, true},
+		{PresetCustom, 1001, 0, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.preset+":"+strconv.Itoa(tc.custom), func(t *testing.T) {
 			opts := validOpts()
 			opts.QueuePreset = tc.preset
 			opts.QueueLoad = tc.custom
-			req, err := opts.request()
+			req, err := opts.Request()
 			if tc.expectErr {
 				if err == nil {
 					t.Fatalf("expected error, got nil")
@@ -161,7 +161,7 @@ func TestContainerRequest_PresetMapping(t *testing.T) {
 func TestContainerRequest_HealthcheckOff(t *testing.T) {
 	opts := validOpts()
 	opts.HealthcheckOff = true
-	req, err := opts.request()
+	req, err := opts.Request()
 	if err != nil {
 		t.Fatalf("request: %v", err)
 	}
@@ -173,7 +173,7 @@ func TestContainerRequest_HealthcheckOff(t *testing.T) {
 func TestContainerRequest_Spot(t *testing.T) {
 	opts := validOpts()
 	opts.Spot = true
-	req, err := opts.request()
+	req, err := opts.Request()
 	if err != nil {
 		t.Fatalf("request: %v", err)
 	}
@@ -186,7 +186,7 @@ func TestContainerRequest_CPUGPUUtilTriggers(t *testing.T) {
 	opts := validOpts()
 	opts.CPUUtil = 70
 	opts.GPUUtil = 80
-	req, err := opts.request()
+	req, err := opts.Request()
 	if err != nil {
 		t.Fatalf("request: %v", err)
 	}
@@ -203,7 +203,7 @@ func TestContainerRequest_EnvMix(t *testing.T) {
 	opts := validOpts()
 	opts.Env = []string{"HF_HOME=/data/.hf", "DEBUG=1"}
 	opts.EnvSecret = []string{"TOKEN=my-secret"}
-	req, err := opts.request()
+	req, err := opts.Request()
 	if err != nil {
 		t.Fatalf("request: %v", err)
 	}
@@ -222,7 +222,7 @@ func TestContainerRequest_EnvMix(t *testing.T) {
 func TestContainerRequest_RegistryCreds(t *testing.T) {
 	opts := validOpts()
 	opts.RegistryCreds = "my-ghcr"
-	req, err := opts.request()
+	req, err := opts.Request()
 	if err != nil {
 		t.Fatalf("request: %v", err)
 	}
@@ -238,34 +238,34 @@ func TestContainerRequest_RegistryCreds(t *testing.T) {
 func TestContainerRequest_ValidationErrors(t *testing.T) {
 	cases := []struct {
 		name    string
-		mutate  func(*containerCreateOptions)
+		mutate  func(*ContainerCreateOptions)
 		wantErr string
 	}{
-		{"empty name", func(o *containerCreateOptions) { o.Name = "" }, "required"},
-		{"invalid name", func(o *containerCreateOptions) { o.Name = "My_Endpoint" }, "lowercase"},
-		{"latest tag", func(o *containerCreateOptions) { o.Image = "nginx:latest" }, "latest"},
-		{"zero compute size", func(o *containerCreateOptions) { o.ComputeSize = 0 }, "compute-size"},
-		{"negative min", func(o *containerCreateOptions) { o.MinReplicas = -1 }, "min-replicas"},
-		{"max < min", func(o *containerCreateOptions) { o.MinReplicas = 5; o.MaxReplicas = 3 }, "max-replicas"},
-		{"zero concurrency", func(o *containerCreateOptions) { o.Concurrency = 0 }, "concurrency"},
-		{"bad port", func(o *containerCreateOptions) { o.Port = 99999 }, "port"},
-		{"bad cpu-util", func(o *containerCreateOptions) { o.CPUUtil = 150 }, "cpu-util"},
-		{"bad gpu-util", func(o *containerCreateOptions) { o.GPUUtil = -1 }, "gpu-util"},
-		{"compute size too large", func(o *containerCreateOptions) { o.ComputeSize = 999 }, "compute-size"},
-		{"min replicas too large", func(o *containerCreateOptions) { o.MinReplicas = 99999 }, "min-replicas"},
-		{"max replicas too large", func(o *containerCreateOptions) { o.MinReplicas = 0; o.MaxReplicas = 99999 }, "max-replicas"},
-		{"concurrency too large", func(o *containerCreateOptions) { o.Concurrency = 99999 }, "concurrency"},
-		{"request ttl too long", func(o *containerCreateOptions) { o.RequestTTL = 365 * 24 * time.Hour }, "request-ttl"},
-		{"scale up delay too long", func(o *containerCreateOptions) { o.ScaleUpDelay = 365 * 24 * time.Hour }, "scale-up-delay"},
-		{"scale down delay too long", func(o *containerCreateOptions) { o.ScaleDownDelay = 365 * 24 * time.Hour }, "scale-down-delay"},
-		{"bad env format", func(o *containerCreateOptions) { o.Env = []string{"nope"} }, "KEY=VALUE"},
-		{"bad secret mount", func(o *containerCreateOptions) { o.SecretMounts = []string{"nope"} }, "SECRET:MOUNT_PATH"},
+		{"empty name", func(o *ContainerCreateOptions) { o.Name = "" }, "required"},
+		{"invalid name", func(o *ContainerCreateOptions) { o.Name = "My_Endpoint" }, "lowercase"},
+		{"latest tag", func(o *ContainerCreateOptions) { o.Image = "nginx:latest" }, "latest"},
+		{"zero compute size", func(o *ContainerCreateOptions) { o.ComputeSize = 0 }, "compute-size"},
+		{"negative min", func(o *ContainerCreateOptions) { o.MinReplicas = -1 }, "min-replicas"},
+		{"max < min", func(o *ContainerCreateOptions) { o.MinReplicas = 5; o.MaxReplicas = 3 }, "max-replicas"},
+		{"zero concurrency", func(o *ContainerCreateOptions) { o.Concurrency = 0 }, "concurrency"},
+		{"bad port", func(o *ContainerCreateOptions) { o.Port = 99999 }, "port"},
+		{"bad cpu-util", func(o *ContainerCreateOptions) { o.CPUUtil = 150 }, "cpu-util"},
+		{"bad gpu-util", func(o *ContainerCreateOptions) { o.GPUUtil = -1 }, "gpu-util"},
+		{"compute size too large", func(o *ContainerCreateOptions) { o.ComputeSize = 999 }, "compute-size"},
+		{"min replicas too large", func(o *ContainerCreateOptions) { o.MinReplicas = 99999 }, "min-replicas"},
+		{"max replicas too large", func(o *ContainerCreateOptions) { o.MinReplicas = 0; o.MaxReplicas = 99999 }, "max-replicas"},
+		{"concurrency too large", func(o *ContainerCreateOptions) { o.Concurrency = 99999 }, "concurrency"},
+		{"request ttl too long", func(o *ContainerCreateOptions) { o.RequestTTL = 365 * 24 * time.Hour }, "request-ttl"},
+		{"scale up delay too long", func(o *ContainerCreateOptions) { o.ScaleUpDelay = 365 * 24 * time.Hour }, "scale-up-delay"},
+		{"scale down delay too long", func(o *ContainerCreateOptions) { o.ScaleDownDelay = 365 * 24 * time.Hour }, "scale-down-delay"},
+		{"bad env format", func(o *ContainerCreateOptions) { o.Env = []string{"nope"} }, "KEY=VALUE"},
+		{"bad secret mount", func(o *ContainerCreateOptions) { o.SecretMounts = []string{"nope"} }, "SECRET:MOUNT_PATH"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			opts := validOpts()
 			tc.mutate(opts)
-			_, err := opts.request()
+			_, err := opts.Request()
 			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 				t.Fatalf("expected error containing %q, got %v", tc.wantErr, err)
 			}
@@ -283,7 +283,7 @@ func TestContainerCreate_AgentMode_NoCredsReturnsMissingFlags(t *testing.T) {
 	cmd := &cobra.Command{}
 	cmd.SetContext(context.Background())
 
-	err := runContainerCreate(cmd, f, ioStreams, &containerCreateOptions{})
+	err := runContainerCreate(cmd, f, ioStreams, &ContainerCreateOptions{})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -302,7 +302,7 @@ func TestContainerCreate_AgentMode_NoCredsReturnsMissingFlags(t *testing.T) {
 func TestContainerRequest_HealthcheckPortOverride(t *testing.T) {
 	opts := validOpts()
 	opts.HealthcheckPort = 9090
-	req, err := opts.request()
+	req, err := opts.Request()
 	if err != nil {
 		t.Fatalf("request: %v", err)
 	}
@@ -319,7 +319,7 @@ func TestContainerRequest_Entrypoint(t *testing.T) {
 	opts := validOpts()
 	opts.Entrypoint = []string{"/bin/sh", "-c"}
 	opts.Cmd = []string{"serve"}
-	req, err := opts.request()
+	req, err := opts.Request()
 	if err != nil {
 		t.Fatalf("request: %v", err)
 	}
@@ -338,7 +338,7 @@ func TestContainerRequest_Entrypoint(t *testing.T) {
 func TestContainerRequest_EntrypointOnly(t *testing.T) {
 	opts := validOpts()
 	opts.Entrypoint = []string{"/app/run"}
-	req, err := opts.request()
+	req, err := opts.Request()
 	if err != nil {
 		t.Fatalf("request: %v", err)
 	}
@@ -357,7 +357,7 @@ func TestContainerRequest_EntrypointOnly(t *testing.T) {
 func TestContainerRequest_CmdOnly(t *testing.T) {
 	opts := validOpts()
 	opts.Cmd = []string{"python", "main.py"}
-	req, err := opts.request()
+	req, err := opts.Request()
 	if err != nil {
 		t.Fatalf("request: %v", err)
 	}
@@ -376,7 +376,7 @@ func TestContainerRequest_CmdOnly(t *testing.T) {
 func TestContainerRequest_SecretMounts(t *testing.T) {
 	opts := validOpts()
 	opts.SecretMounts = []string{"api-key:/etc/secret/key"}
-	req, err := opts.request()
+	req, err := opts.Request()
 	if err != nil {
 		t.Fatalf("request: %v", err)
 	}
@@ -395,7 +395,7 @@ func TestContainerRequest_SecretMounts(t *testing.T) {
 func TestContainerRequest_SecretMountBadFormat(t *testing.T) {
 	opts := validOpts()
 	opts.SecretMounts = []string{"no-colon"}
-	_, err := opts.request()
+	_, err := opts.Request()
 	if err == nil || !strings.Contains(err.Error(), "SECRET:MOUNT_PATH") {
 		t.Fatalf("expected SECRET:MOUNT_PATH error, got %v", err)
 	}
@@ -404,7 +404,7 @@ func TestContainerRequest_SecretMountBadFormat(t *testing.T) {
 func TestContainerRequest_EnvSecretOnly(t *testing.T) {
 	opts := validOpts()
 	opts.EnvSecret = []string{"TOKEN=my-secret"}
-	req, err := opts.request()
+	req, err := opts.Request()
 	if err != nil {
 		t.Fatalf("request: %v", err)
 	}
@@ -420,7 +420,7 @@ func TestContainerRequest_EnvSecretOnly(t *testing.T) {
 func TestContainerRequest_EnvBadFormat(t *testing.T) {
 	opts := validOpts()
 	opts.Env = []string{"BADFORMAT"}
-	_, err := opts.request()
+	_, err := opts.Request()
 	if err == nil || !strings.Contains(err.Error(), "KEY=VALUE") {
 		t.Fatalf("expected KEY=VALUE error, got %v", err)
 	}
@@ -431,7 +431,7 @@ func TestContainerRequest_CostSaverVariants(t *testing.T) {
 		t.Run(alias, func(t *testing.T) {
 			opts := validOpts()
 			opts.QueuePreset = alias
-			req, err := opts.request()
+			req, err := opts.Request()
 			if err != nil {
 				t.Fatalf("request: %v", err)
 			}
@@ -447,7 +447,7 @@ func TestContainerRequest_ScaleDelays(t *testing.T) {
 	opts := validOpts()
 	opts.ScaleUpDelay = 10 * time.Second
 	opts.ScaleDownDelay = 60 * time.Second
-	req, err := opts.request()
+	req, err := opts.Request()
 	if err != nil {
 		t.Fatalf("request: %v", err)
 	}

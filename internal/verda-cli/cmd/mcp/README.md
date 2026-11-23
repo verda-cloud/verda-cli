@@ -37,12 +37,31 @@ Credentials are shared with the CLI — run `verda auth login` first in the same
 | `create_volume` | **yes, billing** — `confirm:true` required | `name`, `size_gb`, `confirm` (required); `type`, `location` |
 | `create_vm` | **yes, billing** — `confirm:true` required | `instance_type`, `image`, `hostname`, `confirm` (required); `location`, `description`, `os_volume_size_gb`, `ssh_key_ids`, `startup_script_id`, `spot`, `storage_size_gb`, `storage_type`, `wait` (default true) |
 | `vm_action` | **action-dependent** | `id`, `action` (required); `confirm`, `wait` |
+| `list_serverless_compute` | no | — |
+| `list_registry_credentials` | no | — (names only) |
+| `list_secrets` | no | `kind` (`env`/`file`/`all`; names only, never values) |
+| `delete_secret`, `delete_file_secret`, `delete_registry_credentials` | **yes, destructive** — `confirm:true` required | `name`, `confirm` (required); `force` |
+| `list_containers` | no | `status` (exact, case-insensitive; reads one status per row) |
+| `describe_container` | no | `name` (required) |
+| `list_container_replicas` | no | `name` (required) |
+| `create_container` | **yes, billing** — `confirm:true` required | `name`, `image`, `compute`, `confirm` (required); `compute_size`, `spot`, `port`, `registry_credentials`, `healthcheck_off`, `healthcheck_path`, `healthcheck_port`, `env[]`, `env_secrets[]`, `entrypoint[]`, `cmd[]`, `secret_mounts[]`, `min_replicas`, `max_replicas`, `concurrency`, `queue_preset`, `queue_load`, `cpu_util`, `gpu_util`, `scale_up_delay_seconds`, `scale_down_delay_seconds`, `request_ttl_seconds` |
+| `container_action` | **action-dependent** | `name`, `action` (`pause`/`resume`/`restart`/`purge_queue`/`delete`; required); `confirm`, `wait`, `timeout_ms` (delete) |
+| `scale_container` | **yes, billing** — `confirm:true` required | `name`, `confirm` (required); `min_replicas`, `max_replicas`, `concurrency`, `queue_preset`, `queue_load`, `cpu_util`, `gpu_util`, `scale_up_delay_seconds`, `scale_down_delay_seconds`, `request_ttl_seconds`, `wait`, `wait_timeout_seconds` |
+| `get_container_env` | no | `name` (required) |
+| `set_container_env` | yes (in place) | `name` (required); `env[]`, `env_secrets[]` (at least one) |
+| `unset_container_env` | **yes, destructive** — `confirm:true` required | `name`, `keys[]`, `confirm` (required) |
+| `list_batchjobs` | no | — |
+| `describe_batchjob` | no | `name` (required) |
+| `create_batchjob` | **yes, billing** — `confirm:true` required | `name`, `image`, `compute`, `deadline_seconds`, `confirm` (required); `compute_size`, `port`, `registry_credentials`, `env[]`, `env_secrets[]`, `entrypoint[]`, `cmd[]`, `secret_mounts[]`, `max_replicas`, `request_ttl_seconds` |
+| `batchjob_action` | **action-dependent** | `name`, `action` (`pause`/`resume`/`purge_queue`/`delete`; required); `confirm`, `wait`, `timeout_ms` (delete) |
 
 Hibernate is deprecated and will be removed in a future version. It discontinues compute and retains volumes. Retained volumes continue billing.
 
+Serverless arguments use the CLI's vocabulary with underscores: env vars are `KEY=VALUE` / `KEY=SECRET_NAME` strings, secret mounts are `SECRET:/path`, durations are whole seconds (`*_seconds`). The create tools build their request through the same `cmd/serverless` code as `verda container create` / `verda batchjob create`, so the scratch `/data` mount, the `:latest` rejection, the queue presets (`instant`=1, `balanced`=3, `cost-saver`=6) and the defaults are identical on both surfaces.
+
 ## Confirmation contract
 
-Tools that create billed resources (`create_vm`, `create_volume`) or perform destructive actions (`vm_action` with `shutdown`, `force_shutdown`, `hibernate` (deprecated), `delete`) require the boolean argument `confirm: true`. This mirrors `--yes` in the CLI's `--agent` mode.
+Tools that create billed resources (`create_vm`, `create_volume`, `create_container`, `create_batchjob`, `scale_container`) or perform destructive actions (`vm_action` with `shutdown`, `force_shutdown`, `hibernate` (deprecated), `delete`; `container_action` with `restart`, `purge_queue`, `delete`; `batchjob_action` with `purge_queue`, `delete`; `unset_container_env`; `delete_secret`, `delete_file_secret`, `delete_registry_credentials`) require the boolean argument `confirm: true`. This mirrors `--yes` in the CLI's `--agent` mode: the gated set is exactly the set of CLI verbs that require `--yes` there (`pause`, `resume` and `env set` are gated on neither surface).
 
 Without it, the tool fails with `isError: true` and a JSON payload following the CLI agent-error envelope (see [docs/agent-errors.md](../../../docs/agent-errors.md)):
 
@@ -59,6 +78,18 @@ Without it, the tool fails with `isError: true` and a JSON payload following the
 With `wait: true`, the tool polls the instance (up to 5 minutes) until it reaches the action's expected status (`start`→running, `shutdown`/`force_shutdown`/`hibernate`→offline) and then reports `status: "completed"` plus `instance_status`. A failed transition (instance enters `error`) is a tool error, not a success. `delete` is not polled and always returns `accepted`.
 
 `create_vm` keeps `wait: true` as its default and blocks until the instance is `running`; on poll failure it returns the instance plus `poll_error`/`poll_timed_out` fields.
+
+### Serverless
+
+- `container_action` / `batchjob_action` report `accepted` by default. `wait: true` polls the deployment status (up to 5 minutes) only for `pause` (→ `paused`) and `resume` (→ `healthy`) and reports `completed` plus `deployment_status`. `restart` and `purge_queue` have no observable target and always return `accepted`.
+- `delete` passes `timeout_ms` to the API, which waits server-side (default 60 s, max 300 s) before answering; the tool reports `completed` on success. With `timeout_ms: 0` the API returns at once and the tool reports `accepted`. The call is bounded by that wait plus a margin, not by `--timeout`.
+- `create_container` / `create_batchjob` do not wait: they return the deployment plus its first status read (typically `initializing`). A `min_replicas: 0` deployment may never report `healthy`, so there is nothing to wait for.
+- `scale_container` reports `accepted` with `previous` and `expected`; reads lag writes by 5-20 s. `wait: true` polls until reads show every field that was sent and reports `completed` plus `current`; a wait failure keeps `accepted` and adds `wait_error` (the change is not rolled back). `completed` means the settings show in reads, not that replicas are ready (`list_container_replicas`).
+- `set_container_env` / `unset_container_env` return the variables as re-read after the write (`env`), not an echo of the input, plus `added`/`updated`/`removed` counts.
+
+## Secrets
+
+No tool returns a secret value and no tool creates a secret or registry credentials: that would put the value in the agent transcript. `list_secrets` and `list_registry_credentials` return names and metadata; creation is `verda container secret create`, `file-secret create`, `registry-creds create` or the web console. Plain `env` values are visible to anyone who can describe the deployment, exactly as with `verda container describe -o json`; `env_secrets` shows only the secret name.
 
 ## Argument typing
 
@@ -78,4 +109,10 @@ mcp-go does not validate arguments against the declared schema. All handlers typ
 - `tools_vm.go` — VM list/describe/create/action; `vmActions` table mirrors `cmd/vm/action.go`
 - `tools_ssh.go` — SSH key list/add, ssh command construction
 - `tools_volume.go` — volume list/create/trash
-- `server_test.go` — strict helper + envelope tests; `lazy_init_test.go` — concurrent-init race repro (`-race`); `tools_test.go` — handler tests against `tests/contract/mockapi`
+- `tools_serverless.go` — shared serverless plumbing: `argReader`, `serverlessArgError` (CLI flag → MCP argument names), status polling
+- `tools_serverless_catalog.go` — compute resources, secrets, registry credentials (list + gated delete)
+- `tools_container.go` — container list/describe/replicas/create/action; `containerActions` mirrors `cmd/serverless/container_actions.go`
+- `tools_container_scale.go` — `scale_container` on the cobra-free `cmd/serverless/scaling` package
+- `tools_container_env.go` — env get/set/unset keyed on the inner container via `serverless.ContainerNameOf`
+- `tools_batchjob.go` — batch-job list/describe/create/action
+- `server_test.go` — strict helper + envelope tests; `lazy_init_test.go` — concurrent-init race repro (`-race`); `tools_test.go` and `tools_*_test.go` — handler tests against `tests/contract/mockapi`

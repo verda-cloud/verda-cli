@@ -27,8 +27,8 @@ import (
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
 
-func validJobOpts() *batchjobCreateOptions {
-	return &batchjobCreateOptions{
+func validJobOpts() *BatchjobCreateOptions {
+	return &BatchjobCreateOptions{
 		Name:        "nightly-embed",
 		Image:       "ghcr.io/org/embedder:v1",
 		Compute:     "RTX4500Ada",
@@ -42,7 +42,7 @@ func validJobOpts() *batchjobCreateOptions {
 
 func TestBatchjobRequest_HappyPath(t *testing.T) {
 	opts := validJobOpts()
-	req, err := opts.request()
+	req, err := opts.Request()
 	if err != nil {
 		t.Fatalf("request: %v", err)
 	}
@@ -63,7 +63,7 @@ func TestBatchjobRequest_HappyPath(t *testing.T) {
 func TestBatchjobRequest_RejectsLatest(t *testing.T) {
 	opts := validJobOpts()
 	opts.Image = "nginx:latest"
-	_, err := opts.request()
+	_, err := opts.Request()
 	if err == nil || !strings.Contains(err.Error(), "latest") {
 		t.Fatalf("expected :latest rejection, got %v", err)
 	}
@@ -72,14 +72,14 @@ func TestBatchjobRequest_RejectsLatest(t *testing.T) {
 func TestBatchjobRequest_RequiresDeadline(t *testing.T) {
 	opts := validJobOpts()
 	opts.Deadline = 0
-	_, err := opts.request()
+	_, err := opts.Request()
 	if err == nil || !strings.Contains(err.Error(), "deadline") {
 		t.Fatalf("expected deadline error, got %v", err)
 	}
 }
 
 func TestBatchjobMissingFlags(t *testing.T) {
-	opts := &batchjobCreateOptions{}
+	opts := &BatchjobCreateOptions{}
 	missing := missingBatchjobCreateFlags(opts)
 	want := []string{"--name", "--image", "--compute", "--deadline"}
 	if len(missing) != len(want) {
@@ -101,7 +101,7 @@ func TestBatchjobCreate_AgentMode_NoCredsReturnsMissingFlags(t *testing.T) {
 	cmd := &cobra.Command{}
 	cmd.SetContext(context.Background())
 
-	err := runBatchjobCreate(cmd, f, ioStreams, &batchjobCreateOptions{})
+	err := runBatchjobCreate(cmd, f, ioStreams, &BatchjobCreateOptions{})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -120,28 +120,28 @@ func TestBatchjobCreate_AgentMode_NoCredsReturnsMissingFlags(t *testing.T) {
 func TestBatchjobRequest_ValidationErrors(t *testing.T) {
 	cases := []struct {
 		name    string
-		mutate  func(*batchjobCreateOptions)
+		mutate  func(*BatchjobCreateOptions)
 		wantErr string
 	}{
-		{"empty name", func(o *batchjobCreateOptions) { o.Name = "" }, "required"},
-		{"invalid name", func(o *batchjobCreateOptions) { o.Name = "My_Endpoint" }, "lowercase"},
-		{"latest tag", func(o *batchjobCreateOptions) { o.Image = "nginx:latest" }, "latest"},
-		{"zero compute size", func(o *batchjobCreateOptions) { o.ComputeSize = 0 }, "compute-size"},
-		{"zero max replicas", func(o *batchjobCreateOptions) { o.MaxReplicas = 0 }, "max-replicas"},
-		{"bad port", func(o *batchjobCreateOptions) { o.Port = 99999 }, "port"},
-		{"deadline too short", func(o *batchjobCreateOptions) { o.Deadline = 1 * time.Second }, "between"},
-		{"deadline too long", func(o *batchjobCreateOptions) { o.Deadline = 8 * 24 * time.Hour }, "between"},
-		{"compute size too large", func(o *batchjobCreateOptions) { o.ComputeSize = 999 }, "compute-size"},
-		{"max replicas too large", func(o *batchjobCreateOptions) { o.MaxReplicas = 99999 }, "max-replicas"},
-		{"request ttl too long", func(o *batchjobCreateOptions) { o.RequestTTL = 8 * 24 * time.Hour }, "request-ttl"},
-		{"bad env format", func(o *batchjobCreateOptions) { o.Env = []string{"bad"} }, "KEY=VALUE"},
-		{"bad secret mount", func(o *batchjobCreateOptions) { o.SecretMounts = []string{"no-colon"} }, "SECRET:MOUNT_PATH"},
+		{"empty name", func(o *BatchjobCreateOptions) { o.Name = "" }, "required"},
+		{"invalid name", func(o *BatchjobCreateOptions) { o.Name = "My_Endpoint" }, "lowercase"},
+		{"latest tag", func(o *BatchjobCreateOptions) { o.Image = "nginx:latest" }, "latest"},
+		{"zero compute size", func(o *BatchjobCreateOptions) { o.ComputeSize = 0 }, "compute-size"},
+		{"zero max replicas", func(o *BatchjobCreateOptions) { o.MaxReplicas = 0 }, "max-replicas"},
+		{"bad port", func(o *BatchjobCreateOptions) { o.Port = 99999 }, "port"},
+		{"deadline too short", func(o *BatchjobCreateOptions) { o.Deadline = 1 * time.Second }, "between"},
+		{"deadline too long", func(o *BatchjobCreateOptions) { o.Deadline = 8 * 24 * time.Hour }, "between"},
+		{"compute size too large", func(o *BatchjobCreateOptions) { o.ComputeSize = 999 }, "compute-size"},
+		{"max replicas too large", func(o *BatchjobCreateOptions) { o.MaxReplicas = 99999 }, "max-replicas"},
+		{"request ttl too long", func(o *BatchjobCreateOptions) { o.RequestTTL = 8 * 24 * time.Hour }, "request-ttl"},
+		{"bad env format", func(o *BatchjobCreateOptions) { o.Env = []string{"bad"} }, "KEY=VALUE"},
+		{"bad secret mount", func(o *BatchjobCreateOptions) { o.SecretMounts = []string{"no-colon"} }, "SECRET:MOUNT_PATH"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			opts := validJobOpts()
 			tc.mutate(opts)
-			_, err := opts.request()
+			_, err := opts.Request()
 			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 				t.Fatalf("expected error containing %q, got %v", tc.wantErr, err)
 			}
@@ -153,7 +153,7 @@ func TestBatchjobRequest_Entrypoint(t *testing.T) {
 	opts := validJobOpts()
 	opts.Entrypoint = []string{"/bin/sh", "-c"}
 	opts.Cmd = []string{"train"}
-	req, err := opts.request()
+	req, err := opts.Request()
 	if err != nil {
 		t.Fatalf("request: %v", err)
 	}
@@ -172,7 +172,7 @@ func TestBatchjobRequest_Entrypoint(t *testing.T) {
 func TestBatchjobRequest_RegistryCreds(t *testing.T) {
 	opts := validJobOpts()
 	opts.RegistryCreds = "my-ghcr"
-	req, err := opts.request()
+	req, err := opts.Request()
 	if err != nil {
 		t.Fatalf("request: %v", err)
 	}
@@ -189,7 +189,7 @@ func TestBatchjobRequest_EnvMix(t *testing.T) {
 	opts := validJobOpts()
 	opts.Env = []string{"HF_HOME=/data/.hf"}
 	opts.EnvSecret = []string{"TOKEN=my-secret"}
-	req, err := opts.request()
+	req, err := opts.Request()
 	if err != nil {
 		t.Fatalf("request: %v", err)
 	}
@@ -208,7 +208,7 @@ func TestBatchjobRequest_EnvMix(t *testing.T) {
 func TestBatchjobRequest_SecretMounts(t *testing.T) {
 	opts := validJobOpts()
 	opts.SecretMounts = []string{"api-key:/etc/secret/key"}
-	req, err := opts.request()
+	req, err := opts.Request()
 	if err != nil {
 		t.Fatalf("request: %v", err)
 	}

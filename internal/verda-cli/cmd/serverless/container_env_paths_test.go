@@ -537,18 +537,18 @@ func TestEnvVarsOf(t *testing.T) {
 	t.Parallel()
 	a := []verda.ContainerEnvVar{{Name: "A"}}
 	b := []verda.ContainerEnvVar{{Name: "B"}}
-	groups := []envVarGroup{{ContainerName: "x-0", Env: a}, {ContainerName: "y-0", Env: b}}
+	groups := []EnvVarGroup{{ContainerName: "x-0", Env: a}, {ContainerName: "y-0", Env: b}}
 
-	if got := envVarsOf(nil, "x-0"); got != nil {
+	if got := EnvVarsOf(nil, "x-0"); got != nil {
 		t.Errorf("no groups: want nil, got %v", got)
 	}
-	if got := envVarsOf(groups, "x-0"); len(got) != 1 || got[0].Name != "A" {
+	if got := EnvVarsOf(groups, "x-0"); len(got) != 1 || got[0].Name != "A" {
 		t.Errorf("first group: want A, got %v", got)
 	}
-	if got := envVarsOf(groups, "y-0"); len(got) != 1 || got[0].Name != "B" {
+	if got := EnvVarsOf(groups, "y-0"); len(got) != 1 || got[0].Name != "B" {
 		t.Errorf("named group: want B, got %v", got)
 	}
-	if got := envVarsOf(groups, "z-0"); got != nil {
+	if got := EnvVarsOf(groups, "z-0"); got != nil {
 		t.Errorf("unknown container: want nil, got %v", got)
 	}
 }

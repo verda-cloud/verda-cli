@@ -24,6 +24,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -66,29 +67,44 @@ const (
 type Server struct {
 	srv *httptest.Server
 
-	mu             sync.Mutex
-	instances      map[string]*verda.Instance
-	volumes        map[string]*verda.Volume
-	sshKeys        map[string]*verda.SSHKey
-	containers     map[string]*containerFixture
-	scalingPatches []map[string]any
-	scalingReadLag int
-	failures       map[string]int // exact path -> HTTP status override
-	hangs          map[string]bool
-	forceFormToken bool
-	instanceGets   int // GET /instances/{id} count — status polling signal
-	idSeq          int
+	mu              sync.Mutex
+	instances       map[string]*verda.Instance
+	volumes         map[string]*verda.Volume
+	sshKeys         map[string]*verda.SSHKey
+	containers      map[string]*containerFixture
+	jobs            map[string]*jobFixture
+	secrets         map[string]verda.Secret
+	fileSecrets     map[string]verda.FileSecret
+	registryCreds   map[string]verda.RegistryCredentials
+	computes        []verda.ComputeResource
+	containerBodies []map[string]any // POST /container-deployments bodies, in order
+	jobBodies       []map[string]any // POST /job-deployments bodies, in order
+	deleteQueries   []string         // DELETE query strings (deployments, jobs, secrets), in order
+	requestCounts   map[string]int   // "METHOD /path" -> served requests
+	scalingPatches  []map[string]any
+	scalingReadLag  int
+	failures        map[string]int // exact path -> HTTP status override
+	hangs           map[string]bool
+	forceFormToken  bool
+	instanceGets    int // GET /instances/{id} count — status polling signal
+	idSeq           int
 }
 
 // New starts a mock API server. The caller is responsible for Close.
 func New() *Server {
 	s := &Server{
-		instances:  map[string]*verda.Instance{},
-		volumes:    map[string]*verda.Volume{},
-		sshKeys:    map[string]*verda.SSHKey{},
-		containers: map[string]*containerFixture{},
-		failures:   map[string]int{},
-		hangs:      map[string]bool{},
+		instances:     map[string]*verda.Instance{},
+		volumes:       map[string]*verda.Volume{},
+		sshKeys:       map[string]*verda.SSHKey{},
+		containers:    map[string]*containerFixture{},
+		jobs:          map[string]*jobFixture{},
+		secrets:       map[string]verda.Secret{},
+		fileSecrets:   map[string]verda.FileSecret{},
+		registryCreds: map[string]verda.RegistryCredentials{},
+		computes:      defaultComputeResources(),
+		requestCounts: map[string]int{},
+		failures:      map[string]int{},
+		hangs:         map[string]bool{},
 	}
 
 	mux := http.NewServeMux()
@@ -112,6 +128,8 @@ func New() *Server {
 	mux.HandleFunc("GET /instance-availability/{type}", s.handleTypeAvailability)
 	mux.HandleFunc("GET /balance", s.handleBalance)
 	s.registerContainerRoutes(mux)
+	s.registerJobRoutes(mux)
+	s.registerServerlessCatalogRoutes(mux)
 	mux.HandleFunc("/", s.handleNotFound)
 
 	s.srv = httptest.NewServer(s.guard(mux))
@@ -130,6 +148,14 @@ func (s *Server) FailRoute(path string, status int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.failures[path] = status
+}
+
+// FailMethod is FailRoute for one method only ("PATCH" on a path whose GET
+// must keep working), so a write can fail after a successful pre-read.
+func (s *Server) FailMethod(method, path string, status int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.failures[method+" "+path] = status
 }
 
 // HangRoute makes requests to exact path block until the client cancels
@@ -226,7 +252,11 @@ func (s *Server) InstanceGetCount() int {
 func (s *Server) guard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
+		s.requestCounts[r.Method+" "+r.URL.Path]++
 		status, fail := s.failures[r.URL.Path]
+		if ms, ok := s.failures[r.Method+" "+r.URL.Path]; ok {
+			status, fail = ms, true
+		}
 		hang := s.hangs[r.URL.Path]
 		s.mu.Unlock()
 		if hang {
@@ -720,4 +750,21 @@ func writeError(w http.ResponseWriter, status int, message string) {
 		Code:       strings.ToUpper(strings.ReplaceAll(http.StatusText(status), " ", "_")),
 		Message:    message,
 	})
+}
+
+// RequestCount returns how many requests the mock has served for an exact
+// "METHOD /path" (query string excluded) — the zero-side-effects check for a
+// refused confirm gate, and the wire-level signal of status polling.
+func (s *Server) RequestCount(method, path string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.requestCounts[method+" "+path]
+}
+
+// DeleteQueries returns the raw query string of every DELETE the serverless
+// routes served, in order ("timeout=0", "force=true", "" when none).
+func (s *Server) DeleteQueries() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.deleteQueries)
 }

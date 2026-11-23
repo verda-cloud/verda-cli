@@ -30,11 +30,11 @@ import (
 
 const envValueMasked = "***"
 
-// containerNameOf: the env endpoints key `container_name` on the container
+// ContainerNameOf: the env endpoints key `container_name` on the container
 // inside the deployment (the API names it "<deployment>-0"), not on the
 // deployment; sending the deployment name returns not_found. Multi-container
 // deployments always target Containers[0]; count is the deployment's size.
-func containerNameOf(ctx context.Context, client *verda.Client, deployment string) (name string, count int, err error) {
+func ContainerNameOf(ctx context.Context, client *verda.Client, deployment string) (name string, count int, err error) {
 	d, err := client.ContainerDeployments.GetDeploymentByName(ctx, deployment)
 	if err != nil {
 		return "", 0, err
@@ -45,59 +45,77 @@ func containerNameOf(ctx context.Context, client *verda.Client, deployment strin
 	return d.Containers[0].Name, len(d.Containers), nil
 }
 
-// envVarGroup is one element of the GET environment-variables response,
+// EnvVarGroup is one element of the GET environment-variables response,
 // which is grouped per container (GetDeploymentEnvVariablesPublicApiResponseDto).
-type envVarGroup struct {
+type EnvVarGroup struct {
 	ContainerName string                  `json:"container_name"`
 	Env           []verda.ContainerEnvVar `json:"env"`
 }
 
-// fetchEnvVars reads the grouped response directly. SDK v1.9.0's
+// FetchEnvVars reads the grouped response directly. SDK v1.9.0's
 // GetEnvironmentVariables decodes it as a flat []ContainerEnvVar, which
 // yields one blank entry per container; drop this once the SDK returns groups.
-func fetchEnvVars(ctx context.Context, client *verda.Client, deployment string) ([]envVarGroup, error) {
+func FetchEnvVars(ctx context.Context, client *verda.Client, deployment string) ([]EnvVarGroup, error) {
 	req, err := client.NewRequest(ctx, http.MethodGet, "/container-deployments/"+url.PathEscape(deployment)+"/environment-variables", nil)
 	if err != nil {
 		return nil, err
 	}
-	var groups []envVarGroup
+	var groups []EnvVarGroup
 	if _, err := client.Do(req, &groups); err != nil {
 		return nil, err
 	}
 	return groups, nil
 }
 
-// envTarget: the container every env command keys on and its current
+// EnvTarget: the container every env command keys on and its current
 // variables. list, set and unset all resolve it the same way so they never
 // disagree on which container a multi-container deployment means.
-type envTarget struct {
+type EnvTarget struct {
 	Container  string
 	Containers int
 	Vars       []verda.ContainerEnvVar
 }
 
-func loadEnvTarget(ctx context.Context, client *verda.Client, deployment string) (*envTarget, error) {
-	cn, count, err := containerNameOf(ctx, client, deployment)
+// LoadEnvTarget resolves the inner container and reads its variables.
+func LoadEnvTarget(ctx context.Context, client *verda.Client, deployment string) (*EnvTarget, error) {
+	cn, count, err := ContainerNameOf(ctx, client, deployment)
 	if err != nil {
 		return nil, err
 	}
-	groups, err := fetchEnvVars(ctx, client, deployment)
+	groups, err := FetchEnvVars(ctx, client, deployment)
 	if err != nil {
 		return nil, err
 	}
-	return &envTarget{Container: cn, Containers: count, Vars: envVarsOf(groups, cn)}, nil
+	return &EnvTarget{Container: cn, Containers: count, Vars: EnvVarsOf(groups, cn)}, nil
 }
 
-// envVarsOf: the variables of container. The deployment GET and the env GET
+// EnvVarsOf: the variables of container. The deployment GET and the env GET
 // are separate reads, so the container may be missing from the groups (no
 // vars yet, or a lagging read): that is empty, not an error.
-func envVarsOf(groups []envVarGroup, container string) []verda.ContainerEnvVar {
+func EnvVarsOf(groups []EnvVarGroup, container string) []verda.ContainerEnvVar {
 	for i := range groups {
 		if groups[i].ContainerName == container {
 			return groups[i].Env
 		}
 	}
 	return nil
+}
+
+// PartitionEnvVars splits vars by name: existing ones are updated (PATCH), the
+// rest are added (POST). The API rejects a POST for a name that already exists.
+func PartitionEnvVars(current, vars []verda.ContainerEnvVar) (toAdd, toUpdate []verda.ContainerEnvVar) {
+	existing := make(map[string]bool, len(current))
+	for i := range current {
+		existing[current[i].Name] = true
+	}
+	for i := range vars {
+		if existing[vars[i].Name] {
+			toUpdate = append(toUpdate, vars[i])
+		} else {
+			toAdd = append(toAdd, vars[i])
+		}
+	}
+	return toAdd, toUpdate
 }
 
 func newCmdContainerEnv(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
@@ -146,8 +164,8 @@ func newCmdEnvList(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Comman
 			ctx, cancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
 			defer cancel()
 
-			target, err := cmdutil.WithSpinner(ctx, f.Status(), "Fetching environment variables...", func(ctx context.Context) (*envTarget, error) {
-				return loadEnvTarget(ctx, client, name)
+			target, err := cmdutil.WithSpinner(ctx, f.Status(), "Fetching environment variables...", func(ctx context.Context) (*EnvTarget, error) {
+				return LoadEnvTarget(ctx, client, name)
 			})
 			if err != nil {
 				return err
@@ -224,7 +242,7 @@ func newCmdEnvSet(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 				return nil
 			}
 
-			newVars, err := buildEnvVars(envPlain, envSecret)
+			newVars, err := BuildEnvVars(envPlain, envSecret)
 			if err != nil {
 				return err
 			}
@@ -236,27 +254,14 @@ func newCmdEnvSet(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command
 			ctx, cancel := context.WithTimeout(cmd.Context(), f.Options().Timeout)
 			defer cancel()
 
-			target, err := cmdutil.WithSpinner(ctx, f.Status(), "Fetching current variables...", func(ctx context.Context) (*envTarget, error) {
-				return loadEnvTarget(ctx, client, name)
+			target, err := cmdutil.WithSpinner(ctx, f.Status(), "Fetching current variables...", func(ctx context.Context) (*EnvTarget, error) {
+				return LoadEnvTarget(ctx, client, name)
 			})
 			if err != nil {
 				return err
 			}
-			containerName, current := target.Container, target.Vars
-
-			existing := make(map[string]bool, len(current))
-			for _, v := range current {
-				existing[v.Name] = true
-			}
-
-			var toAdd, toUpdate []verda.ContainerEnvVar
-			for i := range newVars {
-				if existing[newVars[i].Name] {
-					toUpdate = append(toUpdate, newVars[i])
-				} else {
-					toAdd = append(toAdd, newVars[i])
-				}
-			}
+			containerName := target.Container
+			toAdd, toUpdate := PartitionEnvVars(target.Vars, newVars)
 
 			if len(toAdd) > 0 {
 				req := &verda.ContainerEnvVarsRequest{ContainerName: containerName, Env: toAdd}
@@ -348,7 +353,7 @@ func newCmdEnvUnset(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Comma
 			defer cancel()
 
 			containerName, err := cmdutil.WithSpinner(ctx, f.Status(), "Loading deployment...", func(ctx context.Context) (string, error) {
-				cn, _, err := containerNameOf(ctx, client, deployment)
+				cn, _, err := ContainerNameOf(ctx, client, deployment)
 				return cn, err
 			})
 			if err != nil {

@@ -26,7 +26,7 @@ import (
 // renderContainerSummary prints a human-readable review card before the final
 // deploy confirmation. The cost section shows a scale-to-zero range when min
 // replicas is 0 — the lower bound is $0 regardless of compute choice.
-func renderContainerSummary(w io.Writer, opts *containerCreateOptions) {
+func renderContainerSummary(w io.Writer, opts *ContainerCreateOptions) {
 	label := lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Bold(true)
 	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 	header := lipgloss.NewStyle().Foreground(lipgloss.Color("5")).Bold(true)
@@ -93,7 +93,7 @@ func renderContainerSummary(w io.Writer, opts *containerCreateOptions) {
 // Smaller review card — no spot, no scaling triggers, no concurrency, no
 // healthcheck — but calls out the deadline prominently since it's the one
 // batchjob-only field.
-func renderBatchjobSummary(w io.Writer, opts *batchjobCreateOptions) {
+func renderBatchjobSummary(w io.Writer, opts *BatchjobCreateOptions) {
 	label := lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Bold(true)
 	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 	header := lipgloss.NewStyle().Foreground(lipgloss.Color("5")).Bold(true)

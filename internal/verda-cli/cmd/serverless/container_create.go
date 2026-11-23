@@ -30,10 +30,10 @@ import (
 
 // Queue-load presets map CLI names to ScalingTriggers.QueueLoad thresholds.
 const (
-	presetInstant   = "instant"
-	presetBalanced  = "balanced"
-	presetCostSaver = "cost-saver"
-	presetCustom    = "custom"
+	PresetInstant   = "instant"
+	PresetBalanced  = "balanced"
+	PresetCostSaver = "cost-saver"
+	PresetCustom    = "custom"
 
 	queueLoadInstant   = 1
 	queueLoadBalanced  = 3
@@ -50,20 +50,20 @@ const (
 	defaultRequestTTL      = 300 * time.Second
 )
 
-// queuePreset is a named queue-load threshold; presetCustom is not one.
+// queuePreset is a named queue-load threshold; PresetCustom is not one.
 type queuePreset struct {
 	name, label, description string
 	threshold                int
 }
 
 var queuePresets = []queuePreset{
-	{presetInstant, "Instant", "Scale up as soon as any request arrives. Minimizes time in queue.", queueLoadInstant},
-	{presetBalanced, "Balanced", "Short queue wait before scaling up. Good for most APIs.", queueLoadBalanced},
-	{presetCostSaver, "Cost saver", "Fewer replicas; requests may wait longer in queue.", queueLoadCostSaver},
+	{PresetInstant, "Instant", "Scale up as soon as any request arrives. Minimizes time in queue.", queueLoadInstant},
+	{PresetBalanced, "Balanced", "Short queue wait before scaling up. Good for most APIs.", queueLoadBalanced},
+	{PresetCostSaver, "Cost saver", "Fewer replicas; requests may wait longer in queue.", queueLoadCostSaver},
 }
 
-// containerCreateOptions holds flags/wizard state; request() builds the SDK payload.
-type containerCreateOptions struct {
+// ContainerCreateOptions holds flags/wizard state; Request() builds the SDK payload.
+type ContainerCreateOptions struct {
 	Name  string
 	Image string
 
@@ -99,18 +99,24 @@ type containerCreateOptions struct {
 	Yes bool
 }
 
-func newCmdContainerCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
-	opts := &containerCreateOptions{
+// NewContainerCreateOptions returns the CLI defaults; the MCP server starts from the same values.
+func NewContainerCreateOptions() *ContainerCreateOptions {
+	return &ContainerCreateOptions{
+		ComputeSize:     1,
 		Port:            defaultExposedPort,
 		HealthcheckPath: defaultHealthcheckPath,
 		MinReplicas:     0,
 		MaxReplicas:     defaultMaxReplicas,
 		Concurrency:     defaultConcurrency,
-		QueuePreset:     presetBalanced,
+		QueuePreset:     PresetBalanced,
 		ScaleUpDelay:    0,
 		ScaleDownDelay:  defaultScaleDownDelay,
 		RequestTTL:      defaultRequestTTL,
 	}
+}
+
+func newCmdContainerCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
+	opts := NewContainerCreateOptions()
 
 	cmd := &cobra.Command{
 		Use:   "create",
@@ -184,7 +190,7 @@ func newCmdContainerCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobr
 	return cmd
 }
 
-func runContainerCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *containerCreateOptions) error {
+func runContainerCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *ContainerCreateOptions) error {
 	// In --agent, validate required flags before VerdaClient() so MISSING_REQUIRED_FLAGS beats auth errors.
 	if f.AgentMode() {
 		if missing := missingContainerCreateFlags(opts); len(missing) > 0 {
@@ -201,7 +207,7 @@ func runContainerCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil
 		return err
 	}
 
-	req, err := opts.request()
+	req, err := opts.Request()
 	if err != nil {
 		return cmdutil.UsageErrorf(cmd, "%v", err)
 	}
@@ -241,14 +247,14 @@ func runContainerCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil
 }
 
 // runContainerWizard runs the interactive create flow into opts.
-func runContainerWizard(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *containerCreateOptions) error {
+func runContainerWizard(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *ContainerCreateOptions) error {
 	flow := buildContainerCreateFlow(ctx, f.VerdaClient, opts)
 	engine := wizard.NewEngine(f.Prompter(), f.Status(),
 		wizard.WithOutput(ioStreams.ErrOut))
 	return engine.Run(ctx, flow)
 }
 
-func missingContainerCreateFlags(opts *containerCreateOptions) []string {
+func missingContainerCreateFlags(opts *ContainerCreateOptions) []string {
 	var missing []string
 	if opts.Name == "" {
 		missing = append(missing, "--name")
@@ -262,8 +268,8 @@ func missingContainerCreateFlags(opts *containerCreateOptions) []string {
 	return missing
 }
 
-// validate checks opts; request() performs assembly and SDK validation.
-func (o *containerCreateOptions) validate() error {
+// validate checks opts; Request() performs assembly and SDK validation.
+func (o *ContainerCreateOptions) validate() error {
 	if err := validateDeploymentName(o.Name); err != nil {
 		return err
 	}
@@ -304,17 +310,17 @@ func (o *containerCreateOptions) validate() error {
 }
 
 // request builds CreateDeploymentRequest after validate(); runs ValidateCreateDeploymentRequest.
-func (o *containerCreateOptions) request() (*verda.CreateDeploymentRequest, error) {
+func (o *ContainerCreateOptions) Request() (*verda.CreateDeploymentRequest, error) {
 	if err := o.validate(); err != nil {
 		return nil, err
 	}
 
-	queueLoad, err := resolveQueueLoad(o.QueuePreset, o.QueueLoad)
+	queueLoad, err := ResolveQueueLoad(o.QueuePreset, o.QueueLoad)
 	if err != nil {
 		return nil, err
 	}
 
-	env, err := buildEnvVars(o.Env, o.EnvSecret)
+	env, err := BuildEnvVars(o.Env, o.EnvSecret)
 	if err != nil {
 		return nil, err
 	}
@@ -376,7 +382,8 @@ func (o *containerCreateOptions) request() (*verda.CreateDeploymentRequest, erro
 	return req, nil
 }
 
-func resolveQueueLoad(preset string, custom int) (int, error) {
+// ResolveQueueLoad maps a preset name (or a custom override > 0) to the queue-load threshold.
+func ResolveQueueLoad(preset string, custom int) (int, error) {
 	if custom > 0 {
 		if custom > maxQueueLoad {
 			return 0, fmt.Errorf("--queue-load must be in %d..%d", minQueueLoad, maxQueueLoad)
@@ -386,10 +393,10 @@ func resolveQueueLoad(preset string, custom int) (int, error) {
 	name := strings.ToLower(preset)
 	switch name {
 	case "":
-		name = presetBalanced
+		name = PresetBalanced
 	case "cost_saver", "costsaver":
-		name = presetCostSaver
-	case presetCustom:
+		name = PresetCostSaver
+	case PresetCustom:
 		return 0, errors.New("--queue-preset=custom requires --queue-load")
 	}
 	for _, p := range queuePresets {
@@ -400,7 +407,8 @@ func resolveQueueLoad(preset string, custom int) (int, error) {
 	return 0, fmt.Errorf("invalid --queue-preset %q: expected instant, balanced, cost-saver, or custom", preset)
 }
 
-func buildEnvVars(plain, secret []string) ([]verda.ContainerEnvVar, error) {
+// BuildEnvVars parses KEY=VALUE and KEY=SECRET_NAME entries into typed env vars.
+func BuildEnvVars(plain, secret []string) ([]verda.ContainerEnvVar, error) {
 	total := len(plain) + len(secret)
 	if total == 0 {
 		return nil, nil
@@ -438,7 +446,7 @@ func buildVolumeMounts(secretMounts []string) ([]verda.ContainerVolumeMount, err
 	return mounts, nil
 }
 
-func buildContainerScaling(o *containerCreateOptions, queueLoad int) verda.ContainerScalingOptions {
+func buildContainerScaling(o *ContainerCreateOptions, queueLoad int) verda.ContainerScalingOptions {
 	triggers := &verda.ScalingTriggers{
 		QueueLoad: &verda.QueueLoadTrigger{Threshold: float64(queueLoad)},
 	}
