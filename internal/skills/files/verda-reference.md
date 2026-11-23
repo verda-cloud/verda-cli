@@ -34,6 +34,12 @@ All commands: `--agent -o json` (except `verda ssh` and `verda auth show`).
 | "estimate", "how much will it cost" | `cost estimate` |
 | "connect", "SSH in", "remote access" | Tell user to run `verda ssh <host>` themselves (interactive) |
 | "login", "authenticate", "credentials" | `auth login` (user runs manually) |
+| "LLM models", "inference models", "which models can I call" | `inference models` |
+| "subscribe to a model" | `inference subscriptions enable <code>` |
+| "inference API key", "dcs_ key" | `inference keys` / `inference keys create --label <l>` |
+| "token usage", "inference usage" | `inference usage` |
+| "rate limits", "RPM", "TPM" | `inference limits` |
+| "use Verda models in opencode / kimi", "connect my coding agent" | `inference setup <agent> --model <code> --yes` |
 | "bucket", "S3", "object storage", "list buckets" | `object-storage ls` |
 | "upload", "put file in bucket" | `object-storage cp ./file s3://bucket/key` |
 | "download", "get file from bucket" | `object-storage cp s3://bucket/key ./file` |
@@ -181,6 +187,29 @@ Rules:
 - Storage: optional. NVMe = fast, HDD = cheap
 - Reuse: `volume list --status detached -o json` (must match VM location)
 
+## Inference (alias: `inf`)
+
+| Command | Key Flags | Output Fields |
+|---------|-----------|---------------|
+| `verda inference models -o json` | — | `[]`: `code`, `endpoint_model`, `name`, `status` (available/beta/coming_soon), `category`, `context_length`, `max_output_length`, `service_tiers`, `accept_new_subscriptions`, `pricing` |
+| `verda inference models get <code> -o json` | — | model fields + `quota_tier`, `quota_rpm`, `quota_tpm`, `service_tier_quota[]` |
+| `verda inference subscriptions -o json` | — | `[]`: `model_code`, `service_tier`, `quota_tier`, `rpm`, `tpm`, `created_at` |
+| `verda inference subscriptions status -o json` | — | `status` (active/suspended), `suspend_reason`, `public_comment`, `has_minimum_balance` |
+| `verda inference subscriptions enable <code> -o json` | `--tier` (standard, flex, batch, fast; default standard) | subscription |
+| `verda inference subscriptions disable <code> --yes -o json` | `--tier`, **`--yes`** | `model`, `tier`, `action`, `status` |
+| `verda inference keys -o json` | — | `[]`: `id`, `label`, `masked_key`, `created_at` |
+| `verda inference keys create --label <l> -o json` | **`--label`** | `id`, `label`, `masked_key`, `created_at`, `key` (plaintext, returned once) |
+| `verda inference keys delete <id> --yes -o json` | **`--yes`** | `id`, `action`, `status` |
+| `verda inference usage -o json` | `--from`, `--to` (YYYY-MM-DD or RFC 3339), `--key <id>` | `rows[]` (`day`, `model`, `requests`, `input_tokens`, `cache_read_tokens`, `output_tokens`), `totals`, `range` |
+| `verda inference limits -o json` | `--all-tiers` | `tier`, `rate_limits[]` (`model_code`, `service_tier`, `rpm`, `tpm`, `max_enqueued_tokens`); `--all-tiers` returns a list |
+| `verda inference setup <agent...> --model <code> --yes -o json` | `--model` (repeatable), **`--yes`**, `--dry-run`, `--rotate`, `--inference-url` | `dry_run`, `profile`, `base_url`, `models`, `subscriptions[]` (`model`, `tier`, `action`), `agents[]` (`agent`, `key_action`, `key_id`, `key_label`, `files[]`, `start[]`), `shell` |
+| `verda inference remove <agent...> --yes -o json` | **`--yes`**, `--dry-run` | `agents[]` (`agent`, `key_id`, `key_deleted`, `files[]`) |
+
+Agents: `opencode`, `kimi` (Kimi Code, `~/.kimi-code`). Setup without `--model` reuses the models of an
+earlier setup. Errors: `MISSING_REQUIRED_FLAGS` (agent/model), `CONFIRMATION_REQUIRED`
+(no `--yes`), `VALIDATION_ERROR` (unknown agent/model, agent set up by another profile),
+`AGENT_NOT_READY` (Kimi Code never launched: tell the user to run `kimi` once or `kimi migrate`).
+
 ## Efficiency
 
 - **Parallel**: instance-types, ssh-key list, cost balance — run together
@@ -201,3 +230,5 @@ Rules:
 | template name | `template list` | `name` |
 | bucket name | `object-storage ls` | `buckets[].name` |
 | object key | `object-storage ls s3://bucket` | `objects[].key` |
+| inference model code | `inference models` | `code` |
+| inference API key ID | `inference keys` | `id` |

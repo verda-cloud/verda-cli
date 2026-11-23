@@ -29,7 +29,7 @@ func TestRedactSensitiveBody_JSON(t *testing.T) {
 		"client_secret", "secret_access_key", "service_account_key",
 		"value_or_reference_to_secret", "base64_content", "docker_config_json",
 		"jupyter_token", "access_token", "refresh_token", "id_token",
-		"password", "api_key", "bearer", "authorization", "value",
+		"password", "api_key", "key", "bearer", "authorization", "value",
 	}
 	for _, key := range secretKeys {
 		t.Run(key, func(t *testing.T) {
@@ -135,4 +135,22 @@ func TestRedactSensitiveBody_ContentTypeDispatch(t *testing.T) {
 			t.Errorf("json body with empty content type leaked: %s", got)
 		}
 	})
+}
+
+func TestRedactSensitiveBody_InferenceAPIKey(t *testing.T) {
+	t.Parallel()
+
+	created := `{"id":"k1","label":"ci","masked_key":"dcs_ab…yz","created_at":"2026-11-23T10:00:00Z","key":"dcs_fake-fixture-SECRET"}` // gitleaks:allow
+	got := redactSensitiveBody("application/json", created)
+	if strings.Contains(got, "SECRET") {
+		t.Errorf("create response leaked the plaintext key: %s", got)
+	}
+	if !strings.Contains(got, `"masked_key":"dcs_ab…yz"`) {
+		t.Errorf("masked key should stay readable: %s", got)
+	}
+
+	other := `{"note":"use dcs_fake-fixture-SECRET here"}` // gitleaks:allow
+	if got := redactSensitiveBody("application/json", other); strings.Contains(got, "SECRET") {
+		t.Errorf("dcs_ value under an unknown field leaked: %s", got)
+	}
 }

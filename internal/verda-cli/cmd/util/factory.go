@@ -52,7 +52,7 @@ const (
 // would stop at the first escaped quote and leak the remainder while emitting
 // malformed JSON.
 var sensitiveJSONFieldRe = regexp.MustCompile(
-	`("(?:client_secret|secret_access_key|service_account_key|value_or_reference_to_secret|base64_content|docker_config_json|jupyter_token|access_token|refresh_token|id_token|password|api_key|bearer|authorization|value)")(\s*:\s*)"(?:[^"\\]|\\.)*"`)
+	`("(?:client_secret|secret_access_key|service_account_key|value_or_reference_to_secret|base64_content|docker_config_json|jupyter_token|access_token|refresh_token|id_token|password|api_key|key|bearer|authorization|value)")(\s*:\s*)"(?:[^"\\]|\\.)*"`)
 
 // sensitiveFormFieldRe matches name=value pairs in form-encoded bodies whose
 // values are secrets. The SDK retries /oauth2/token form-encoded when the API
@@ -62,8 +62,12 @@ var sensitiveJSONFieldRe = regexp.MustCompile(
 var sensitiveFormFieldRe = regexp.MustCompile(
 	`\b(client_secret|access_token|refresh_token|id_token|password|token)=[^&]*`)
 
+// inferenceKeyRe catches inference API key plaintexts under any field name.
+var inferenceKeyRe = regexp.MustCompile(`dcs_[A-Za-z0-9_-]{8,}`)
+
 func redactSensitiveJSON(s string) string {
-	return sensitiveJSONFieldRe.ReplaceAllString(s, `$1$2"<redacted>"`)
+	s = sensitiveJSONFieldRe.ReplaceAllString(s, `$1$2"<redacted>"`)
+	return inferenceKeyRe.ReplaceAllString(s, "dcs_<redacted>")
 }
 
 func redactSensitiveForm(s string) string {

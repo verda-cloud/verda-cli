@@ -1,6 +1,6 @@
 ---
 name: verda-cloud
-description: Use when the user mentions Verda Cloud, GPU/CPU VMs, cloud instances, deploying servers, ML training infrastructure, cloud costs/billing, SSH into remote machines, object storage / S3 buckets, uploading or downloading files, or verda CLI commands.
+description: Use when the user mentions Verda Cloud, Verda Inference (LLM API, model subscriptions, inference API keys, connecting coding agents to Verda models), GPU/CPU VMs, cloud instances, deploying servers, ML training infrastructure, cloud costs/billing, SSH into remote machines, object storage / S3 buckets, uploading or downloading files, or verda CLI commands.
 ---
 
 # Verda Cloud
@@ -37,6 +37,7 @@ description: Use when the user mentions Verda Cloud, GPU/CPU VMs, cloud instance
 | **Cost** | "balance", "burn rate", "spending", "how much" | `verda --agent cost balance -o json` and/or `cost running -o json` |
 | **Storage** | "volumes", "disks", "block storage" | `verda --agent volume list -o json` |
 | **Object Storage** | "bucket", "S3", "object storage", "upload a file", "download a file" | `verda --agent object-storage ls -o json` (needs `object-storage configure` first — see below) |
+| **Inference** | "LLM API", "inference", "models", "API key for models", "use Verda models in opencode/kimi" | See Inference below |
 
 ### Explore — Use Specific Commands, Not `status`
 
@@ -103,6 +104,34 @@ user-only — like `auth login`; never run it yourself, never handle the keys).
 user before bulk/`--recursive`/`--delete` operations. Always offer `--dryrun`
 first for recursive deletes and `sync --delete`. See the verda-reference skill
 for flags and output fields.
+
+## Inference (LLM API)
+
+`verda inference` (alias `inf`) manages Verda Inference for the project of the
+user's credentials. OpenAI-compatible base URL `https://inference.verda.com/v1`,
+Anthropic-compatible `https://inference.verda.com`; requests send
+`Authorization: Bearer <dcs_ key>` and `model: <endpoint_model>`.
+
+| Question / intent | Command |
+|-------------------|---------|
+| Which models exist? | `verda --agent inf models -o json` (use `code` in CLI commands, `endpoint_model` in API requests) |
+| One model + my rate limits | `verda --agent inf models get <code> -o json` |
+| What am I subscribed to? Is inference active? | `verda --agent inf subscriptions -o json`, `inf subscriptions status -o json` |
+| Subscribe / unsubscribe | `inf subscriptions enable <code> [--tier standard] -o json` / `inf subscriptions disable <code> --yes -o json` |
+| Usage / tokens | `verda --agent inf usage [--from YYYY-MM-DD --to YYYY-MM-DD --key <id>] -o json` |
+| Rate limits | `verda --agent inf limits [--all-tiers] -o json` |
+| List keys (masked) | `verda --agent inf keys -o json` |
+| Connect opencode / Kimi Code to Verda | `verda --agent inf setup opencode kimi --model <code> --yes -o json` (`--dry-run` first; `AGENT_NOT_READY` for kimi → user must run `kimi` once or `kimi migrate`) |
+| Disconnect | `verda --agent inf remove <agent> --yes -o json` |
+
+**Keys:** prefer `inf setup` — it stores the key in a 0600 file / the agent's
+config and never prints it. `inf keys create --label <l>` returns the plaintext
+once in `key`: only run it when the user explicitly asks for a key, never echo
+the value back into the chat, and tell the user to store it. `keys delete` and
+`subscriptions disable` need `--yes` (confirm with the user first).
+**Setup only adds:** it never changes the agent's default model; config files
+it touches are backed up to `<file>.verda-bak`. Run `--dry-run` and show the
+user the plan before applying.
 
 ## Error Recovery
 
