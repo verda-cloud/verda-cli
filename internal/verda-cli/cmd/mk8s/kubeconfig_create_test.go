@@ -322,7 +322,7 @@ func TestKubeconfigCreate_RecoveryAfterCreate(t *testing.T) {
 		if ae := cmdutil.ClassifyError(err); tc.agent != cmdutil.IsAgentError(err) || (tc.agent && (ae.Details["kubeconfig_id"] != "prod-kc-1" || ae.Details["save_command"] != saveCmd)) {
 			t.Errorf("%s: agent error = %v", name, ae)
 		}
-		if got, statErr := os.ReadFile(file); string(got) != tc.fileLeft || (tc.fileLeft == "") != (statErr != nil) {
+		if got, statErr := os.ReadFile(file); string(got) != tc.fileLeft || (tc.fileLeft == "") != (statErr != nil) { //nolint:gosec // G304: file is under t.TempDir()
 			t.Errorf("%s: file = %q (%v)", name, got, statErr)
 		}
 		if n := kcPosts(api); n != 1 {

@@ -644,7 +644,7 @@ func poolAPI() *fakeAPI {
 
 func readFile(t *testing.T, path string) string {
 	t.Helper()
-	b, err := os.ReadFile(path)
+	b, err := os.ReadFile(path) //nolint:gosec // G304: reads a file the test wrote under its own temp dir
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
 	}
