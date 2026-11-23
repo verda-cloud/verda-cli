@@ -25,5 +25,5 @@
 - `cmdutil.Factory` / `cmdutil.IOStreams` -- standard dependency injection
 - `options` package -- `SaveSetting()` for persisting to config YAML
 - `pkg/tui/wizard` -- wizard engine, `SelectPrompt`, `StaticChoices`
-- `pkg/tui/bubbletea` -- `Themes`, `ThemeNames()`, `GetThemeName()`, `SetThemeByName()`, `HintStyle()`, `Theme` type
+- `pkg/tui/bubbletea` -- `Themes`, `ThemeNames()`, `GetThemeName()`, `SetThemeByName()`, `Theme` type
 - `charm.land/lipgloss/v2` -- used in `renderThemePreview` for styled color swatches

@@ -17,6 +17,7 @@ package bubbletea
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -141,9 +142,14 @@ func DefaultMultiSelectBindings() []KeyBinding[multiSelectModel] {
 		{
 			ID:    "confirm",
 			Match: MatchKey(tea.KeyEnter),
-			Label: func(*multiSelectModel) string { return "enter confirm" },
+			Label: func(m *multiSelectModel) string {
+				if m.cursorOnBack() {
+					return "enter back"
+				}
+				return "enter confirm"
+			},
 			Handle: func(m *multiSelectModel, _ tea.KeyPressMsg) (tea.Cmd, bool) {
-				if len(m.matched) > 0 && m.isBack(m.matched[m.cursor]) {
+				if m.cursorOnBack() {
 					m.aborted = true
 					return func() tea.Msg { return GoBackMsg{} }, true
 				}
@@ -209,13 +215,16 @@ func WithMultiSelectAddBindings(extras ...KeyBinding[multiSelectModel]) tui.Mult
 }
 
 func newMultiSelectModel(prompt string, choices []string, cfg tui.MultiSelectConfig) multiSelectModel {
+	if cfg.BackLabel != "" {
+		choices = append(slices.Clone(choices), cfg.BackLabel)
+	}
 	ps := cfg.PageSize
 	if ps <= 0 || ps > len(choices) {
 		ps = len(choices)
 	}
 	selected := make(map[int]bool)
 	for _, idx := range cfg.Defaults {
-		if idx >= 0 && idx < len(choices) && (!cfg.BackItem || idx != len(choices)-1) {
+		if idx >= 0 && idx < len(choices) && (cfg.BackLabel == "" || idx != len(choices)-1) {
 			selected[idx] = true
 		}
 	}
@@ -255,7 +264,7 @@ func newMultiSelectModel(prompt string, choices []string, cfg tui.MultiSelectCon
 		max:         cfg.Max,
 		minErr:      minErr,
 		maxErr:      maxErr,
-		backItem:    cfg.BackItem,
+		backItem:    cfg.BackLabel != "",
 		showHints:   cfg.ShowHints,
 		customHints: cfg.Hints,
 		bindings:    bindings,
@@ -264,6 +273,10 @@ func newMultiSelectModel(prompt string, choices []string, cfg tui.MultiSelectCon
 
 func (m *multiSelectModel) isBack(idx int) bool {
 	return m.backItem && idx == len(m.choices)-1
+}
+
+func (m *multiSelectModel) cursorOnBack() bool {
+	return len(m.matched) > 0 && m.isBack(m.matched[m.cursor])
 }
 
 func (m *multiSelectModel) refilter() {

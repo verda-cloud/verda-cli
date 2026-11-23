@@ -751,7 +751,7 @@ func TestMultiSelectModel_ViewShowsError(t *testing.T) {
 
 func TestMultiSelectModel_BackItem(t *testing.T) {
 	newBack := func() multiSelectModel {
-		return newMS([]string{"a", "b", "← Back"}, func(c *tui.MultiSelectConfig) { c.BackItem = true })
+		return newMS([]string{"a", "b"}, func(c *tui.MultiSelectConfig) { c.BackLabel = "← Back" })
 	}
 
 	t.Run("select-all skips back", func(t *testing.T) {
@@ -787,6 +787,17 @@ func TestMultiSelectModel_BackItem(t *testing.T) {
 		}
 		if _, ok := cmd().(GoBackMsg); !ok {
 			t.Fatalf("expected GoBackMsg, got %T", cmd())
+		}
+	})
+
+	t.Run("enter hint follows the cursor", func(t *testing.T) {
+		m := newBack()
+		if got := strings.Join(m.Hints(), " | "); !strings.Contains(got, "enter confirm") {
+			t.Errorf("hints = %q, want enter confirm", got)
+		}
+		m.cursor = 2
+		if got := strings.Join(m.Hints(), " | "); !strings.Contains(got, "enter back") {
+			t.Errorf("hints = %q, want enter back", got)
 		}
 	})
 

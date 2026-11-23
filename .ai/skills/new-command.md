@@ -191,7 +191,7 @@ flow := &wizard.Flow{
 }
 ```
 
-Do not register a `HintBarView`: the wizard composite already renders its own hint bar, and a second one shows contradictory hints.
+The wizard composite renders the hint bar; do not add your own view for it.
 
 Per-step rules:
 - Each `Step` binds to a variable via `Setter`/`Value`/`IsSet`/`Resetter`. `IsSet()==true` (e.g. a `--flag` was passed) makes the engine **skip** the step and propagate `Value()` into the collected map.

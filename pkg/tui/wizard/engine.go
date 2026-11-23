@@ -293,13 +293,8 @@ func (e *Engine) runPersistentProgram(ctx context.Context) error {
 // create their own tea.Programs (spinners, sub-flow prompts) without stdin
 // conflicts.
 func (e *Engine) runPerPromptProgram(ctx context.Context) error {
-	defer func() {
-		if e.program != nil && e.progErrCh != nil {
-			e.program.Quit()
-			<-e.progErrCh
-			e.program = nil
-		}
-	}()
+	// Restores the terminal if a panic skips stopProgram mid-prompt.
+	defer func() { e.stopProgram(e.progErrCh) }()
 	return e.stepLoop(ctx)
 }
 
@@ -341,7 +336,7 @@ func (e *Engine) stepLoop(ctx context.Context) error {
 
 		// Build prompt model and send to composite.
 		canGoBack := e.hasEditablePriorStep()
-		promptModel := e.buildPromptModel(step, choices, canGoBack)
+		promptModel := e.buildPromptModel(step, choices, canGoBack, e.steps[e.current].prior)
 		if promptModel == nil {
 			return fmt.Errorf("step %q: unsupported prompt type: %d", step.Name, step.Prompt)
 		}
@@ -477,7 +472,7 @@ func (e *Engine) handlePromptResult(result promptResult, step Step, choices []Ch
 		return false, errCancelledInterrupt
 	case ActionBack:
 		if canGoBack {
-			e.rewindOne()
+			e.rewindOne(true)
 		} else {
 			_, _ = fmt.Fprintln(e.out())
 			return false, errCancelledBack
@@ -490,7 +485,7 @@ func (e *Engine) handlePromptResult(result promptResult, step Step, choices []Ch
 
 	// Handle "← Back" selection in select/multiselect.
 	if idx, ok := value.(int); ok && canGoBack && idx == len(choices) {
-		e.rewindOne()
+		e.rewindOne(true)
 		return false, nil
 	}
 
@@ -551,22 +546,57 @@ func (e *Engine) handlePromptResult(result promptResult, step Step, choices []Ch
 	return true, nil
 }
 
-// promptDefault returns the value to pre-fill: the answer the user gave before
-// going back, else the step's Default.
-func (e *Engine) promptDefault(step Step) (any, bool) {
-	if e.current < len(e.steps) {
-		if prior := e.steps[e.current].prior; prior != nil {
-			return prior, true
+// defaultCandidates lists pre-fill values by priority: the answer the user gave
+// before going back (nil if none), then the step's Default. Callers take the
+// first usable one so a stale prior never hides Default.
+func (e *Engine) defaultCandidates(step Step, prior any) []any {
+	var out []any
+	if prior != nil {
+		out = append(out, prior)
+	}
+	if step.Default != nil {
+		out = append(out, step.Default(e.store.Collected()))
+	}
+	return out
+}
+
+func choiceIndex(choices []Choice, candidates []any) (int, bool) {
+	for _, def := range candidates {
+		v, ok := def.(string)
+		if !ok {
+			continue
+		}
+		for i, c := range choices {
+			if c.Value == v {
+				return i, true
+			}
 		}
 	}
-	if step.Default == nil {
-		return nil, false
+	return 0, false
+}
+
+func choiceIndices(choices []Choice, candidates []any) []int {
+	for _, def := range candidates {
+		vals, ok := def.([]string)
+		if !ok {
+			continue
+		}
+		var idx []int
+		for i, c := range choices {
+			if slices.Contains(vals, c.Value) {
+				idx = append(idx, i)
+			}
+		}
+		if len(idx) > 0 {
+			return idx
+		}
 	}
-	return step.Default(e.store.Collected()), true
+	return nil
 }
 
 // buildPromptModel creates the appropriate PromptModel for a step.
-func (e *Engine) buildPromptModel(step Step, choices []Choice, canGoBack bool) bubbletea.PromptModel {
+func (e *Engine) buildPromptModel(step Step, choices []Choice, canGoBack bool, prior any) bubbletea.PromptModel {
+	candidates := e.defaultCandidates(step, prior)
 	switch step.Prompt {
 	case SelectPrompt:
 		labels := choiceLabels(choices)
@@ -574,15 +604,8 @@ func (e *Engine) buildPromptModel(step Step, choices []Choice, canGoBack bool) b
 			labels = append(labels, backLabel)
 		}
 		var opts []tui.SelectOption
-		if def, ok := e.promptDefault(step); ok {
-			if defVal, ok := def.(string); ok {
-				for i, c := range choices {
-					if c.Value == defVal {
-						opts = append(opts, tui.WithSelectDefault(i))
-						break
-					}
-				}
-			}
+		if i, ok := choiceIndex(choices, candidates); ok {
+			opts = append(opts, tui.WithSelectDefault(i))
 		}
 		cfg := tui.ResolveSelectConfig(opts)
 		return bubbletea.NewSelectPrompt(promptLabel(step), labels, cfg)
@@ -590,8 +613,7 @@ func (e *Engine) buildPromptModel(step Step, choices []Choice, canGoBack bool) b
 		labels := choiceLabels(choices)
 		var opts []tui.MultiSelectOption
 		if canGoBack {
-			labels = append(labels, backLabel)
-			opts = append(opts, tui.WithMultiSelectBackItem())
+			opts = append(opts, tui.WithMultiSelectBack(backLabel))
 		}
 		if step.Required {
 			opts = append(opts, tui.WithMinSelections(1))
@@ -599,30 +621,17 @@ func (e *Engine) buildPromptModel(step Step, choices []Choice, canGoBack bool) b
 		if step.MinError != nil {
 			opts = append(opts, tui.WithMinSelectionsError(step.MinError))
 		}
-		if def, ok := e.promptDefault(step); ok {
-			if defVals, ok := def.([]string); ok && len(defVals) > 0 {
-				valSet := make(map[string]bool, len(defVals))
-				for _, v := range defVals {
-					valSet[v] = true
-				}
-				var defaults []int
-				for i, c := range choices {
-					if valSet[c.Value] {
-						defaults = append(defaults, i)
-					}
-				}
-				if len(defaults) > 0 {
-					opts = append(opts, tui.WithMultiSelectDefaults(defaults))
-				}
-			}
+		if defaults := choiceIndices(choices, candidates); len(defaults) > 0 {
+			opts = append(opts, tui.WithMultiSelectDefaults(defaults))
 		}
 		cfg := tui.ResolveMultiSelectConfig(opts)
 		return bubbletea.NewMultiSelectPrompt(promptLabel(step), labels, cfg)
 	case TextInputPrompt:
 		var opts []tui.TextInputOption
-		if def, ok := e.promptDefault(step); ok {
+		for _, def := range candidates {
 			if d, ok := def.(string); ok && d != "" {
 				opts = append(opts, tui.WithDefault(d))
+				break
 			}
 		}
 		if step.Validate != nil {
@@ -640,9 +649,10 @@ func (e *Engine) buildPromptModel(step Step, choices []Choice, canGoBack bool) b
 		return bubbletea.NewTextInputPrompt(promptLabel(step), cfg)
 	case ConfirmPrompt:
 		var opts []tui.ConfirmOption
-		if def, ok := e.promptDefault(step); ok {
+		for _, def := range candidates {
 			if d, ok := def.(bool); ok {
 				opts = append(opts, tui.WithConfirmDefault(d))
+				break
 			}
 		}
 		cfg := tui.ResolveConfirmConfig(opts)
@@ -758,16 +768,20 @@ func (e *Engine) resetRange(from, to int) {
 // --- Navigation ---
 
 // rewindOne goes back to the nearest editable prior step, clearing everything
-// between. The step landed on keeps its answer as a pre-filled default; its
-// loader still re-runs and the store value is cleared, so dependents never see it.
-func (e *Engine) rewindOne() {
+// between. With keepAnswer (user-initiated back) the step landed on keeps its
+// answer as a pre-filled default; its loader still re-runs and the store value
+// is cleared, so dependents never see it. Auto-rewinds pass false: that answer
+// is what led to the dead end.
+func (e *Engine) rewindOne(keepAnswer bool) {
 	from := e.current
 	e.current--
 	for e.current >= 0 {
 		if e.isEditable(e.current) {
 			prior := e.steps[e.current].value
 			e.resetRange(e.current, from+1) // +1 to include the abandoned step
-			e.steps[e.current].prior = prior
+			if keepAnswer {
+				e.steps[e.current].prior = prior
+			}
 			return
 		}
 		e.current--
@@ -779,7 +793,7 @@ func (e *Engine) rewindOne() {
 // editable step if deps are skipped. Returns error if no rewind target exists.
 func (e *Engine) rewindToDependency(current Step) error {
 	if len(current.DependsOn) == 0 {
-		e.rewindOne()
+		e.rewindOne(false)
 		return nil
 	}
 
@@ -835,7 +849,7 @@ func (e *Engine) rewindToDependency(current Step) error {
 	}
 
 	// Fallback.
-	e.rewindOne()
+	e.rewindOne(false)
 	return nil
 }
 

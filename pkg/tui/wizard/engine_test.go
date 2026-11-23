@@ -1929,7 +1929,7 @@ func TestEngine_MultiSelectMinErrorPlumbed(t *testing.T) {
 	}
 	choices := []Choice{{Label: "us", Value: "us"}, {Label: "eu", Value: "eu"}}
 
-	model := engine.buildPromptModel(step, choices, false)
+	model := engine.buildPromptModel(step, choices, false, nil)
 
 	// Press Enter with nothing selected: Required enforces min=1, so the
 	// confirm handler fires the (now custom) min-error message.
@@ -1986,7 +1986,7 @@ func TestEngine_BuildPromptModel_MultiSelectBackIsNotAValue(t *testing.T) {
 	engine.current = 1
 	choices := []Choice{{Label: "key-a", Value: "a"}}
 
-	model := engine.buildPromptModel(flow.Steps[1], choices, true)
+	model := engine.buildPromptModel(flow.Steps[1], choices, true, nil)
 	updated, _ := model.Update(tea.KeyPressMsg{Code: 'a', Mod: tea.ModCtrl})
 	updated, _ = updated.(bubbletea.PromptModel).Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	updated, cmd := updated.(bubbletea.PromptModel).Update(tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -2009,15 +2009,18 @@ func TestEngine_RewindOne_KeepsAnswerAsDefault(t *testing.T) {
 			{Name: "gpu", Prompt: SelectPrompt, Required: true, DependsOn: []string{"name"}},
 		},
 	}
-	engine := newTestEngine(nil)
-	engine.flow = flow
-	engine.steps = make([]stepRuntime, len(flow.Steps))
-	engine.transition(0, stateCompleted, "my-pool")
-	engine.steps[0].loaded = true
-	engine.current = 1
+	rewound := func(keepAnswer bool) *Engine {
+		engine := newTestEngine(nil)
+		engine.flow = flow
+		engine.steps = make([]stepRuntime, len(flow.Steps))
+		engine.transition(0, stateCompleted, "my-pool")
+		engine.steps[0].loaded = true
+		engine.current = 1
+		engine.rewindOne(keepAnswer)
+		return engine
+	}
 
-	engine.rewindOne()
-
+	engine := rewound(true)
 	if engine.current != 0 {
 		t.Fatalf("current = %d, want 0", engine.current)
 	}
@@ -2027,13 +2030,35 @@ func TestEngine_RewindOne_KeepsAnswerAsDefault(t *testing.T) {
 	if engine.steps[0].loaded {
 		t.Error("loader cache must be invalidated so dependent loaders re-run")
 	}
-	def, ok := engine.promptDefault(flow.Steps[0])
-	if !ok || def != "my-pool" {
-		t.Errorf("promptDefault = %v, %v; want my-pool", def, ok)
+	if got := engine.steps[0].prior; got != "my-pool" {
+		t.Errorf("prior = %v, want my-pool", got)
 	}
 
 	engine.transition(0, stateCompleted, "other")
-	if _, ok := engine.promptDefault(flow.Steps[0]); ok {
+	if engine.steps[0].prior != nil {
 		t.Error("prior answer must be dropped once the step is completed again")
+	}
+
+	if got := rewound(false).steps[0].prior; got != nil {
+		t.Errorf("auto-rewind must not pre-fill the answer that led to the dead end, got %v", got)
+	}
+}
+
+func TestEngine_DefaultCandidates_StalePriorFallsBackToDefault(t *testing.T) {
+	engine := newTestEngine(nil)
+	choices := []Choice{{Label: "A", Value: "a"}, {Label: "B", Value: "b"}}
+	step := Step{Default: func(map[string]any) any { return "b" }}
+
+	if i, ok := choiceIndex(choices, engine.defaultCandidates(step, "gone")); !ok || i != 1 {
+		t.Errorf("stale prior: index = %d, %v; want Default's index 1", i, ok)
+	}
+	if i, ok := choiceIndex(choices, engine.defaultCandidates(step, "a")); !ok || i != 0 {
+		t.Errorf("valid prior: index = %d, %v; want prior's index 0", i, ok)
+	}
+
+	textStep := Step{Prompt: TextInputPrompt, Default: func(map[string]any) any { return "dflt" }}
+	model := engine.buildPromptModel(textStep, nil, false, "")
+	if view := model.View().Content; !strings.Contains(view, "dflt") {
+		t.Errorf("empty prior must not hide Default:\n%s", view)
 	}
 }

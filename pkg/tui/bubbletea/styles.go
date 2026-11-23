@@ -166,12 +166,6 @@ func GetTheme() Theme {
 	return activeTheme
 }
 
-// HintStyle returns the resolved hint lipgloss.Style for the active theme.
-// Use this with wizard.WithHintStyle to pass the correct style to HintBarView.
-func HintStyle() lipgloss.Style {
-	return hintStyle
-}
-
 // GetThemeName returns the name of the active theme
 // (e.g., "default", "dracula", "catppuccin", "nord", "tokyonight", or "custom").
 func GetThemeName() string {

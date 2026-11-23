@@ -154,12 +154,3 @@ func TestNameIsTrimmedAndCountedInCharacters(t *testing.T) {
 		t.Errorf("name must be trimmed: %s", body)
 	}
 }
-
-func TestWizardLayoutHasNoExtraHintBar(t *testing.T) {
-	t.Parallel()
-	for _, def := range wizardLayout() {
-		if _, ok := def.View.(*wizard.HintBarView); ok {
-			t.Fatalf("view %q duplicates the wizard composite's hint bar", def.ID)
-		}
-	}
-}

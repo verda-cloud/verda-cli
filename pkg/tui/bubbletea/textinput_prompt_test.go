@@ -128,3 +128,17 @@ func TestTextInputPrompt_PasteLongerThanPlaceholderIsNotClipped(t *testing.T) {
 		t.Fatalf("pasted text clipped:\n%s", m.View().Content)
 	}
 }
+
+func TestTextInputPrompt_WidePlaceholderHasNoNULs(t *testing.T) {
+	cfg := tui.ResolveTextInputConfig([]tui.TextInputOption{tui.WithPlaceholder("名前を入力")})
+	m := NewTextInputPrompt("Name:", cfg)
+	view := m.View().Content
+	if strings.ContainsRune(view, 0) || !strings.Contains(view, "前を入力") {
+		t.Fatalf("wide placeholder rendered wrongly: %q", view)
+	}
+}
+
+func TestTextInputPrompt_ZeroWidthPlaceholderDoesNotPanic(t *testing.T) {
+	cfg := tui.ResolveTextInputConfig([]tui.TextInputOption{tui.WithPlaceholder("\u0301")})
+	_ = NewTextInputPrompt("Name:", cfg).View()
+}
