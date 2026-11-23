@@ -205,9 +205,10 @@ Rules:
 | `verda inference setup <agent...> --model <code> --yes -o json` | `--model` (repeatable), **`--yes`**, `--dry-run`, `--rotate`, `--inference-url` | `dry_run`, `profile`, `base_url`, `models`, `subscriptions[]` (`model`, `tier`, `action`), `agents[]` (`agent`, `key_action`, `key_id`, `key_label`, `files[]`, `start[]`), `shell` |
 | `verda inference remove <agent...> --yes -o json` | **`--yes`**, `--dry-run` | `agents[]` (`agent`, `key_id`, `key_deleted`, `files[]`) |
 
-Agents: `opencode`, `kimi`. Setup without `--model` reuses the models of an
+Agents: `opencode`, `kimi` (Kimi Code, `~/.kimi-code`). Setup without `--model` reuses the models of an
 earlier setup. Errors: `MISSING_REQUIRED_FLAGS` (agent/model), `CONFIRMATION_REQUIRED`
-(no `--yes`), `VALIDATION_ERROR` (unknown agent/model, agent set up by another profile).
+(no `--yes`), `VALIDATION_ERROR` (unknown agent/model, agent set up by another profile),
+`AGENT_NOT_READY` (Kimi Code never launched: tell the user to run `kimi` once or `kimi migrate`).
 
 ## Efficiency
 

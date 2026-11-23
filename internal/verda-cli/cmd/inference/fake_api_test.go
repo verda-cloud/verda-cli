@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"slices"
 	"sync"
@@ -225,7 +226,13 @@ func newTestHost(t *testing.T) *testHost {
 			return h.version, nil
 		},
 	}
+	h.initKimi()
 	return h
+}
+
+// initKimi simulates a Kimi Code that has been launched once.
+func (h *testHost) initKimi() {
+	_ = os.MkdirAll(h.path(".kimi-code"), 0o700)
 }
 
 func (h *testHost) path(rel string) string { return filepath.Join(h.env.Home, rel) }

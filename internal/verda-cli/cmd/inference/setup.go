@@ -72,8 +72,9 @@ func newCmdSetup(f cmdutil.Factory, ioStreams cmdutil.IOStreams, envFn func() (*
 			"verda inference remove <agent>".
 
 			Supported agents: opencode (~/.config/opencode/opencode.json[c]) and
-			kimi (~/.kimi/config.toml). Without arguments on a terminal, setup
-			offers a checklist with installed agents preselected.
+			Kimi Code (kimi, $KIMI_CODE_HOME or ~/.kimi-code/config.toml; run
+			kimi once first). Without arguments on a terminal, setup offers a
+			checklist with installed agents preselected.
 
 			The endpoint defaults to https://inference.verda.com; override it with
 			--inference-url, VERDA_INFERENCE_BASE_URL, "inference.base-url" in
@@ -231,7 +232,37 @@ func (r *setupRun) resolveInputs(args []string) (ok bool, err error) {
 			return false, err
 		}
 	}
-	return true, r.checkOwnership()
+	if err := r.checkOwnership(); err != nil {
+		return false, err
+	}
+	return r.checkReady()
+}
+
+// checkReady: interactive runs skip agents that are not ready; otherwise it is an error.
+func (r *setupRun) checkReady() (ok bool, err error) {
+	ready := r.agents[:0:0]
+	for _, d := range r.agents {
+		if d.ready == nil {
+			ready = append(ready, d)
+			continue
+		}
+		reason := d.ready(r.env)
+		if reason == nil {
+			ready = append(ready, d)
+			continue
+		}
+		if !r.interactive {
+			return false, &cmdutil.AgentError{
+				Code:     "AGENT_NOT_READY",
+				Message:  d.Name + ": " + reason.Error(),
+				Details:  map[string]any{"agent": d.Name, "reason": reason.Error()},
+				ExitCode: cmdutil.ExitBadArgs,
+			}
+		}
+		_, _ = fmt.Fprintf(r.io.ErrOut, "Skipping %s: %v\n", d.Display, reason)
+	}
+	r.agents = ready
+	return len(ready) > 0, nil
 }
 
 // plan reads models, subscriptions and keys; ok=false is a clean cancel.
@@ -285,10 +316,15 @@ func (r *setupRun) pickAgents() ([]*agentDef, error) {
 		note := "not found on PATH"
 		if r.env.installed(d.Binary) {
 			note = "installed"
-			defaults = append(defaults, len(defs))
+			if d.ready == nil || d.ready(r.env) == nil {
+				defaults = append(defaults, len(defs))
+			}
 		}
 		if r.state.agent(r.profile, d.Name) != nil {
 			note += ", set up"
+		}
+		if d.ready != nil && d.ready(r.env) != nil {
+			note += ", not initialized (run it once first)"
 		}
 		defs = append(defs, d)
 		labels = append(labels, fmt.Sprintf("%s (%s)  %s", d.Display, d.Name, note))

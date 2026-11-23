@@ -39,9 +39,15 @@ verda --agent inf keys create --label ci -o json   # plaintext in "key"
 | Agent | File | Entries | Key |
 |-------|------|---------|-----|
 | `opencode` | `$XDG_CONFIG_HOME/opencode/opencode.jsonc` if present, else `opencode.json` (default `~/.config`) | `providers.verda` (opencode ≥ 2) or `provider.verda` (v1) | `~/.verda/agents/opencode.key`, referenced as `{file:…}` |
-| `kimi` | `$KIMI_CODE_HOME/config.toml`, `$KIMI_SHARE_DIR/config.toml`, `~/.kimi-code/config.toml` when that dir exists, else `~/.kimi/config.toml` | `[providers.verda]` (`openai_legacy`), `[models."verda/<code>"]` | inline `api_key` |
+| `kimi` (Kimi Code) | `$KIMI_CODE_HOME/config.toml`, else `~/.kimi-code/config.toml`; the directory must already exist (see below) | `[providers.verda]` (`type = "openai"`), `[models."verda/<code>"]` with `display_name`, `max_context_size`, `max_output_size` when known | inline `api_key` |
 | `codex` (hidden, `--experimental-agents`) | `$CODEX_HOME/config.toml` + `verda.config.toml` profile | `[model_providers.verda]` (`wire_api = "responses"`) | `~/.verda/agents/codex.key`, read by the `codex-verda` alias |
 | `claude-code` (hidden) | `~/.verda/agents/claude-code.json` (`--settings` file) | `env` block | inline `ANTHROPIC_AUTH_TOKEN` |
+
+Kimi Code must have been launched once: setup never creates `~/.kimi-code`
+(or `$KIMI_CODE_HOME`), because a config written before the first launch would
+skip Kimi Code's offer to migrate the archived Kimi CLI's `~/.kimi`. Interactive
+setup skips kimi with a hint (`run kimi once (or kimi migrate)`); non-interactive
+and `--agent` runs fail with `AGENT_NOT_READY`, dry-run included.
 
 Aliases (codex, claude-code) go in one marked block in `~/.zshrc` (`$ZDOTDIR`)
 or, for bash, `~/.bashrc` (macOS without `~/.bashrc`: `~/.bash_profile`);

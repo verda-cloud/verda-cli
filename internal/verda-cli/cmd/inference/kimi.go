@@ -25,19 +25,23 @@ import (
 // kimiFallbackContext: max_context_size is required; used only when the API omits context_length.
 const kimiFallbackContext int64 = 131072
 
-// kimiConfigPath: Kimi's documented home is ~/.kimi (KIMI_SHARE_DIR); Kimi Code
-// installs use ~/.kimi-code (KIMI_CODE_HOME).
-func kimiConfigPath(env *hostEnv) string {
+func kimiHome(env *hostEnv) string {
 	if dir := env.Getenv("KIMI_CODE_HOME"); dir != "" {
-		return filepath.Join(dir, "config.toml")
+		return dir
 	}
-	if dir := env.Getenv("KIMI_SHARE_DIR"); dir != "" {
-		return filepath.Join(dir, "config.toml")
+	return filepath.Join(env.Home, ".kimi-code")
+}
+
+func kimiConfigPath(env *hostEnv) string { return filepath.Join(kimiHome(env), "config.toml") }
+
+// kimiReady: never create the Kimi Code home ourselves; a config written before
+// its first launch would skip the ~/.kimi legacy-migration prompt.
+func kimiReady(env *hostEnv) error {
+	if st, err := os.Stat(kimiHome(env)); err == nil && st.IsDir() {
+		return nil
 	}
-	if st, err := os.Stat(filepath.Join(env.Home, ".kimi-code")); err == nil && st.IsDir() {
-		return filepath.Join(env.Home, ".kimi-code", "config.toml")
-	}
-	return filepath.Join(env.Home, ".kimi", "config.toml")
+	return fmt.Errorf("%s does not exist yet: run `kimi` once (or `kimi migrate`), then re-run `verda inference setup kimi`",
+		env.tildePath(kimiHome(env)))
 }
 
 func kimiOwns(key []string) bool {
@@ -50,8 +54,7 @@ func kimiOwns(key []string) bool {
 
 func kimiBlock(c *agentContext) string {
 	tables := []string{renderTOMLTable(tomlKey("providers", providerID), []tomlKV{
-		// openai_legacy is Kimi's Chat Completions provider type.
-		{"type", "openai_legacy"},
+		{"type", "openai"},
 		{"base_url", c.openAIBaseURL()},
 		{"api_key", c.key},
 	})}
@@ -63,11 +66,16 @@ func kimiBlock(c *agentContext) string {
 		} else if c.warn != nil {
 			c.warn(fmt.Sprintf("kimi: %s has no published context length; using %d", m.Code, kimiFallbackContext))
 		}
-		tables = append(tables, renderTOMLTable(tomlKey("models", providerID+"/"+m.Code), []tomlKV{
+		kvs := []tomlKV{
 			{"provider", providerID},
 			{"model", m.EndpointModel},
+			{"display_name", m.Name},
 			{"max_context_size", ctxLen},
-		}))
+		}
+		if m.MaxOutputLength != nil && *m.MaxOutputLength > 0 {
+			kvs = append(kvs, tomlKV{"max_output_size", *m.MaxOutputLength})
+		}
+		tables = append(tables, renderTOMLTable(tomlKey("models", providerID+"/"+m.Code), kvs))
 	}
 	return strings.Join(tables, "\n")
 }

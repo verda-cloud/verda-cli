@@ -18,5 +18,6 @@
 ## Gotchas
 - `--base-url` is the global API flag; the inference endpoint flag is `--inference-url`.
 - Non-interactive setup/remove need `--yes` (or `--dry-run`); setup without `--model` reuses the models recorded in state.
-- Kimi requires `max_context_size`; when the API has no `context_length`, 131072 is used and a warning is printed.
+- Kimi Code (not the archived Kimi CLI with `~/.kimi`): config is `$KIMI_CODE_HOME/config.toml` else `~/.kimi-code/config.toml`; provider `type = "openai"` (Chat Completions). Setup never creates the Kimi Code home — doing so before its first launch skips the `~/.kimi` migration prompt — so a missing home skips kimi interactively and is `AGENT_NOT_READY` otherwise (`agentDef.ready`).
+- Kimi requires `max_context_size`; when the API has no `context_length`, 131072 is used and a warning is printed. `max_output_size` is written only when the API has `max_output_length`.
 - opencode version: `opencode --version` major ≥ 2 → `providers` (v2) format, else v1; unknown version → v2 only if the file already has `providers`. Switching formats removes our entry from the other key.

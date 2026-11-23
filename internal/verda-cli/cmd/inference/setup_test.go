@@ -135,14 +135,15 @@ func TestSetupFreshNonInteractiveJSON(t *testing.T) {
 		t.Errorf("opencode.json must reference the key file, not inline the key:\n%s", oc)
 	}
 
-	kimi := readFile(t, h.path(".kimi/config.toml"))
-	for _, want := range []string{"[providers.verda]", `type = "openai_legacy"`, `api_key = "dcs_plaintext0002"`,
-		`[models."verda/qwen3-coder"]`, `model = "Qwen/Qwen3-Coder"`, "max_context_size = 262144", `[models."verda/kimi-k2"]`} {
+	kimi := readFile(t, h.path(".kimi-code/config.toml"))
+	for _, want := range []string{"[providers.verda]", `type = "openai"`, `api_key = "dcs_plaintext0002"`,
+		`[models."verda/qwen3-coder"]`, `model = "Qwen/Qwen3-Coder"`, `display_name = "Qwen3 Coder"`, "max_context_size = 262144",
+		"max_output_size = 65536", `[models."verda/kimi-k2"]`} {
 		if !strings.Contains(kimi, want) {
 			t.Errorf("kimi config missing %s:\n%s", want, kimi)
 		}
 	}
-	assertMode(t, h.path(".kimi/config.toml"), 0o600)
+	assertMode(t, h.path(".kimi-code/config.toml"), 0o600)
 	assertMissing(t, h.path(".zshrc"))
 }
 
@@ -150,7 +151,7 @@ func TestSetupPreservesUserConfigAndRemoveRestoresIt(t *testing.T) {
 	t.Parallel()
 	api, h := newFakeAPI(), newTestHost(t)
 	ocPath := h.path(".config/opencode/opencode.jsonc")
-	kimiPath := h.path(".kimi/config.toml")
+	kimiPath := h.path(".kimi-code/config.toml")
 	writeFile(t, ocPath, userOpenCode)
 	writeFile(t, kimiPath, userKimi)
 
@@ -200,12 +201,12 @@ func TestSetupPreservesUserConfigAndRemoveRestoresIt(t *testing.T) {
 func TestSetupRerunIsIdempotent(t *testing.T) {
 	t.Parallel()
 	api, h := newFakeAPI(), newTestHost(t)
-	writeFile(t, h.path(".kimi/config.toml"), userKimi)
+	writeFile(t, h.path(".kimi-code/config.toml"), userKimi)
 	args := []string{"setup", "opencode", "kimi", "--model", "kimi-k2", "--yes"}
 	if _, _, err := runInference(t, api, h, runOpts{}, args...); err != nil {
 		t.Fatal(err)
 	}
-	oc1, kimi1 := readFile(t, h.path(".config/opencode/opencode.json")), readFile(t, h.path(".kimi/config.toml"))
+	oc1, kimi1 := readFile(t, h.path(".config/opencode/opencode.json")), readFile(t, h.path(".kimi-code/config.toml"))
 
 	out, _, err := runInference(t, api, h, runOpts{format: "json"}, "setup", "opencode", "kimi", "--yes")
 	if err != nil {
@@ -217,7 +218,7 @@ func TestSetupRerunIsIdempotent(t *testing.T) {
 	if oc2 := readFile(t, h.path(".config/opencode/opencode.json")); oc2 != oc1 {
 		t.Errorf("opencode.json changed on re-run\n%s\n---\n%s", oc1, oc2)
 	}
-	if kimi2 := readFile(t, h.path(".kimi/config.toml")); kimi2 != kimi1 {
+	if kimi2 := readFile(t, h.path(".kimi-code/config.toml")); kimi2 != kimi1 {
 		t.Errorf("kimi config changed on re-run\n%s\n---\n%s", kimi1, kimi2)
 	}
 	var res setupResult
@@ -254,7 +255,7 @@ func TestSetupRotateReplacesKey(t *testing.T) {
 	if got := readFile(t, filepath.Join(h.env.VerdaDir, "agents", "opencode.key")); got != "dcs_plaintext0003" {
 		t.Errorf("opencode key not rotated: %q", got)
 	}
-	if kimi := readFile(t, h.path(".kimi/config.toml")); !strings.Contains(kimi, "dcs_plaintext0004") || strings.Contains(kimi, "dcs_plaintext0002") {
+	if kimi := readFile(t, h.path(".kimi-code/config.toml")); !strings.Contains(kimi, "dcs_plaintext0004") || strings.Contains(kimi, "dcs_plaintext0002") {
 		t.Errorf("kimi key not rotated:\n%s", kimi)
 	}
 	st, _ := loadState(h.env.statePath())
@@ -282,23 +283,76 @@ func TestSetupDryRunWritesNothing(t *testing.T) {
 	t.Parallel()
 	api, h := newFakeAPI(), newTestHost(t)
 	h.vars["CODEX_HOME"] = h.path("codex")
+	before := snapshot(t, h.env.Home)
 	out, _, err := runInference(t, api, h, runOpts{}, "setup", "opencode", "kimi", "codex", "--experimental-agents", "--model", "qwen3-coder", "--dry-run")
 	if err != nil {
 		t.Fatal(err)
 	}
-	entries, _ := os.ReadDir(h.env.Home)
-	if len(entries) != 0 {
-		t.Errorf("dry run wrote files: %v", entries)
+	if after := snapshot(t, h.env.Home); after != before {
+		t.Errorf("dry run changed the home dir:\nbefore %s\nafter  %s", before, after)
 	}
 	if len(api.created) != 0 || len(api.subscribed) != 0 {
 		t.Errorf("dry run called mutating APIs: keys %v, subs %v", api.created, api.subscribed)
 	}
 	for _, want := range []string{"Dry run", "subscribe the project to qwen3-coder", `create API key "verda-cli opencode (testhost)"`,
-		"create ~/.config/opencode/opencode.json", "create ~/.kimi/config.toml", "alias block in ~/.zshrc"} {
+		"create ~/.config/opencode/opencode.json", "create ~/.kimi-code/config.toml", "alias block in ~/.zshrc"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("dry-run output missing %q:\n%s", want, out)
 		}
 	}
+}
+
+func snapshot(t *testing.T, root string) string {
+	t.Helper()
+	var paths []string
+	err := filepath.WalkDir(root, func(p string, _ os.DirEntry, err error) error {
+		paths = append(paths, p)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.Join(paths, ",")
+}
+
+func TestSetupKimiNotInitialized(t *testing.T) {
+	t.Parallel()
+	api, h := newFakeAPI(), newTestHost(t)
+	if err := os.Remove(h.path(".kimi-code")); err != nil {
+		t.Fatal(err)
+	}
+	for _, extra := range [][]string{{"--yes"}, {"--dry-run"}} {
+		args := append([]string{"setup", "opencode", "kimi", "--model", "kimi-k2"}, extra...)
+		_, _, err := runInference(t, api, h, runOpts{agent: true, format: "json"}, args...)
+		if errCode(err) != "AGENT_NOT_READY" || !strings.Contains(err.Error(), "kimi migrate") {
+			t.Fatalf("%v: err = %v, want AGENT_NOT_READY", extra, err)
+		}
+	}
+	if len(api.created) != 0 {
+		t.Errorf("keys created: %v", api.created)
+	}
+	assertMissing(t, h.path(".kimi-code"))
+	assertMissing(t, h.path(".kimi"))
+}
+
+func TestSetupKimiHonorsKimiCodeHome(t *testing.T) {
+	t.Parallel()
+	api, h := newFakeAPI(), newTestHost(t)
+	h.vars["KIMI_CODE_HOME"] = h.path("custom-kimi")
+	if _, _, err := runInference(t, api, h, runOpts{agent: true, format: "json"}, "setup", "kimi", "--model", "kimi-k2", "--yes"); errCode(err) != "AGENT_NOT_READY" {
+		t.Fatalf("missing KIMI_CODE_HOME dir: %v", err)
+	}
+	if err := os.MkdirAll(h.vars["KIMI_CODE_HOME"], 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := runInference(t, api, h, runOpts{}, "setup", "kimi", "--model", "kimi-k2", "--yes"); err != nil {
+		t.Fatal(err)
+	}
+	kimi := readFile(t, h.path("custom-kimi/config.toml"))
+	if !strings.Contains(kimi, `display_name = "Kimi K2"`) || strings.Contains(kimi, "max_output_size") {
+		t.Errorf("kimi config (no max output known):\n%s", kimi)
+	}
+	assertMissing(t, h.path(".kimi-code/config.toml"))
 }
 
 func TestSetupNonInteractiveInputErrors(t *testing.T) {
@@ -351,7 +405,7 @@ func TestSetupRefusesAgentOwnedByOtherProfile(t *testing.T) {
 func TestSetupFailureDeletesNewKey(t *testing.T) {
 	t.Parallel()
 	api, h := newFakeAPI(), newTestHost(t)
-	writeFile(t, h.path(".kimi/config.toml"), "this is = = not toml\n")
+	writeFile(t, h.path(".kimi-code/config.toml"), "this is = = not toml\n")
 	_, _, err := runInference(t, api, h, runOpts{}, "setup", "kimi", "--model", "kimi-k2", "--yes")
 	if err == nil || !strings.Contains(err.Error(), "not valid TOML") {
 		t.Fatalf("err = %v, want TOML error", err)
@@ -359,7 +413,7 @@ func TestSetupFailureDeletesNewKey(t *testing.T) {
 	if len(api.created) != 0 {
 		t.Errorf("a key was created although the config could not be edited: %v", api.created)
 	}
-	if got := readFile(t, h.path(".kimi/config.toml")); got != "this is = = not toml\n" {
+	if got := readFile(t, h.path(".kimi-code/config.toml")); got != "this is = = not toml\n" {
 		t.Errorf("broken config was rewritten: %q", got)
 	}
 }
@@ -464,11 +518,20 @@ func TestSetupInteractive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(stderr, "Setup will:") || !strings.Contains(out, "Kimi Code CLI is connected") || !strings.Contains(out, "kimi -m verda/qwen3-coder") {
+	if !strings.Contains(stderr, "Setup will:") || !strings.Contains(out, "Kimi Code is connected") || !strings.Contains(out, "kimi -m verda/qwen3-coder") {
 		t.Errorf("stdout:\n%s\nstderr:\n%s", out, stderr)
 	}
 	if len(api.subscribed) != 1 {
 		t.Errorf("subscriptions = %v", api.subscribed)
+	}
+
+	h2 := newTestHost(t)
+	if err := os.Remove(h2.path(".kimi-code")); err != nil {
+		t.Fatal(err)
+	}
+	_, stderr, err = runInference(t, api, h2, runOpts{prompter: tuitest.New().AddMultiSelect([]int{1})}, "setup")
+	if err != nil || !strings.Contains(stderr, "Skipping Kimi Code:") {
+		t.Errorf("uninitialized kimi should be skipped: %v\n%s", err, stderr)
 	}
 
 	declined := tuitest.New().AddMultiSelect([]int{0}).AddMultiSelect([]int{0}).AddConfirm(false)

@@ -121,7 +121,7 @@ Anthropic-compatible `https://inference.verda.com`; requests send
 | Usage / tokens | `verda --agent inf usage [--from YYYY-MM-DD --to YYYY-MM-DD --key <id>] -o json` |
 | Rate limits | `verda --agent inf limits [--all-tiers] -o json` |
 | List keys (masked) | `verda --agent inf keys -o json` |
-| Connect opencode / kimi to Verda | `verda --agent inf setup opencode kimi --model <code> --yes -o json` (`--dry-run` first) |
+| Connect opencode / Kimi Code to Verda | `verda --agent inf setup opencode kimi --model <code> --yes -o json` (`--dry-run` first; `AGENT_NOT_READY` for kimi → user must run `kimi` once or `kimi migrate`) |
 | Disconnect | `verda --agent inf remove <agent> --yes -o json` |
 
 **Keys:** prefer `inf setup` — it stores the key in a 0600 file / the agent's

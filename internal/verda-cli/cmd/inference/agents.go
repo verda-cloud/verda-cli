@@ -113,6 +113,8 @@ type agentDef struct {
 	// KeyInFile: the key lives in ~/.verda/agents/<name>.key; else inline in a config.
 	KeyInFile bool
 
+	// ready reports why the agent cannot be set up on this machine yet; nil = ready.
+	ready      func(env *hostEnv) error
 	write      func(c *agentContext) ([]fileChange, error)
 	clean      func(c *agentContext) ([]fileChange, error)
 	inlineKey  func(c *agentContext) (string, error)
@@ -126,8 +128,8 @@ var agentDefs = []*agentDef{
 		write: writeOpenCode, clean: cleanOpenCode, startHints: openCodeHints,
 	},
 	{
-		Name: agentKimi, Display: "Kimi Code CLI", Binary: "kimi",
-		write: writeKimi, clean: cleanKimi, inlineKey: kimiKey, startHints: kimiHints,
+		Name: agentKimi, Display: "Kimi Code", Binary: "kimi",
+		ready: kimiReady, write: writeKimi, clean: cleanKimi, inlineKey: kimiKey, startHints: kimiHints,
 	},
 	{
 		Name: agentCodex, Display: "Codex", Binary: "codex", Experimental: true, KeyInFile: true,
