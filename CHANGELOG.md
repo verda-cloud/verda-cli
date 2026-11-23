@@ -10,6 +10,7 @@
 - [`ad8164f`] Feat(network): add verda network and subnet list, create and delete for mk8s (beta)
 - [`7ece6b0`] Feat(serverless): release container and batchjob as ungated features
 - [`14538cb`] Fix: serverless env variable feature update
+- [`6172463`] Fix(tui): wizard Back panic, vanishing errors, lost answers, double hint bar
 
 ## [v1.10.0] - 2026-11-06
 - [`2a464bc`] Chore(deps): update verdacloud-sdk-go to v1.7.0 and add go fix check
