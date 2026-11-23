@@ -22,7 +22,6 @@ import (
 
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
 
-	"github.com/verda-cloud/verda-cli/pkg/tui/bubbletea"
 	"github.com/verda-cloud/verda-cli/pkg/tui/wizard"
 )
 
@@ -43,7 +42,6 @@ func validateName(s string) error {
 func wizardLayout() []wizard.ViewDef {
 	return []wizard.ViewDef{
 		{ID: "progress", View: wizard.NewProgressView(wizard.WithProgressPercent())},
-		{ID: "hints", View: wizard.NewHintBarView(wizard.WithHintStyle(bubbletea.HintStyle()))},
 	}
 }
 

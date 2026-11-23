@@ -83,10 +83,8 @@ func selectThemeWizard(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.
 	}
 
 	flow := &wizard.Flow{
-		Name: "theme-select",
-		Layout: []wizard.ViewDef{
-			{ID: "hints", View: wizard.NewHintBarView(wizard.WithHintStyle(bubbletea.HintStyle()))},
-		},
+		Name:   "theme-select",
+		Layout: []wizard.ViewDef{}, // empty, not nil: nil adds the default progress view
 		Steps: []wizard.Step{
 			{
 				Name:        "theme",

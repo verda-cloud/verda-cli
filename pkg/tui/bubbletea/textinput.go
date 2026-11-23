@@ -17,9 +17,11 @@ package bubbletea
 import (
 	"context"
 	"fmt"
+	"unicode/utf8"
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/verda-cloud/verda-cli/pkg/tui"
 )
@@ -109,6 +111,7 @@ func newTextInputModel(prompt string, cfg tui.TextInputConfig) textInputModel {
 	ti.Placeholder = cfg.Placeholder
 	ti.SetValue(cfg.Default)
 	ti.Focus()
+	syncPlaceholderWidth(&ti)
 
 	defaults := ApplyBindingOverrides(DefaultTextInputBindings(), cfg.RelabelByID, cfg.HiddenByID)
 	var bindings []KeyBinding[textInputModel]
@@ -141,10 +144,35 @@ func (m textInputModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	before := m.textInput.Value()
 	var cmd tea.Cmd
 	m.textInput, cmd = m.textInput.Update(msg)
-	m.err = nil
+	if m.textInput.Value() != before {
+		m.err = nil
+		syncPlaceholderWidth(&m.textInput)
+	}
 	return m, cmd
+}
+
+// syncPlaceholderWidth: bubbles renders only the first rune of a placeholder
+// while Width is 0, so give an empty input a width that shows all of it, and
+// leave typed text unbounded. bubbles slices a rune buffer by cell width, so
+// with wide runes the width must be one less than the rune count or the tail is
+// padded with NULs.
+func syncPlaceholderWidth(ti *textinput.Model) {
+	if ti.Value() != "" {
+		ti.SetWidth(0)
+		ti.SetCursor(ti.Position()) // width 0 resets the scroll offsets left from the narrow width
+		return
+	}
+	w, cells := utf8.RuneCountInString(ti.Placeholder), lipgloss.Width(ti.Placeholder)
+	switch {
+	case cells == 0:
+		w = 0 // a positive width would make bubbles slice p[1:0] and panic
+	case cells > w:
+		w--
+	}
+	ti.SetWidth(w)
 }
 
 // Hints derives key hints from the resolved bindings.

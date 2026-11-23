@@ -748,3 +748,63 @@ func TestMultiSelectModel_ViewShowsError(t *testing.T) {
 		t.Errorf("view should show min error, got:\n%s", view)
 	}
 }
+
+func TestMultiSelectModel_BackItem(t *testing.T) {
+	newBack := func() multiSelectModel {
+		return newMS([]string{"a", "b"}, func(c *tui.MultiSelectConfig) { c.BackLabel = "← Back" })
+	}
+
+	t.Run("select-all skips back", func(t *testing.T) {
+		m := msCtrl(newBack(), 'a')
+		if len(m.selected) != 2 || m.selected[2] {
+			t.Errorf("selected = %v, want only indices 0 and 1", m.selected)
+		}
+		m = msCtrl(m, 'a')
+		if len(m.selected) != 0 {
+			t.Errorf("second ctrl+a should deselect, selected = %v", m.selected)
+		}
+	})
+
+	t.Run("space on back is a no-op", func(t *testing.T) {
+		m := newBack()
+		m.cursor = 2
+		m = msKey(m, tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
+		if m.selected[2] {
+			t.Error("back row must not be selectable")
+		}
+	})
+
+	t.Run("enter on back goes back", func(t *testing.T) {
+		m := newBack()
+		m.cursor = 2
+		updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+		m = updated.(multiSelectModel)
+		if m.done {
+			t.Fatal("enter on back must not complete the prompt")
+		}
+		if cmd == nil {
+			t.Fatal("expected a go-back command")
+		}
+		if _, ok := cmd().(GoBackMsg); !ok {
+			t.Fatalf("expected GoBackMsg, got %T", cmd())
+		}
+	})
+
+	t.Run("enter hint follows the cursor", func(t *testing.T) {
+		m := newBack()
+		if got := strings.Join(m.Hints(), " | "); !strings.Contains(got, "enter confirm") {
+			t.Errorf("hints = %q, want enter confirm", got)
+		}
+		m.cursor = 2
+		if got := strings.Join(m.Hints(), " | "); !strings.Contains(got, "enter back") {
+			t.Errorf("hints = %q, want enter back", got)
+		}
+	})
+
+	t.Run("back renders without a checkbox", func(t *testing.T) {
+		view := newBack().View().Content
+		if strings.Count(view, "[ ]") != 2 {
+			t.Errorf("want checkboxes for the two real rows only:\n%s", view)
+		}
+	})
+}

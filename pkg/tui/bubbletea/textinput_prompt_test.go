@@ -15,6 +15,8 @@
 package bubbletea
 
 import (
+	"errors"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -75,4 +77,68 @@ func TestTextInputPrompt_Result_NotDoneInitially(t *testing.T) {
 	if done {
 		t.Fatal("should not be done initially")
 	}
+}
+
+type tickMsg struct{}
+
+func TestTextInputPrompt_ValidationErrorSurvivesNonKeyMessages(t *testing.T) {
+	cfg := tui.ResolveTextInputConfig([]tui.TextInputOption{
+		tui.WithValidation(func(s string) error {
+			if s == "" {
+				return errors.New("required")
+			}
+			return nil
+		}),
+	})
+	m := NewTextInputPrompt("Name:", cfg)
+
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = updated.(PromptModel)
+	for _, msg := range []tea.Msg{tickMsg{}, tea.WindowSizeMsg{Width: 80, Height: 24}} {
+		updated, _ = m.Update(msg)
+		m = updated.(PromptModel)
+	}
+	if !strings.Contains(m.View().Content, "required") {
+		t.Fatalf("validation error vanished after a non-key message:\n%s", m.View().Content)
+	}
+
+	updated, _ = m.Update(tea.KeyPressMsg{Code: 'x', Text: "x"})
+	m = updated.(PromptModel)
+	if strings.Contains(m.View().Content, "required") {
+		t.Fatal("typing should clear the validation error")
+	}
+}
+
+func TestTextInputPrompt_ShowsFullPlaceholder(t *testing.T) {
+	cfg := tui.ResolveTextInputConfig([]tui.TextInputOption{tui.WithPlaceholder("default: 90 days")})
+	m := NewTextInputPrompt("Expires:", cfg)
+	if !strings.Contains(m.View().Content, "efault: 90 days") {
+		t.Fatalf("placeholder truncated:\n%s", m.View().Content)
+	}
+}
+
+func TestTextInputPrompt_PasteLongerThanPlaceholderIsNotClipped(t *testing.T) {
+	cfg := tui.ResolveTextInputConfig([]tui.TextInputOption{tui.WithPlaceholder("name")})
+	m := NewTextInputPrompt("Name:", cfg)
+
+	pasted := "a-much-longer-pasted-value"
+	updated, _ := m.Update(tea.PasteMsg{Content: pasted})
+	m = updated.(PromptModel)
+	if !strings.Contains(m.View().Content, pasted) {
+		t.Fatalf("pasted text clipped:\n%s", m.View().Content)
+	}
+}
+
+func TestTextInputPrompt_WidePlaceholderHasNoNULs(t *testing.T) {
+	cfg := tui.ResolveTextInputConfig([]tui.TextInputOption{tui.WithPlaceholder("名前を入力")})
+	m := NewTextInputPrompt("Name:", cfg)
+	view := m.View().Content
+	if strings.ContainsRune(view, 0) || !strings.Contains(view, "前を入力") {
+		t.Fatalf("wide placeholder rendered wrongly: %q", view)
+	}
+}
+
+func TestTextInputPrompt_ZeroWidthPlaceholderDoesNotPanic(t *testing.T) {
+	cfg := tui.ResolveTextInputConfig([]tui.TextInputOption{tui.WithPlaceholder("\u0301")})
+	_ = NewTextInputPrompt("Name:", cfg).View()
 }

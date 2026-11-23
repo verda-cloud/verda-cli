@@ -186,11 +186,12 @@ flow := &wizard.Flow{
     Name: "s3-move",
     Layout: []wizard.ViewDef{
         {ID: "progress", View: wizard.NewProgressView(wizard.WithProgressPercent())},
-        {ID: "hints", View: wizard.NewHintBarView(wizard.WithHintStyle(bubbletea.HintStyle()))},
     },
     Steps: []wizard.Step{ /* ... */ },
 }
 ```
+
+The wizard composite renders the hint bar; do not add your own view for it.
 
 Per-step rules:
 - Each `Step` binds to a variable via `Setter`/`Value`/`IsSet`/`Resetter`. `IsSet()==true` (e.g. a `--flag` was passed) makes the engine **skip** the step and propagate `Value()` into the collected map.
