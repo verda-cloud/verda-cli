@@ -53,7 +53,7 @@ Credentials are shared with the CLI — run `verda auth login` first in the same
 | `list_batchjobs` | no | — |
 | `describe_batchjob` | no | `name` (required) |
 | `create_batchjob` | **yes, billing** — `confirm:true` required | `name`, `image`, `compute`, `deadline_seconds`, `confirm` (required); `compute_size`, `port`, `registry_credentials`, `env[]`, `env_secrets[]`, `entrypoint[]`, `cmd[]`, `secret_mounts[]`, `max_replicas`, `request_ttl_seconds` |
-| `batchjob_action` | **action-dependent** | `name`, `action` (`pause`/`resume`/`purge_queue`/`delete`; required); `confirm`, `wait`, `timeout_ms` (delete) |
+| `batchjob_action` | **action-dependent** | `name`, `action` (`pause`/`resume`/`purge_queue`/`delete`; required); `confirm`, `timeout_ms` (delete) |
 
 Hibernate is deprecated and will be removed in a future version. It discontinues compute and retains volumes. Retained volumes continue billing.
 
@@ -81,11 +81,14 @@ With `wait: true`, the tool polls the instance (up to 5 minutes) until it reache
 
 ### Serverless
 
-- `container_action` / `batchjob_action` report `accepted` by default. `wait: true` polls the deployment status (up to 5 minutes) only for `pause` (→ `paused`) and `resume` (→ `healthy`) and reports `completed` plus `deployment_status`. `restart` and `purge_queue` have no observable target and always return `accepted`.
+- `container_action` reports `accepted` by default. `wait: true` polls the deployment status (up to 5 minutes) only for `pause` (→ `paused`) and `resume` (→ `healthy`) and reports `completed` plus `deployment_status`. A transient read failure during the wait is retried until the deadline; a permanent 4xx ends it with an error that states the action itself was accepted. `restart` and `purge_queue` have no observable target and always return `accepted`.
+- `batchjob_action` has no `wait` (passing it is a `VALIDATION_ERROR`): the job status vocabulary has not been verified, so the tool does not promise a target it cannot observe. Use `describe_batchjob` to watch the status.
+- `list_containers` with `status` keeps rows whose status could not be read, with `status_error` set and no `status`, so a filtered list is never silently incomplete.
 - `delete` passes `timeout_ms` to the API, which waits server-side (default 60 s, max 300 s) before answering; the tool reports `completed` on success. With `timeout_ms: 0` the API returns at once and the tool reports `accepted`. The call is bounded by that wait plus a margin, not by `--timeout`.
 - `create_container` / `create_batchjob` do not wait: they return the deployment plus its first status read (typically `initializing`). A `min_replicas: 0` deployment may never report `healthy`, so there is nothing to wait for.
 - `scale_container` reports `accepted` with `previous` and `expected`; reads lag writes by 5-20 s. `wait: true` polls until reads show every field that was sent and reports `completed` plus `current`; a wait failure keeps `accepted` and adds `wait_error` (the change is not rolled back). `completed` means the settings show in reads, not that replicas are ready (`list_container_replicas`).
-- `set_container_env` / `unset_container_env` return the variables as re-read after the write (`env`), not an echo of the input, plus `added`/`updated`/`removed` counts.
+- `set_container_env` / `unset_container_env` return the variables as re-read after the write (`env`), not an echo of the input, plus `added`/`updated`/`removed` counts. `removed` is observed (variables before minus after), so an unknown key counts as zero. If `set_container_env` adds succeed and the update of existing names fails, the error says how many were added.
+- Validation errors speak MCP: `details.field` is the argument name and the reason uses argument names and seconds (`must be between 600s and 604800s`), not CLI flags or Go durations.
 
 ## Secrets
 

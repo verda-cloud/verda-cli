@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
@@ -138,11 +139,13 @@ func TestDescribeContainerBestEffortReads(t *testing.T) {
 	}
 }
 
-func TestContainerActionWaitFailureIsError(t *testing.T) {
+// TestContainerActionWaitPermanentFailureIsError: a 4xx on the status read
+// ends the wait at once and reports that the action itself was accepted.
+func TestContainerActionWaitPermanentFailureIsError(t *testing.T) {
 	t.Parallel()
 	s, mock := newMockBackedServer(t)
 	mock.SeedContainerDeployment("api")
-	mock.FailRoute("/container-deployments/api/status", http.StatusServiceUnavailable)
+	mock.FailRoute("/container-deployments/api/status", http.StatusForbidden)
 
 	res := call(t, s.handleContainerAction, "container_action", map[string]any{"name": "api", "action": "pause", "wait": true})
 	if !res.IsError || !strings.Contains(resultText(t, res), "accepted but the wait failed") {
@@ -150,6 +153,27 @@ func TestContainerActionWaitFailureIsError(t *testing.T) {
 	}
 	if mock.ContainerStatus("api") != verda.ContainerDeploymentStatusPaused {
 		t.Error("the pause itself must have gone through before the wait")
+	}
+	if n := mock.RequestCount(http.MethodGet, "/container-deployments/api/status"); n != 1 {
+		t.Errorf("a permanent error must not be retried; status reads = %d", n)
+	}
+}
+
+// TestContainerActionWaitToleratesTransientError: a 503 on one status read is
+// "not yet", like scaling.Wait; the wait completes once reads recover.
+func TestContainerActionWaitToleratesTransientError(t *testing.T) {
+	t.Parallel()
+	s, mock := newMockBackedServer(t)
+	mock.SeedContainerDeployment("api")
+	mock.FailRoute("/container-deployments/api/status", http.StatusServiceUnavailable)
+	time.AfterFunc(200*time.Millisecond, mock.ClearFailures)
+
+	out := parseSuccess(t, call(t, s.handleContainerAction, "container_action", map[string]any{"name": "api", "action": "pause", "wait": true}))
+	if out["status"] != statusCompleted || out["deployment_status"] != verda.ContainerDeploymentStatusPaused {
+		t.Fatalf("wait must recover from a transient read failure: %v", out)
+	}
+	if n := mock.RequestCount(http.MethodGet, "/container-deployments/api/status"); n < 2 {
+		t.Errorf("the failed read must have been retried; status reads = %d", n)
 	}
 }
 
@@ -209,17 +233,27 @@ func TestScaleContainerPatchFailureAfterPreRead(t *testing.T) {
 	}
 }
 
-func TestListContainersFilterSkipsUnreadableStatus(t *testing.T) {
+// TestListContainersFilterFlagsUnreadableStatus: a row whose status cannot be
+// read is kept with status_error, so a filtered list is never silently short.
+func TestListContainersFilterFlagsUnreadableStatus(t *testing.T) {
 	t.Parallel()
 	s, mock := newMockBackedServer(t)
 	mock.SeedContainerDeployment("a")
 	mock.SeedContainerDeployment("b")
+	mock.SeedContainerDeployment("c")
+	mock.SetContainerStatus("c", verda.ContainerDeploymentStatusPaused)
 	mock.FailRoute("/container-deployments/a/status", http.StatusServiceUnavailable)
 
 	var rows []map[string]any
 	mustJSON(t, resultText(t, call(t, s.handleListContainers, "list_containers", map[string]any{"status": "healthy"})), &rows)
-	if len(rows) != 1 || rows[0]["name"] != "b" {
-		t.Fatalf("a row whose status cannot be read does not match a status filter: %v", rows)
+	if len(rows) != 2 || rows[0]["name"] != "a" || rows[1]["name"] != "b" {
+		t.Fatalf("want the unreadable row a and the matching row b, got %v", rows)
+	}
+	if rows[0]["status_error"] == nil || rows[0]["status"] != nil {
+		t.Errorf("unreadable row must carry status_error and no status: %v", rows[0])
+	}
+	if rows[1]["status"] != verda.ContainerDeploymentStatusHealthy || rows[1]["status_error"] != nil {
+		t.Errorf("matching row = %v", rows[1])
 	}
 }
 
@@ -233,11 +267,22 @@ func TestSetContainerEnvWriteFailures(t *testing.T) {
 	}
 	mock.FailMethod(http.MethodPatch, envRoute, http.StatusBadGateway)
 	res = call(t, s.handleSetContainerEnv, "set_container_env", map[string]any{"name": "api", "env": []any{"HF_HOME=/x"}})
-	if !res.IsError {
-		t.Fatal("a failed update must be a tool error")
+	if !res.IsError || strings.Contains(resultText(t, res), "were added") {
+		t.Fatalf("a failed update with nothing added is a plain error: %s", resultText(t, res))
 	}
 	if len(mock.ContainerEnv("api")) != 2 {
 		t.Error("failed writes must leave the variables unchanged")
+	}
+
+	// Adds landed, then the update failed: the error must say so.
+	s2, mock2 := seedEnv(t)
+	mock2.FailMethod(http.MethodPatch, envRoute, http.StatusBadGateway)
+	res = call(t, s2.handleSetContainerEnv, "set_container_env", map[string]any{"name": "api", "env": []any{"NEW=1", "HF_HOME=/x"}})
+	if !res.IsError || !strings.Contains(resultText(t, res), "1 variable(s) were added but the update") {
+		t.Fatalf("partial write must be reported: %s", resultText(t, res))
+	}
+	if len(mock2.ContainerEnv("api")) != 3 {
+		t.Error("the add must have landed")
 	}
 
 	res = call(t, s.handleSetContainerEnv, "set_container_env", map[string]any{"name": "ghost", "env": []any{"A=1"}})
@@ -278,9 +323,14 @@ func TestBatchjobActionFailures(t *testing.T) {
 	if out["status"] != statusAccepted || mock.JobStatus("nightly") != mockapi.JobStatusPaused {
 		t.Fatalf("pause without wait = %v, mock status %q", out, mock.JobStatus("nightly"))
 	}
-	out = parseSuccess(t, call(t, s.handleBatchjobAction, "batchjob_action", map[string]any{"name": "nightly", "action": "resume", "wait": true}))
-	if out["status"] != statusCompleted || out["deployment_status"] != mockapi.JobStatusHealthy {
-		t.Fatalf("resume wait = %v", out)
+	out = parseSuccess(t, call(t, s.handleBatchjobAction, "batchjob_action", map[string]any{"name": "nightly", "action": "resume"}))
+	if out["status"] != statusAccepted || mock.JobStatus("nightly") != mockapi.JobStatusHealthy {
+		t.Fatalf("resume = %v, mock status %q", out, mock.JobStatus("nightly"))
+	}
+	// No wait for jobs until the status vocabulary is verified on staging.
+	assertFieldError(t, call(t, s.handleBatchjobAction, "batchjob_action", map[string]any{"name": "nightly", "action": "resume", "wait": true}), "wait")
+	if n := mock.RequestCount(http.MethodPost, "/job-deployments/nightly/resume"); n != 1 {
+		t.Errorf("a rejected wait must not run the action; resumes = %d", n)
 	}
 	out = parseSuccess(t, call(t, s.handleBatchjobAction, "batchjob_action", map[string]any{"name": "nightly", "action": "delete", "confirm": true, "timeout_ms": float64(0)}))
 	if out["status"] != statusAccepted {

@@ -114,11 +114,12 @@ func TestUnsetContainerEnvConfirmGate(t *testing.T) {
 	res = call(t, s.handleUnsetContainerEnv, "unset_container_env", map[string]any{"name": "api", "keys": []any{}, "confirm": true})
 	assertToolErrorCode(t, res, "MISSING_REQUIRED_FLAGS")
 
+	// removed is observed (before minus after), not the number of keys requested.
 	out := parseSuccess(t, call(t, s.handleUnsetContainerEnv, "unset_container_env", map[string]any{
-		"name": "api", "keys": []any{"HF_HOME"}, "confirm": true,
+		"name": "api", "keys": []any{"HF_HOME", "NOT_THERE"}, "confirm": true,
 	}))
 	if out["removed"] != float64(1) {
-		t.Fatalf("removed = %v, want 1", out["removed"])
+		t.Fatalf("removed = %v, want 1 (one of two keys existed)", out["removed"])
 	}
 	if env := mock.ContainerEnv("api"); len(env) != 1 || env[0].Name != "API_KEY" {
 		t.Fatalf("mock env after unset = %v", env)

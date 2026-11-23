@@ -465,8 +465,8 @@ func TestPermanent(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			if got := permanent(tt.err); got != tt.want {
-				t.Errorf("permanent() = %v, want %v", got, tt.want)
+			if got := Permanent(tt.err); got != tt.want {
+				t.Errorf("Permanent() = %v, want %v", got, tt.want)
 			}
 		})
 	}

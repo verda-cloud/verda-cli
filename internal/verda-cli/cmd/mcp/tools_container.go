@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
@@ -31,7 +32,7 @@ const containerActionDelete = "delete"
 func (s *Server) registerContainerTools() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("list_containers",
-			mcp.WithDescription("List serverless container deployments (always-on HTTP endpoints). The list has no status; pass status to filter, which reads each deployment's status (exact, case-insensitive: healthy, unhealthy, paused, initializing, ...). Use describe_container for one deployment's status and scaling."),
+			mcp.WithDescription("List serverless container deployments (always-on HTTP endpoints). The list has no status; pass status to filter, which reads each deployment's status (exact, case-insensitive: healthy, unhealthy, paused, initializing, ...). A row whose status could not be read is still returned, without status and with status_error, so the filtered list is never silently incomplete. Use describe_container for one deployment's status and scaling."),
 			mcp.WithString("status", mcp.Description("Filter by exact status, case-insensitive (e.g. healthy, paused)")),
 		),
 		s.handleListContainers,
@@ -143,16 +144,41 @@ func (s *Server) handleListContainers(ctx context.Context, req mcp.CallToolReque
 		return jsonResult(deployments)
 	}
 
-	// The list endpoint carries no status; filtering needs one read per row (same N+1 as the CLI).
+	return jsonResult(filterContainersByStatus(ctx, client, deployments, status))
+}
+
+// statusReadParallelism bounds the per-row status reads of a filtered list so
+// they share the --timeout budget concurrently instead of serially.
+const statusReadParallelism = 8
+
+// filterContainersByStatus: the list endpoint carries no status, so a filter
+// needs one read per row (the N+1 the CLI accepts too). Rows whose status
+// could not be read are kept with status_error set: an agent asking for
+// paused deployments must be able to see that the answer is incomplete.
+func filterContainersByStatus(ctx context.Context, client *verda.Client, deployments []verda.ContainerDeployment, status string) []containerView {
+	type read struct{ status, err string }
+	reads := make([]read, len(deployments))
+	sem := make(chan struct{}, statusReadParallelism)
+	var wg sync.WaitGroup
+	for i := range deployments {
+		wg.Go(func() {
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			reads[i].status, reads[i].err = readStatus(ctx, containerStatusReader(client, deployments[i].Name))
+		})
+	}
+	wg.Wait()
+
 	rows := make([]containerView, 0, len(deployments))
 	for i := range deployments {
-		d := &deployments[i]
-		st, stErr := readStatus(ctx, containerStatusReader(client, d.Name))
-		if strings.EqualFold(st, status) {
-			rows = append(rows, containerView{ContainerDeployment: d, Status: st, StatusError: stErr})
+		switch {
+		case reads[i].err != "":
+			rows = append(rows, containerView{ContainerDeployment: &deployments[i], StatusError: reads[i].err})
+		case strings.EqualFold(reads[i].status, status):
+			rows = append(rows, containerView{ContainerDeployment: &deployments[i], Status: reads[i].status})
 		}
 	}
-	return jsonResult(rows)
+	return rows
 }
 
 //nolint:gocritic // hugeParam: handler signature defined by mcp-go.

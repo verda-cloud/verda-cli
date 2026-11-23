@@ -17,6 +17,8 @@ package mcp
 import (
 	"context"
 	"errors"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -87,7 +89,8 @@ func serverlessArgError(err error) error {
 	msg := err.Error()
 	if strings.HasPrefix(msg, "--") {
 		flag, rest, _ := strings.Cut(msg, " ")
-		return invalidArgError(argName(flag), rest)
+		field := argName(flag)
+		return invalidArgError(field, argVocabulary(field, rest))
 	}
 	for _, m := range messageFields {
 		if strings.HasPrefix(msg, m.prefix) {
@@ -95,6 +98,28 @@ func serverlessArgError(err error) error {
 		}
 	}
 	return invalidArgError("request", msg)
+}
+
+var (
+	flagTokenRe = regexp.MustCompile(`--[a-z][a-z-]*`)
+	durationRe  = regexp.MustCompile(`\b\d+[hms](?:\d+[ms])*\b`)
+)
+
+// argVocabulary rewrites a CLI validator message for MCP: other --flag tokens
+// become argument names, and for *_seconds arguments Go durations ("10m",
+// "168h") become seconds, since that is the unit the agent passes.
+func argVocabulary(field, reason string) string {
+	reason = flagTokenRe.ReplaceAllStringFunc(reason, argName)
+	if !strings.HasSuffix(field, "_seconds") {
+		return reason
+	}
+	return durationRe.ReplaceAllStringFunc(reason, func(tok string) string {
+		d, err := time.ParseDuration(tok)
+		if err != nil {
+			return tok
+		}
+		return strconv.Itoa(int(d.Seconds())) + "s"
+	})
 }
 
 // argReader collects typed arguments and latches the first error, so handlers
@@ -167,14 +192,20 @@ func setSeconds(dst *time.Duration, v *int) {
 }
 
 // waitForStatus polls read until it reports want; the last observed status is
-// returned with any error. The timeout bounds every read (no http.Client Timeout).
+// returned with any error. Like scaling.Wait, a transient read failure is "not
+// yet" (the deadline bounds retries); a permanent 4xx ends the wait at once.
 func waitForStatus(ctx context.Context, want string, timeout time.Duration, read func(ctx context.Context) (string, error)) (string, error) {
+	last := "unknown"
 	return cmdutil.Poll(ctx, nil, deploymentPollInterval, cmdutil.WaitOptions{Wait: true, Timeout: timeout},
 		func(ctx context.Context) (string, bool, error) {
 			s, err := read(ctx)
-			if err != nil {
-				return "", false, err
+			if scaling.Permanent(err) {
+				return last, false, err
 			}
+			if err != nil {
+				return last, false, nil //nolint:nilerr // intentional: transient read failure is "not yet"
+			}
+			last = s
 			return s, s == want, nil
 		})
 }

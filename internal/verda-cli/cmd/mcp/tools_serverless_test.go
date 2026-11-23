@@ -70,27 +70,48 @@ func dig(t *testing.T, v any, path ...any) any {
 	return v
 }
 
+// TestServerlessArgErrorFieldNames: details.field is the MCP argument, and the
+// reason speaks MCP too (argument names, seconds), not CLI flags and durations.
 func TestServerlessArgErrorFieldNames(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
-		err   error
-		field string
+		err    error
+		field  string
+		reason string // "" = not asserted
 	}{
-		{errors.New("--max-replicas must be >= max(1, --min-replicas)"), "max_replicas"},
-		{errors.New("--scale-up-delay must be between 0s and 1h"), "scale_up_delay_seconds"},
-		{errors.New("--request-ttl must be between 0s and 24h"), "request_ttl_seconds"},
-		{errors.New("--deadline must be between 10m and 168h"), "deadline_seconds"},
-		{errors.New("--queue-preset=custom requires --queue-load"), "queue_preset"},
-		{&scaling.FieldError{Field: "min-replicas", Message: "must be between 0 and 1000"}, "min_replicas"},
-		{errors.New(`deployment name "Bad_Name" must be lowercase`), "name"},
-		{errors.New(`container image "nginx:latest" must use a specific tag`), "image"},
-		{errors.New(`invalid env name "lower": use uppercase`), "env"},
-		{errors.New(`invalid secret mount "a:b": mount path must be absolute`), "secret_mounts"},
-		{errors.New("something the SDK said"), "request"},
+		{errors.New("--max-replicas must be >= max(1, --min-replicas)"), "max_replicas", "must be >= max(1, min_replicas)"},
+		{errors.New("--scale-up-delay must be between 0s and 1h"), "scale_up_delay_seconds", "must be between 0s and 3600s"},
+		{errors.New("--request-ttl must be between 0s and 24h"), "request_ttl_seconds", "must be between 0s and 86400s"},
+		{errors.New("--deadline must be between 10m and 168h"), "deadline_seconds", "must be between 600s and 604800s"},
+		{errors.New("--queue-preset=custom requires --queue-load"), "queue_preset", "requires queue_load"},
+		{errors.New("--compute-size must be <= 128"), "compute_size", "must be <= 128"},
+		{&scaling.FieldError{Field: "min-replicas", Message: "must be between 0 and 1000"}, "min_replicas", "must be between 0 and 1000"},
+		{errors.New(`deployment name "Bad_Name" must be lowercase`), "name", ""},
+		{errors.New(`container image "nginx:latest" must use a specific tag`), "image", ""},
+		{errors.New(`invalid env name "lower": use uppercase`), "env", ""},
+		{errors.New(`invalid secret mount "a:b": mount path must be absolute`), "secret_mounts", ""},
+		{errors.New("something the SDK said"), "request", ""},
 	}
 	for _, tc := range cases {
 		res := toolErrorResult(serverlessArgError(tc.err))
-		assertFieldError(t, res, tc.field)
+		d := toolErrorDetails(t, res, "VALIDATION_ERROR")
+		if d["field"] != tc.field {
+			t.Errorf("%q: field = %v, want %s", tc.err, d["field"], tc.field)
+		}
+		if tc.reason != "" && d["reason"] != tc.reason {
+			t.Errorf("%q: reason = %q, want %q", tc.err, d["reason"], tc.reason)
+		}
+	}
+}
+
+func TestArgVocabularyLeavesNonDurationFieldsAlone(t *testing.T) {
+	t.Parallel()
+	// "1000" must not be mistaken for a duration, and non-seconds fields keep their text.
+	if got := argVocabulary("max_replicas", "must be between 1 and 1000"); got != "must be between 1 and 1000" {
+		t.Errorf("got %q", got)
+	}
+	if got := argVocabulary("deadline_seconds", "between 10m and 7d"); got != "between 600s and 7d" {
+		t.Errorf("unparseable units stay as they are: %q", got)
 	}
 }
 

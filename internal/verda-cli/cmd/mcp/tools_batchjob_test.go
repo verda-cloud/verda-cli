@@ -97,9 +97,9 @@ func TestBatchjobActions(t *testing.T) {
 		t.Fatal("refused actions must have zero side effects")
 	}
 
-	out := parseSuccess(t, call(t, s.handleBatchjobAction, "batchjob_action", map[string]any{"name": "nightly", "action": "pause", "wait": true}))
-	if out["status"] != statusCompleted || out["deployment_status"] != mockapi.JobStatusPaused {
-		t.Fatalf("pause wait = %v", out)
+	out := parseSuccess(t, call(t, s.handleBatchjobAction, "batchjob_action", map[string]any{"name": "nightly", "action": "pause"}))
+	if out["status"] != statusAccepted || mock.JobStatus("nightly") != mockapi.JobStatusPaused {
+		t.Fatalf("pause = %v, mock status %q", out, mock.JobStatus("nightly"))
 	}
 	out = parseSuccess(t, call(t, s.handleBatchjobAction, "batchjob_action", map[string]any{"name": "nightly", "action": "purge_queue", "confirm": true}))
 	if out["status"] != statusAccepted {

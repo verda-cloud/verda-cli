@@ -27,7 +27,8 @@
 - Never report `"completed"` without observing it: default is `"accepted"`; `wait: true` polls via `cmdutil.PollInstanceStatus` (5 min timeout, nil writer — no TUI spinner over MCP)
 - `vmActions.expectStatus` and the destructive set mirror `cmd/vm/action.go` — keep both in sync
 - `cmdutil.PollInstanceStatus` reports GO errors on terminal failure statuses (`error`, `notfound`); `PollVolumeStatus` stops immediately on failed volume statuses (`VolumeFailedStatuses` in `cmd/util/status_messages.go`) instead of burning the timeout
-- Serverless: `container_action` / `batchjob_action` poll only `pause` → `paused` and `resume` → `healthy` (`waitForStatus`, 5 min); `restart` / `purge_queue` stay `accepted`. `delete` is `completed` because the API waits server-side for `timeout_ms` (bounded by `serverless.DeleteTimeout`, not `--timeout`); `timeout_ms: 0` is `accepted`. `scale_container` uses `scaling.Wait` and keeps `accepted` + `wait_error` on a failed wait (the result's `previous`/`expected` are worth more than an error string). Creates never wait. The job status vocabulary (`paused`/`healthy`) is assumed to match containers — unverified on staging
+- Serverless: `container_action` polls only `pause` → `paused` and `resume` → `healthy` (`waitForStatus`, 5 min); `restart` / `purge_queue` stay `accepted`. Like `scaling.Wait`, a transient read error is "not yet" and only a permanent 4xx (`scaling.Permanent`) ends the wait. `delete` is `completed` because the API waits server-side for `timeout_ms` (bounded by `serverless.DeleteTimeout`, not `--timeout`); `timeout_ms: 0` is `accepted`. `scale_container` uses `scaling.Wait` and keeps `accepted` + `wait_error` on a failed wait (the result's `previous`/`expected` are worth more than an error string). Creates never wait
+- `batchjob_action` has NO `wait`: the job status vocabulary is unverified on staging, so `wait: true` is a `VALIDATION_ERROR` and `batchjobActions` has no `expectStatus`. Once `/job-deployments/{name}/status` is confirmed to report `paused` / `healthy`, set `expectStatus` on pause/resume, drop the rejection in `handleBatchjobAction`, and re-add the `wait` schema argument
 
 ### Serverless: import, never mirror
 - `create_container` / `create_batchjob` start from `serverless.NewContainerCreateOptions()` / `NewBatchjobCreateOptions()` (the CLI defaults) and build via `Request()` — the scratch mount, `:latest` rejection, preset math and SDK validation live in `cmd/serverless`; `wire_format_test.go` there protects this surface too
@@ -48,7 +49,8 @@
 - `add_ssh_key` is additive (not destructive/billing) — intentionally NOT gated
 - No MCP tools exist for `verda registry` (vccr.io) or startup-script mutations; if added, they need the same gate treatment
 - No tool creates a secret, file secret or registry credentials (the value would travel through the agent transcript) and none returns a value; `list_secrets` is names only (`TestListSecretsNamesOnly` greps the output for `"value"`)
-- `list_containers` without `status` carries no status (the list endpoint has none); with `status` it reads one status per row — the same N+1 the CLI accepts for its filter
+- `list_containers` without `status` carries no status (the list endpoint has none); with `status` it reads one status per row (`filterContainersByStatus`, 8 reads in flight so they share the `--timeout` budget concurrently). A row whose read failed is KEPT with `status_error` and no `status`: silently dropping it would hand the agent an incomplete list it cannot detect
+- `unset_container_env` reports `removed` as observed (vars before minus after), not the request length; `set_container_env` says so in the error when adds landed and the update failed
 - `update_container` / `update_batchjob` are absent: the CLI merge depends on `cmd.Flags().Changed()`; `scale_container` and the env tools cover the common changes
 
 ## Relationships

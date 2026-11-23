@@ -139,6 +139,9 @@ func (s *Server) handleSetContainerEnv(ctx context.Context, req mcp.CallToolRequ
 	if len(toUpdate) > 0 {
 		if err := client.ContainerDeployments.UpdateEnvironmentVariables(ctx, name,
 			&verda.ContainerEnvVarsRequest{ContainerName: target.Container, Env: toUpdate}); err != nil {
+			if len(toAdd) > 0 {
+				return mcp.NewToolResultError(fmt.Sprintf("%d variable(s) were added but the update of %d existing variable(s) failed: %v", len(toAdd), len(toUpdate), err)), nil
+			}
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 	}
@@ -176,12 +179,12 @@ func (s *Server) handleUnsetContainerEnv(ctx context.Context, req mcp.CallToolRe
 	ctx, cancel := s.apiContext(ctx)
 	defer cancel()
 
-	container, _, err := serverless.ContainerNameOf(ctx, client, name)
+	before, err := serverless.LoadEnvTarget(ctx, client, name)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 	if err := client.ContainerDeployments.DeleteEnvironmentVariables(ctx, name,
-		&verda.DeleteContainerEnvVarsRequest{ContainerName: container, Env: keys}); err != nil {
+		&verda.DeleteContainerEnvVarsRequest{ContainerName: before.Container, Env: keys}); err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
@@ -190,7 +193,8 @@ func (s *Server) handleUnsetContainerEnv(ctx context.Context, req mcp.CallToolRe
 		return mcp.NewToolResultError(fmt.Sprintf("variables were removed but the re-read failed: %v", err)), nil
 	}
 	view := newEnvView(name, after)
-	removed := len(keys)
+	// removed is observed: names present before and absent after, not the request's length.
+	removed := len(before.Vars) - len(after.Vars)
 	view.Removed = &removed
 	return jsonResult(view)
 }
