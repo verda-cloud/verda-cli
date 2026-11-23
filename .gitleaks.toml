@@ -3,7 +3,18 @@ title = "Verda CLI Gitleaks Config"
 [extend]
 useDefault = true
 
-[allowlist]
+# CI scans every ref with full history, so an allowlist here must be precise:
+# exact synthetic test values, never a pattern that could hide a real key.
+
+[[allowlists]]
+description = "vhs demo tapes"
 paths = [
     '''vhs/.*\.tape''',
+]
+
+[[allowlists]]
+description = "Allow known non-secret CI test value (redact_test.go fixture: sequential hex + SECRET, asserted redacted)"
+regexTarget = "secret"
+regexes = [
+    '''^dcs_0123456789abcdefSECRET$''',
 ]
