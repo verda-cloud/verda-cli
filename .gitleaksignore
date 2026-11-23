@@ -1,0 +1,2 @@
+# Fake inference key in a redaction test fixture, since replaced with a low-entropy value.
+6cb1538b6702acda087f8102527653806f057907:internal/verda-cli/cmd/util/redact_test.go:generic-api-key:143

@@ -140,7 +140,7 @@ func TestRedactSensitiveBody_ContentTypeDispatch(t *testing.T) {
 func TestRedactSensitiveBody_InferenceAPIKey(t *testing.T) {
 	t.Parallel()
 
-	created := `{"id":"k1","label":"ci","masked_key":"dcs_ab…yz","created_at":"2026-11-23T10:00:00Z","key":"dcs_0123456789abcdefSECRET"}`
+	created := `{"id":"k1","label":"ci","masked_key":"dcs_ab…yz","created_at":"2026-11-23T10:00:00Z","key":"dcs_fake-fixture-SECRET"}`
 	got := redactSensitiveBody("application/json", created)
 	if strings.Contains(got, "SECRET") {
 		t.Errorf("create response leaked the plaintext key: %s", got)
@@ -149,7 +149,7 @@ func TestRedactSensitiveBody_InferenceAPIKey(t *testing.T) {
 		t.Errorf("masked key should stay readable: %s", got)
 	}
 
-	other := `{"note":"use dcs_0123456789abcdefSECRET here"}`
+	other := `{"note":"use dcs_fake-fixture-SECRET here"}`
 	if got := redactSensitiveBody("application/json", other); strings.Contains(got, "SECRET") {
 		t.Errorf("dcs_ value under an unknown field leaked: %s", got)
 	}
