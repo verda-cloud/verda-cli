@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
@@ -288,10 +289,21 @@ func sshKeyRequired(apiErr *verda.APIError) *AgentError {
 	}
 }
 
+// authPhrases are auth failures that reach ClassifyError only as text (the SDK's
+// token fetch wraps them with fmt.Errorf). Whole phrases, not "auth" and
+// "failed" anywhere: messages also carry user-chosen names, such as cluster
+// auth-prod next to a pool reason provisioning_failed.
+var authPhrases = []string{
+	"no credentials configured",
+	"authentication failed",
+	"authentication request failed",
+	"failed to get authentication token",
+	"failed to authenticate",
+	"unauthorized",
+	"token expired",
+}
+
 func isAuthError(msg string) bool {
 	lower := strings.ToLower(msg)
-	return strings.Contains(lower, "no credentials configured") ||
-		strings.Contains(lower, "auth") && strings.Contains(lower, "failed") ||
-		strings.Contains(lower, "unauthorized") ||
-		strings.Contains(lower, "token expired")
+	return slices.ContainsFunc(authPhrases, func(p string) bool { return strings.Contains(lower, p) })
 }

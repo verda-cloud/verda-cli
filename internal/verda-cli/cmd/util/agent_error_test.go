@@ -186,6 +186,23 @@ func TestClassifyError_AuthHeuristic(t *testing.T) {
 	}
 }
 
+// The SDK's auth failures arrive as text; names inside other messages must not look like one.
+func TestClassifyError_AuthPhrases(t *testing.T) {
+	t.Parallel()
+	for msg, want := range map[string]string{
+		"failed to get authentication token: authentication failed: 401":     "AUTH_ERROR",
+		"authentication request failed (form): dial tcp: connection refused": "AUTH_ERROR",
+		"Unauthorized":  "AUTH_ERROR",
+		"token expired": "AUTH_ERROR",
+		"timed out waiting for node pool workers in cluster auth-prod (provisioning_failed)": "ERROR",
+		"kubeconfig kc-1 is ready but writing it failed: open /tmp/auth/k.yaml: denied":      "ERROR",
+	} {
+		if got := ClassifyError(errors.New(msg)).Code; got != want {
+			t.Errorf("%q: code = %s, want %s", msg, got, want)
+		}
+	}
+}
+
 func TestClassifyError_Fallback(t *testing.T) {
 	err := errors.New("something unexpected happened")
 	got := ClassifyError(err)
