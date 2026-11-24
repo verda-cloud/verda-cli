@@ -21,6 +21,8 @@ import (
 	"net/netip"
 	"strings"
 
+	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
+
 	"github.com/verda-cloud/verda-cli/pkg/tui"
 	"github.com/verda-cloud/verda-cli/pkg/tui/wizard"
 
@@ -48,11 +50,17 @@ func wizardLayout() []wizard.ViewDef {
 	}
 }
 
-// The SDK and the API own the real rules (name format and length, CIDR size and
-// overlap); the wizard only rejects input that cannot be sent at all.
+// validateName applies the SDK's name rule (the same for clusters and pools) at
+// the prompt, so a bad name does not cost the whole wizard. The SDK owns the
+// rule; the other fields are checked with the whole request before the confirmation.
 func validateName(s string) error {
+	s = strings.TrimSpace(s)
 	if s == "" {
 		return errors.New("name must not be empty")
+	}
+	req := verda.CreateManagedKubernetesNodePoolRequest{Name: s, InstanceType: "x", SSHKeyIDs: []string{"x"}}
+	if err := req.Validate(); err != nil {
+		return errors.New("name must be a DNS label of at most 30 characters: lowercase letters, digits and '-'")
 	}
 	return nil
 }

@@ -176,6 +176,12 @@ func runNodePoolCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.
 	if len(missing) > 0 && !interactive {
 		return cmdutil.NewMissingFlagsError(missing)
 	}
+	// Complete flags are checked before any call, wizard answers before the confirmation.
+	if len(missing) == 0 {
+		if err := checkRequest(cmd, kindNodePool, opts.request().Validate()); err != nil {
+			return err
+		}
+	}
 	client, err := f.VerdaClient()
 	if err != nil {
 		return err
@@ -195,6 +201,9 @@ func runNodePoolCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.
 			return err
 		}
 		opts.trim()
+		if err := checkRequest(cmd, kindNodePool, opts.request().Validate()); err != nil {
+			return err
+		}
 	}
 	target := &clusterTarget{Name: opts.Cluster, Location: opts.Location}
 	req := opts.request()

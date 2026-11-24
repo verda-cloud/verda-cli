@@ -24,6 +24,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/spf13/cobra"
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
 
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
@@ -58,6 +59,15 @@ func mapErr(err error) error {
 		return &verda.APIError{StatusCode: http.StatusForbidden, Code: reasonFeatureNotEnabled, Message: notEnabledMessage}
 	}
 	return err
+}
+
+// checkRequest: the SDK checks a create request inside the call, where a failure
+// is a generic ERROR; checked before the confirmation it is VALIDATION_ERROR.
+func checkRequest(cmd *cobra.Command, kind string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return cmdutil.UsageErrorf(cmd, "invalid %s: %s", kind, strings.TrimSuffix(err.Error(), "."))
 }
 
 // createMayHaveSucceeded: the request was sent and the answer is a 5xx, a 408,

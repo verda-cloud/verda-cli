@@ -89,7 +89,7 @@ func TestNodePoolCreate_MissingFlagsOffTerminal(t *testing.T) {
 
 func TestNodePoolCreate_InvalidFlagsSendNothing(t *testing.T) {
 	t.Parallel()
-	for _, extra := range [][]string{{"--replicas", "-1"}, {"--wait", "--wait-timeout", "0s"}} {
+	for _, extra := range [][]string{{"--replicas", "-1"}, {"--wait", "--wait-timeout", "0s"}, {"--name", "Workers_1"}} {
 		api := poolWizardAPI()
 		if _, _, err := runMK8s(t, tableFactory(newFakeClient(t, api), nil), withPoolArgs(extra...)...); !isUsageError(err) || len(api.requests) != 0 {
 			t.Errorf("%v: err = %v, %d request(s)", extra, err, len(api.requests))

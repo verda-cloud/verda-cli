@@ -253,10 +253,7 @@ func (o *kubeconfigCreateOptions) scriptedInput(cmd *cobra.Command) (verda.Creat
 
 func (o *kubeconfigCreateOptions) validRequest(cmd *cobra.Command) (verda.CreateManagedKubernetesKubeconfigRequest, error) {
 	req := o.request()
-	if err := req.Validate(); err != nil {
-		return req, cmdutil.UsageErrorf(cmd, "invalid kubeconfig: %s", strings.TrimSuffix(err.Error(), "."))
-	}
-	return req, nil
+	return req, checkRequest(cmd, kindKubeconfig, req.Validate())
 }
 
 func createKubeconfig(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client *verda.Client, target *clusterTarget, opts *kubeconfigCreateOptions, req *verda.CreateManagedKubernetesKubeconfigRequest, dest *kubeconfigDest) error {

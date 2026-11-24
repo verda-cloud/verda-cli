@@ -16,6 +16,7 @@ package mk8s
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/verda-cloud/verda-cli/pkg/tui/wizard"
@@ -117,8 +118,11 @@ func TestClusterCreateWizard_StopsBeforeCreateOnEmptyPickers(t *testing.T) {
 
 func TestValidateClusterWizardInputs(t *testing.T) {
 	t.Parallel()
-	// Only input that cannot be sent is rejected; the SDK and the API own the real rules.
-	for name, ok := range map[string]bool{"prod": true, "Prod": true, "a_b": true, "": false} {
+	// The name step applies the SDK's rule; the API owns the CIDR rules beyond the form.
+	for name, ok := range map[string]bool{
+		"prod": true, " prod-1 ": true, "": false, "Prod": false, "a_b": false, "-a": false,
+		strings.Repeat("a", 30): true, strings.Repeat("a", 31): false,
+	} {
 		if err := validateName(name); (err == nil) != ok {
 			t.Errorf("validateName(%q) = %v, ok=%v", name, err, ok)
 		}
@@ -130,5 +134,18 @@ func TestValidateClusterWizardInputs(t *testing.T) {
 	}
 	if validateVersion("  ") == nil || validateVersion("1.37.0") != nil {
 		t.Error("validateVersion")
+	}
+}
+
+// Values the SDK rejects stop after the wizard, before the confirmation and any POST.
+func TestClusterCreateWizard_ChecksTheRequestBeforeTheConfirmation(t *testing.T) {
+	withTerminal(t)
+	api := wizardAPI()
+	withWizardAnswers(t, wizard.TextResult("prod"), wizard.TextResult(""))
+	f := tableFactory(newFakeClient(t, api), nil) // no confirm answer: asking would fail differently
+	args := []string{"cluster", "create", "-l", "FIN-03", "--kubernetes-version", "1.37.0", "--network", "pn-123", "--subnet", "sn-456", "--pod-cidr", "10.50.0.0/24"}
+	_, _, err := runMK8s(t, f, args...)
+	if !isUsageError(err) || !strings.Contains(err.Error(), "invalid cluster: pod_cidr: must be /21 or larger") || len(api.requestsMatching("POST")) != 0 {
+		t.Errorf("err = %v, POSTs = %d", err, len(api.requestsMatching("POST")))
 	}
 }

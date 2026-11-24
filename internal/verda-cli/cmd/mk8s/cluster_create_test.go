@@ -168,3 +168,22 @@ func TestClusterCreate_InteractiveSummaryAndConfirm(t *testing.T) {
 		}
 	}
 }
+
+// The SDK's request rules are checked before any call: VALIDATION_ERROR, nothing sent.
+func TestClusterCreate_InvalidValuesSendNothing(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"cluster", "create", "--name", "Prod_1", "-l", "FIN-03", "--kubernetes-version", "1.37.0", "--network", "pn-123", "--subnet", "sn-456"}, "invalid cluster: name: must be in a valid format"},
+		{withArgs("--pod-cidr", "10.0.0.0/24"), "invalid cluster: pod_cidr: must be /21 or larger"},
+		{withArgs("--pod-cidr", "10.0.0.0/16", "--service-cidr", "10.0.1.0/24"), "service_cidr must not overlap pod_cidr"},
+	} {
+		api := newFakeAPI()
+		_, _, err := runMK8s(t, agentFactory(newFakeClient(t, api)), tc.args...)
+		if ae := cmdutil.ClassifyError(err); ae == nil || ae.Code != "VALIDATION_ERROR" || ae.ExitCode != cmdutil.ExitBadArgs || !strings.Contains(ae.Message, tc.want) || len(api.requests) != 0 {
+			t.Errorf("%v: err = %v, %d request(s)", tc.args, err, len(api.requests))
+		}
+	}
+}

@@ -167,6 +167,13 @@ func runClusterCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.I
 	if len(missing) > 0 && !interactive {
 		return cmdutil.NewMissingFlagsError(missing)
 	}
+	// Complete flags are checked before any call, wizard answers before the confirmation.
+	req := opts.request()
+	if len(missing) == 0 {
+		if err := checkRequest(cmd, kindCluster, req.Validate()); err != nil {
+			return err
+		}
+	}
 
 	client, err := f.VerdaClient()
 	if err != nil {
@@ -178,8 +185,11 @@ func runClusterCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.I
 			return err
 		}
 		opts.trim()
+		req = opts.request()
+		if err := checkRequest(cmd, kindCluster, req.Validate()); err != nil {
+			return err
+		}
 	}
-	req := opts.request()
 
 	if interactive {
 		ok, err := confirmClusterCreate(cmd.Context(), f, ioStreams, &req)
