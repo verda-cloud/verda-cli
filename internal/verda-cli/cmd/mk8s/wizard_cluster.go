@@ -16,12 +16,12 @@ package mk8s
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/netip"
 	"strings"
 
-	validation "github.com/go-ozzo/ozzo-validation/v4"
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
 
 	"github.com/verda-cloud/verda-cli/pkg/tui"
@@ -60,11 +60,32 @@ func sdkNameRule(validate func(name string) error) func(string) error {
 		if s == "" {
 			return errors.New("name must not be empty")
 		}
-		if errs, ok := errors.AsType[validation.Errors](validate(s)); ok && errs["name"] != nil {
-			return fmt.Errorf("name: %w (lowercase letters, digits and '-')", errs["name"])
+		if msg := fieldError(validate(s), "name"); msg != "" {
+			return fmt.Errorf("name: %s (lowercase letters, digits and '-')", msg)
 		}
 		return nil
 	}
+}
+
+// fieldError is the SDK's message for one field of a Validate error, or "".
+// The SDK's field-error type is internal (v1.10.0); it marshals to
+// {"field": "message"}. If that stops working, names pass the prompt and the
+// whole-request check still stops them before the confirmation.
+func fieldError(err error, field string) string {
+	var m json.Marshaler
+	if !errors.As(err, &m) {
+		return ""
+	}
+	b, err := m.MarshalJSON()
+	if err != nil {
+		return ""
+	}
+	var fields map[string]any
+	if json.Unmarshal(b, &fields) != nil {
+		return ""
+	}
+	msg, _ := fields[field].(string)
+	return msg
 }
 
 var (

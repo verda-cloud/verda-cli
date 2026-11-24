@@ -8,7 +8,7 @@ require (
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
 	github.com/spf13/viper v1.21.0
-	github.com/verda-cloud/verdacloud-sdk-go v1.9.1
+	github.com/verda-cloud/verdacloud-sdk-go v1.10.0
 	go.yaml.in/yaml/v3 v3.0.5
 )
 
@@ -23,7 +23,6 @@ require (
 	github.com/aws/smithy-go v1.25.0
 	github.com/charmbracelet/colorprofile v0.4.2
 	github.com/charmbracelet/x/term v0.2.2
-	github.com/go-ozzo/ozzo-validation/v4 v4.4.1
 	github.com/google/go-containerregistry v0.21.5
 	github.com/mark3labs/mcp-go v0.47.0
 	go.uber.org/zap v1.27.1

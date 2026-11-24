@@ -298,7 +298,7 @@ func (f *factoryImpl) VerdaClient() (*verda.Client, error) {
 		return nil, err
 	}
 
-	// SDK v1.9.1 runs this middleware around a no-op handler, so nothing is retried today.
+	// SDK v1.10.0 runs this middleware around a no-op handler, so nothing is retried today.
 	// A later SDK that retries would also retry POST creates (shouldRetry ignores the method).
 	client.AddRequestMiddleware(verda.ExponentialBackoffRetryMiddleware(
 		retryMaxAttempts, retryInitialDelay, client.Logger,
