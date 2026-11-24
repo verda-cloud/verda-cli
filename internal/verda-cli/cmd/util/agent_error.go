@@ -275,8 +275,8 @@ const sshKeyRequiredText = "ssh keys can be an array of uuid"
 // itself: POST /instances rejects an absent ssh_key_ids while listing "not
 // defined" as valid, so the wording is unactionable and moves to details.
 // It matches that sentence only: any other 400 that mentions SSH keys (an
-// unknown key ID on a node pool) keeps its own text. Delete when the API
-// accepts an absent value.
+// unknown key ID on a node pool) keeps its own text, and so would a reworded
+// one (API_ERROR). Delete when the API accepts an absent value.
 func sshKeyRequired(apiErr *verda.APIError) *AgentError {
 	if !strings.Contains(strings.ToLower(apiErr.Message), sshKeyRequiredText) {
 		return nil
@@ -295,15 +295,14 @@ func sshKeyRequired(apiErr *verda.APIError) *AgentError {
 }
 
 // authPhrases are auth failures that reach ClassifyError only as text (the SDK's
-// token fetch wraps them with fmt.Errorf). Whole phrases, not "auth" and
-// "failed" anywhere: messages also carry user-chosen names, such as cluster
-// auth-prod next to a pool reason provisioning_failed.
+// token fetch wraps them with fmt.Errorf). Whole phrases: "auth" and "failed"
+// anywhere also matched user-chosen names, such as cluster auth-prod next to a
+// pool reason provisioning_failed. A name holding a whole phrase still matches.
 var authPhrases = []string{
 	"no credentials configured",
 	"authentication failed",
 	"authentication request failed",
 	"failed to get authentication token",
-	"failed to authenticate",
 	"unauthorized",
 	"token expired",
 }

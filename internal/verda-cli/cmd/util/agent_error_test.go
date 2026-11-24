@@ -190,7 +190,9 @@ func TestClassifyError_AuthHeuristic(t *testing.T) {
 func TestClassifyError_AuthPhrases(t *testing.T) {
 	t.Parallel()
 	for msg, want := range map[string]string{
-		"failed to get authentication token: authentication failed: 401":     "AUTH_ERROR",
+		"failed to get authentication token: context deadline exceeded":      "AUTH_ERROR",
+		"authentication failed: API error 401: invalid client":               "AUTH_ERROR",
+		"no credentials configured":                                          "AUTH_ERROR",
 		"authentication request failed (form): dial tcp: connection refused": "AUTH_ERROR",
 		"Unauthorized":  "AUTH_ERROR",
 		"token expired": "AUTH_ERROR",
