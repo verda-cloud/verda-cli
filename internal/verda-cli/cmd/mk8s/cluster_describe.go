@@ -53,7 +53,7 @@ func NewCmdClusterDescribe(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobr
 			return runClusterDescribe(cmd, f, ioStreams, args, location)
 		},
 	}
-	addLocationFlag(cmd, &location)
+	addLocationFlag(cmd, &location, locationUsage)
 	return cmd
 }
 

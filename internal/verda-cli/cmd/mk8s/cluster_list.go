@@ -18,40 +18,46 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"text/tabwriter"
 	"time"
 	"unicode/utf8"
 
 	"github.com/spf13/cobra"
+	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
 
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
 
 // NewCmdClusterList creates `verda mk8s cluster list`.
 func NewCmdClusterList(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
-	return &cobra.Command{
+	var location string
+	cmd := &cobra.Command{
 		Use:     "list",
 		Aliases: []string{"ls"},
 		Short:   "List clusters",
 		Long: longDesc(`
 			List the managed Kubernetes clusters in your project, in every
-			location.
+			location or, with -l, in one.
 		`),
 		Example: cmdutil.Examples(`
 			verda mk8s cluster list
+			verda mk8s cluster list -l FIN-03
 
 			# Names only, for scripts
 			verda mk8s cluster ls -o json | jq -r '.[].name'
 		`),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runClusterList(cmd, f, ioStreams)
+			return runClusterList(cmd, f, ioStreams, location)
 		},
 	}
+	addLocationFlag(cmd, &location, "List only the clusters in this location")
+	return cmd
 }
 
-func runClusterList(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams) error {
+func runClusterList(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, location string) error {
 	client, err := f.VerdaClient()
 	if err != nil {
 		return err
@@ -60,6 +66,9 @@ func runClusterList(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOS
 	if err != nil {
 		return err
 	}
+	if location != "" {
+		clusters = slices.DeleteFunc(clusters, func(c verda.ManagedKubernetesCluster) bool { return c.Location != location })
+	}
 	views := newClusterViews(clusters)
 	cmdutil.DebugJSON(ioStreams.ErrOut, f.Debug(), fmt.Sprintf("API response: %d cluster(s):", len(views)), views)
 
@@ -67,7 +76,7 @@ func runClusterList(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOS
 		return err
 	}
 	if len(views) == 0 {
-		printNoClusters(ioStreams)
+		printNoClusters(ioStreams, location)
 		return nil
 	}
 

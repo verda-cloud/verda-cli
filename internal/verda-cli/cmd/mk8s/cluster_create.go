@@ -115,7 +115,7 @@ func NewCmdClusterCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.
 	}
 	flags := cmd.Flags()
 	flags.StringVar(&opts.Name, flagName, "", "Cluster name: a DNS label of at most 30 characters, unique in the project")
-	flags.StringVarP(&opts.Location, flagLocation, "l", "", "Location code, for example FIN-03 (see verda mk8s locations)")
+	addLocationFlag(cmd, &opts.Location, "Location code, for example FIN-03 (see verda mk8s locations)")
 	flags.StringVar(&opts.Version, flagKubernetesVersion, "", "Kubernetes version, for example 1.37.0 (the API checks it)")
 	flags.StringVar(&opts.Network, flagNetwork, "", "ID of the private network (see verda network list)")
 	flags.StringVar(&opts.Subnet, flagSubnet, "", "ID of a subnet of that network in the cluster's location (see verda network subnet list)")

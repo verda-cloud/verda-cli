@@ -110,3 +110,16 @@ func TestAgeColumn(t *testing.T) {
 		t.Errorf("zero time = %q", got)
 	}
 }
+
+func TestClusterList_Location(t *testing.T) {
+	t.Parallel()
+	client := newFakeClient(t, seededClusters())
+	out, _, err := runMK8s(t, jsonFactory(client), "cluster", "list", "-l", "fin-01")
+	if got := decodeJSON[[]ClusterView](t, out); err != nil || len(got) != 1 || got[0].Name != "staging" {
+		t.Errorf("-l fin-01: %v, err = %v", got, err)
+	}
+	out, errOut, err := runMK8s(t, tableFactory(client, nil), "cluster", "list", "-l", "FIN-99")
+	if err != nil || out != "No clusters found in FIN-99.\n" || errOut != "" {
+		t.Errorf("-l FIN-99: out=%q stderr=%q err=%v", out, errOut, err)
+	}
+}

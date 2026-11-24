@@ -77,7 +77,7 @@ func NewCmdClusterUpgrade(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra
 			return runClusterUpgrade(cmd, f, ioStreams, args, opts)
 		},
 	}
-	addLocationFlag(cmd, &opts.Location)
+	addLocationFlag(cmd, &opts.Location, locationUsage)
 	cmd.Flags().StringVar(&opts.Version, flagKubernetesVersion, "", "New Kubernetes version, for example 1.38.0 (the API checks it)")
 	cmd.Flags().BoolVarP(&opts.Yes, flagYes, "y", false, yesUsage)
 	return cmd

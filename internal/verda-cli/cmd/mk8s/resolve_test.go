@@ -26,11 +26,11 @@ import (
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
 
-// With -l there is no List call; name and location are trimmed.
+// With -l there is no List call; name and location are trimmed, the location upper-cased.
 func TestResolve_TrimsNameAndLocation(t *testing.T) {
 	t.Parallel()
 	api := seededClusters()
-	if _, _, err := runMK8s(t, tableFactory(newFakeClient(t, api), nil), "cluster", "describe", " prod ", "-l", " FIN-03 "); err != nil {
+	if _, _, err := runMK8s(t, tableFactory(newFakeClient(t, api), nil), "cluster", "describe", " prod ", "-l", " fin-03 "); err != nil {
 		t.Fatal(err)
 	}
 	if got := api.paths("GET"); got[0] != "/mk8sclusters/FIN-03/prod" {
@@ -78,7 +78,7 @@ func TestResolve_Picker(t *testing.T) {
 		err         string
 	}{
 		"picks the second":     {seededClusters(), &cancelPrompter{Prompter: tuitest.New().AddSelect(1)}, nil, "staging", "", ""},
-		"limited to -l":        {seededClusters(), &cancelPrompter{Prompter: tuitest.New().AddSelect(0)}, []string{"-l", "FIN-01"}, "staging", "", ""},
+		"limited to -l":        {seededClusters(), &cancelPrompter{Prompter: tuitest.New().AddSelect(0)}, []string{"-l", "fin-01"}, "staging", "", ""},
 		"cancel row":           {seededClusters(), &cancelPrompter{Prompter: tuitest.New().AddSelect(2)}, nil, "", canceledMsg, ""},
 		"esc":                  {seededClusters(), &cancelPrompter{Prompter: tuitest.New(), selectErr: context.Canceled}, nil, "", canceledMsg, ""},
 		"ctrl+c":               {seededClusters(), &cancelPrompter{Prompter: tuitest.New(), selectErr: tui.ErrInterrupted}, nil, "", canceledMsg, ""},

@@ -56,7 +56,7 @@ func NewCmdClusterDelete(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.
 			return runClusterDelete(cmd, f, ioStreams, args, location, yes)
 		},
 	}
-	addLocationFlag(cmd, &location)
+	addLocationFlag(cmd, &location, locationUsage)
 	cmd.Flags().BoolVarP(&yes, flagYes, "y", false, yesUsage)
 	return cmd
 }

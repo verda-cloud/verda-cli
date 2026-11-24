@@ -71,7 +71,7 @@ type poolScope struct {
 
 func (s *poolScope) addFlags(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&s.Cluster, flagCluster, "", clusterUsage)
-	addLocationFlag(cmd, &s.Location)
+	addLocationFlag(cmd, &s.Location, locationUsage)
 }
 
 // missing lists --cluster, and arg (<pool> or <id>) unless it is "", when a

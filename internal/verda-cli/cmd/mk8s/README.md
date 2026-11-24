@@ -26,7 +26,7 @@ verda mk8s node-pool scale workers --cluster prod --replicas 0 --yes
 verda mk8s cluster delete prod --yes        # node pools, worker VMs and kubeconfigs go with it
 ```
 
-Cluster and node pool names are unique in the project (pool names too, not only in their cluster), so `--cluster prod` is enough: the CLI finds the location with one list call; `-l` skips that call. Kubeconfigs are named by an ID that the API chooses.
+Cluster and node pool names are unique in the project (pool names too, not only in their cluster), so `--cluster prod` is enough: the CLI finds the location with one list call; `-l` skips that call. `-l` takes the code in any case (`fin-03` is `FIN-03`); on `cluster list` it filters. Kubeconfigs are named by an ID that the API chooses.
 
 ## Prompts and `--yes`
 

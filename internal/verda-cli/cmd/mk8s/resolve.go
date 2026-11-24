@@ -42,9 +42,21 @@ type clusterTarget struct {
 	Location string
 }
 
-func addLocationFlag(cmd *cobra.Command, location *string) {
-	cmd.Flags().StringVarP(location, flagLocation, "l", "", locationUsage)
+func addLocationFlag(cmd *cobra.Command, location *string, usage string) {
+	cmd.Flags().VarP((*locationCode)(location), flagLocation, "l", usage)
 }
+
+// locationCode: codes are upper case (FIN-03), so -l fin-03 matches them in pickers and API paths.
+type locationCode string
+
+func (l *locationCode) String() string { return string(*l) }
+
+func (l *locationCode) Set(s string) error {
+	*l = locationCode(strings.ToUpper(strings.TrimSpace(s)))
+	return nil
+}
+
+func (l *locationCode) Type() string { return "string" }
 
 // checkClusterArg runs before f.VerdaClient(), so bad input fails the same
 // with or without credentials. label is <cluster> or --cluster.
@@ -141,11 +153,7 @@ func pickCluster(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStr
 		}
 	}
 	if len(shown) == 0 {
-		if location != "" {
-			_, _ = fmt.Fprintf(ioStreams.Out, "No clusters found in %s.\n", location)
-			return nil, nil
-		}
-		printNoClusters(ioStreams)
+		printNoClusters(ioStreams, location)
 		return nil, nil
 	}
 	labels := make([]string, 0, len(shown)+1)
@@ -170,7 +178,11 @@ func pickerHints() []tui.SelectOption {
 	return []tui.SelectOption{tui.WithShowHints(true), tui.WithSelectRelabel("esc", "esc cancel")}
 }
 
-func printNoClusters(ioStreams cmdutil.IOStreams) {
+func printNoClusters(ioStreams cmdutil.IOStreams, location string) {
+	if location != "" {
+		_, _ = fmt.Fprintf(ioStreams.Out, "No clusters found in %s.\n", location)
+		return
+	}
 	_, _ = fmt.Fprintln(ioStreams.Out, "No clusters found.")
 	_, _ = fmt.Fprintln(ioStreams.ErrOut, "Create one with: verda mk8s cluster create")
 }
