@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"os"
 	"os/user"
+	"path/filepath"
 	"strings"
 
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
@@ -184,8 +185,21 @@ func (a *kubeconfigAsker) askFile(opts *kubeconfigCreateOptions, t *clusterTarge
 	if !ok {
 		return false, err
 	}
-	opts.File, opts.fileSet = v, true
+	opts.File, opts.fileSet = expandHome(v), true
 	return true, nil
+}
+
+// expandHome: no shell expands a leading ~/ in a prompt answer.
+func expandHome(path string) string {
+	rest, ok := strings.CutPrefix(path, "~/")
+	if !ok {
+		return path
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return path
+	}
+	return filepath.Join(home, rest)
 }
 
 // kubeconfigFileValidator refuses "-": it would print the private key on the terminal.
@@ -195,7 +209,7 @@ func kubeconfigFileValidator(cluster, commonName string, force bool) func(string
 		if s == kubeconfigStdout {
 			return errors.New("enter a file path; use --file - to print the YAML to stdout")
 		}
-		target, err := newKubeconfigTarget(s, cluster, commonName)
+		target, err := newKubeconfigTarget(expandHome(s), cluster, commonName)
 		if err != nil {
 			return err
 		}

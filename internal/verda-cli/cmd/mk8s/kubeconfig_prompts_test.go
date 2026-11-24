@@ -62,6 +62,13 @@ func TestKubeconfigCreateInteractive(t *testing.T) {
 			file:   func(home, _ string) string { return filepath.Join(home, ".kube", "verda-prod.alice.yaml") },
 			groups: []any{"dev", "ops"},
 		},
+		"~/ in the file answer is the home directory": {
+			prompter: func(string) *tuitest.Prompter {
+				return tuitest.New().AddTextInput("alice").AddSelect(0).AddTextInput("").AddTextInput("").AddTextInput("~/kc.yaml").AddConfirm(true)
+			},
+			file:   func(home, _ string) string { return filepath.Join(home, "kc.yaml") },
+			groups: []any{groupAdmin},
+		},
 		"all flags: only the confirm": {
 			prompter: func(string) *tuitest.Prompter { return tuitest.New().AddConfirm(true) },
 			flags: func(file string) []string {
@@ -157,5 +164,19 @@ func TestKubeconfigPromptValidators(t *testing.T) {
 		if (tc.want == "") != (tc.err == nil) || (tc.err != nil && (!strings.Contains(tc.err.Error(), tc.want) || strings.HasSuffix(tc.err.Error(), "."))) {
 			t.Errorf("%s: err = %v, want %q", name, tc.err, tc.want)
 		}
+	}
+}
+
+func TestKubeconfigFileValidator_ExpandsHome(t *testing.T) {
+	home := setHome(t)
+	if err := os.WriteFile(filepath.Join(home, "taken.yaml"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	validate := kubeconfigFileValidator("prod", "alice", false)
+	if err := validate("~/kc.yaml"); err != nil {
+		t.Errorf("~/kc.yaml: %v", err)
+	}
+	if err := validate("~/taken.yaml"); err == nil || !strings.Contains(err.Error(), filepath.Join(home, "taken.yaml")) {
+		t.Errorf("~/taken.yaml: %v, want the existing file in the home directory", err)
 	}
 }
