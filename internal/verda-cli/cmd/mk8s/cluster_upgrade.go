@@ -51,7 +51,8 @@ func NewCmdClusterUpgrade(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra
 			as a rolling update. The command returns once the API accepts the
 			request. It has no --wait: the API reports the requested version,
 			not the running one, so the CLI cannot tell when the rollout ends.
-			Follow the rollout with cluster describe.
+			Follow the rollout with cluster describe. The version the cluster
+			already has sends nothing (status "unchanged").
 
 			Without <cluster>, a terminal session shows a picker. Without
 			--kubernetes-version, it shows the current version and asks for
@@ -113,6 +114,9 @@ func runClusterUpgrade(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.
 		}
 		opts.Version = version
 	}
+	if opts.Version == current.KubernetesVersion {
+		return reportUpgradeUnchanged(f, ioStreams, current)
+	}
 	if !opts.Yes {
 		ok, err := confirmWarning(cmd.Context(), ioStreams, f.Prompter(),
 			fmt.Sprintf("Rolling upgrade from %s to %s", current.KubernetesVersion, opts.Version),
@@ -141,6 +145,15 @@ func runClusterUpgrade(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.
 		result.Cluster.Name, result.PreviousVersion, opts.Version, result.Cluster.Location)
 	_, _ = fmt.Fprintf(ioStreams.ErrOut, "Follow the rollout with: %s\n", describeCmd(result.Cluster.Name, result.Cluster.Location))
 	_, _ = fmt.Fprintln(ioStreams.ErrOut, "`describe` may show `degraded` while the rollout runs.")
+	return nil
+}
+
+func reportUpgradeUnchanged(f cmdutil.Factory, ioStreams cmdutil.IOStreams, c *verda.ManagedKubernetesCluster) error {
+	result := ClusterUpgradeResult{Status: statusUnchanged, PreviousVersion: c.KubernetesVersion, Cluster: newClusterView(c)}
+	if wrote, err := cmdutil.WriteStructured(ioStreams.Out, f.OutputFormat(), result); wrote {
+		return err
+	}
+	_, _ = fmt.Fprintf(ioStreams.Out, "Cluster %s already has Kubernetes version %s; nothing to do.\n", c.Name, c.KubernetesVersion)
 	return nil
 }
 

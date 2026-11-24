@@ -108,3 +108,25 @@ func TestClusterUpgrade_APIErrorsShownAsSent(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+// The version the cluster already has sends nothing, on a terminal too (no confirmation).
+func TestClusterUpgrade_SameVersionSendsNothing(t *testing.T) {
+	t.Parallel()
+	api := seededClusters()
+	out, _, err := runMK8s(t, jsonFactory(newFakeClient(t, api)), "cluster", "upgrade", "prod", "--kubernetes-version", "1.37.0", "--yes")
+	if r := decodeJSON[ClusterUpgradeResult](t, out); err != nil || r.Status != "unchanged" || r.PreviousVersion != "1.37.0" || r.Cluster.Name != "prod" {
+		t.Errorf("result = %+v, err = %v", r, err)
+	}
+	if patches := api.requestsMatching("PATCH"); len(patches) != 0 {
+		t.Errorf("PATCHes = %v", patches)
+	}
+}
+
+func TestClusterUpgrade_SameVersionInteractive(t *testing.T) {
+	withTerminal(t)
+	api := seededClusters()
+	out, _, err := runMK8s(t, tableFactory(newFakeClient(t, api), tuitest.New().AddTextInput("1.37.0")), "cluster", "upgrade", "prod")
+	if err != nil || out != "Cluster prod already has Kubernetes version 1.37.0; nothing to do.\n" || len(api.requestsMatching("PATCH")) != 0 {
+		t.Errorf("out = %q, err = %v, PATCHes = %v", out, err, api.requestsMatching("PATCH"))
+	}
+}

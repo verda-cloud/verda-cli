@@ -43,7 +43,7 @@ Without `--wait` a command reports `accepted`; with `--wait` (`kubeconfig create
 
 - A timeout exits non-zero; the change keeps going in the background. Ctrl+C stops only the wait.
 - After a node pool timeout the backend keeps creating workers, which bill even before they join: the error says how to stop (delete the pool, or scale back with `--yes`).
-- `node-pool scale` to the current count sends nothing (status `unchanged`); with `--wait` it still waits for a pool that is not yet settled.
+- `node-pool scale` to the current count sends nothing (status `unchanged`); with `--wait` it still waits for a pool that is not yet settled. `cluster upgrade` to the version the cluster already has sends nothing either (status `unchanged`).
 - Deletes and `cluster upgrade` have no `--wait`: the VMs of a deleted cluster or pool are deleted in the background, and the API reports the requested version, not the running one.
 
 ## Kubeconfigs
