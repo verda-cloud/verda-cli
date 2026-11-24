@@ -66,7 +66,7 @@ func buildNodePoolCreateFlow(opts *nodePoolCreateOptions, cache *wizardCache) *w
 				IsSet: func() bool { return clusterSet },
 				Value: func() any { return opts.Cluster },
 			},
-			textStep(flagName, "Node pool name (unique in the project, not only in the cluster)", &opts.Name, opts.Name != "", validateName),
+			textStep(flagName, "Node pool name (unique in the project, not only in the cluster)", &opts.Name, opts.Name != "", validatePoolName),
 			selectStep(flagInstanceType, "Instance type", &opts.InstanceType, opts.InstanceType != "", instanceTypeLoader(opts, cache), flagCluster),
 			{
 				Name:        flagSSHKey,

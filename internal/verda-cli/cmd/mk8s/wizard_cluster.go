@@ -21,6 +21,7 @@ import (
 	"net/netip"
 	"strings"
 
+	validation "github.com/go-ozzo/ozzo-validation/v4"
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
 
 	"github.com/verda-cloud/verda-cli/pkg/tui"
@@ -50,20 +51,26 @@ func wizardLayout() []wizard.ViewDef {
 	}
 }
 
-// validateName applies the SDK's name rule (the same for clusters and pools) at
-// the prompt, so a bad name does not cost the whole wizard. The SDK owns the
-// rule; the other fields are checked with the whole request before the confirmation.
-func validateName(s string) error {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return errors.New("name must not be empty")
+// sdkNameRule checks a name at the prompt with the SDK's own rule, so a bad name
+// does not cost the whole wizard. Only the "name" error counts: the other fields
+// are empty here and are checked with the whole request before the confirmation.
+func sdkNameRule(validate func(name string) error) func(string) error {
+	return func(s string) error {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			return errors.New("name must not be empty")
+		}
+		if errs, ok := errors.AsType[validation.Errors](validate(s)); ok && errs["name"] != nil {
+			return fmt.Errorf("name: %w (lowercase letters, digits and '-')", errs["name"])
+		}
+		return nil
 	}
-	req := verda.CreateManagedKubernetesNodePoolRequest{Name: s, InstanceType: "x", SSHKeyIDs: []string{"x"}}
-	if err := req.Validate(); err != nil {
-		return errors.New("name must be a DNS label of at most 30 characters: lowercase letters, digits and '-'")
-	}
-	return nil
 }
+
+var (
+	validateClusterName = sdkNameRule(func(n string) error { return verda.CreateManagedKubernetesClusterRequest{Name: n}.Validate() })
+	validatePoolName    = sdkNameRule(func(n string) error { return verda.CreateManagedKubernetesNodePoolRequest{Name: n}.Validate() })
+)
 
 func validateCIDR(s, example string) error {
 	if _, err := netip.ParsePrefix(s); err != nil {
@@ -121,7 +128,7 @@ func buildClusterCreateFlow(opts *clusterCreateOptions, cache *wizardCache) *wiz
 		Name:   "mk8s-cluster-create",
 		Layout: wizardLayout(),
 		Steps: []wizard.Step{
-			textStep(flagName, "Cluster name (unique in the project)", &opts.Name, opts.Name != "", validateName),
+			textStep(flagName, "Cluster name (unique in the project)", &opts.Name, opts.Name != "", validateClusterName),
 			selectStep(flagLocation, "Location", &opts.Location, opts.Location != "", locationLoader(cache)),
 			textStep(flagKubernetesVersion, "Kubernetes version (for example 1.37.0)", &opts.Version, opts.Version != "", validateVersion),
 			selectStep(flagNetwork, "Private network", &opts.Network, opts.Network != "", networkLoader(cache)),

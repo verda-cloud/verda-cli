@@ -166,6 +166,20 @@ func (o *nodePoolCreateOptions) request() verda.CreateManagedKubernetesNodePoolR
 	}
 }
 
+// checkGiven runs before any call: a given name, and the whole request when
+// nothing is left to ask. Wizard answers are checked before the confirmation.
+func (o *nodePoolCreateOptions) checkGiven(cmd *cobra.Command, complete bool) error {
+	if o.Name != "" {
+		if err := checkRequest(cmd, kindNodePool, validatePoolName(o.Name)); err != nil {
+			return err
+		}
+	}
+	if !complete {
+		return nil
+	}
+	return checkRequest(cmd, kindNodePool, o.request().Validate())
+}
+
 func runNodePoolCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *nodePoolCreateOptions) error {
 	opts.trim()
 	if err := checkPoolFlags(cmd, opts.Wait, opts.Replicas); err != nil {
@@ -176,11 +190,8 @@ func runNodePoolCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.
 	if len(missing) > 0 && !interactive {
 		return cmdutil.NewMissingFlagsError(missing)
 	}
-	// Complete flags are checked before any call, wizard answers before the confirmation.
-	if len(missing) == 0 {
-		if err := checkRequest(cmd, kindNodePool, opts.request().Validate()); err != nil {
-			return err
-		}
+	if err := opts.checkGiven(cmd, len(missing) == 0); err != nil {
+		return err
 	}
 	client, err := f.VerdaClient()
 	if err != nil {

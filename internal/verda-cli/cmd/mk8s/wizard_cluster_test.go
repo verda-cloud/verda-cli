@@ -118,13 +118,15 @@ func TestClusterCreateWizard_StopsBeforeCreateOnEmptyPickers(t *testing.T) {
 
 func TestValidateClusterWizardInputs(t *testing.T) {
 	t.Parallel()
-	// The name step applies the SDK's rule; the API owns the CIDR rules beyond the form.
+	// The name steps apply the SDK's rule, so this table fails when the SDK changes it.
 	for name, ok := range map[string]bool{
 		"prod": true, " prod-1 ": true, "": false, "Prod": false, "a_b": false, "-a": false,
 		strings.Repeat("a", 30): true, strings.Repeat("a", 31): false,
 	} {
-		if err := validateName(name); (err == nil) != ok {
-			t.Errorf("validateName(%q) = %v, ok=%v", name, err, ok)
+		for kind, validate := range map[string]func(string) error{"cluster": validateClusterName, "pool": validatePoolName} {
+			if err := validate(name); (err == nil) != ok {
+				t.Errorf("%s name %q: err = %v, ok=%v", kind, name, err, ok)
+			}
 		}
 	}
 	for cidr, ok := range map[string]bool{"10.100.0.0/16": true, "": false, "10.0.0.1": false, "x/16": false} {
@@ -147,5 +149,14 @@ func TestClusterCreateWizard_ChecksTheRequestBeforeTheConfirmation(t *testing.T)
 	_, _, err := runMK8s(t, f, args...)
 	if !isUsageError(err) || !strings.Contains(err.Error(), "invalid cluster: pod_cidr: must be /21 or larger") || len(api.requestsMatching("POST")) != 0 {
 		t.Errorf("err = %v, POSTs = %d", err, len(api.requestsMatching("POST")))
+	}
+}
+
+func TestClusterCreateWizard_RejectsABadNameFlag(t *testing.T) {
+	withTerminal(t)
+	api := wizardAPI()
+	_, _, err := runMK8s(t, tableFactory(newFakeClient(t, api), nil), "cluster", "create", "--name", "Prod_1")
+	if !isUsageError(err) || !strings.Contains(err.Error(), "invalid cluster: name: must be in a valid format") || len(api.requests) != 0 {
+		t.Errorf("err = %v, %d request(s)", err, len(api.requests))
 	}
 }

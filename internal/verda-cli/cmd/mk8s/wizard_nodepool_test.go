@@ -69,6 +69,16 @@ func TestNodePoolCreateWizard_FlagsSkipTheirSteps(t *testing.T) {
 	}
 }
 
+// A bad --name with other values missing is a usage error before the wizard and any call.
+func TestNodePoolCreateWizard_RejectsABadNameFlag(t *testing.T) {
+	withTerminal(t)
+	api := poolWizardAPI()
+	_, _, err := runMK8s(t, tableFactory(newFakeClient(t, api), nil), "node-pool", "create", "--cluster", "prod", "--name", "Workers_1")
+	if !isUsageError(err) || !strings.Contains(err.Error(), "invalid node pool: name: must be in a valid format") || len(api.requests) != 0 {
+		t.Errorf("err = %v, %d request(s)", err, len(api.requests))
+	}
+}
+
 // The cluster step sets the location from the picked cluster; Back clears it,
 // but keeps a location given with -l.
 func TestNodePoolCreateWizard_BackRestoresTheLocationFilter(t *testing.T) {

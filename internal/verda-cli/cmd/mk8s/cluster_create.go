@@ -157,6 +157,20 @@ func (o *clusterCreateOptions) request() verda.CreateManagedKubernetesClusterReq
 	}
 }
 
+// checkGiven runs before any call: a given name, and the whole request when
+// nothing is left to ask. Wizard answers are checked before the confirmation.
+func (o *clusterCreateOptions) checkGiven(cmd *cobra.Command, complete bool) error {
+	if o.Name != "" {
+		if err := checkRequest(cmd, kindCluster, validateClusterName(o.Name)); err != nil {
+			return err
+		}
+	}
+	if !complete {
+		return nil
+	}
+	return checkRequest(cmd, kindCluster, o.request().Validate())
+}
+
 func runClusterCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *clusterCreateOptions) error {
 	opts.trim()
 	if opts.Wait.Wait && opts.Wait.Timeout <= 0 {
@@ -167,13 +181,10 @@ func runClusterCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.I
 	if len(missing) > 0 && !interactive {
 		return cmdutil.NewMissingFlagsError(missing)
 	}
-	// Complete flags are checked before any call, wizard answers before the confirmation.
-	req := opts.request()
-	if len(missing) == 0 {
-		if err := checkRequest(cmd, kindCluster, req.Validate()); err != nil {
-			return err
-		}
+	if err := opts.checkGiven(cmd, len(missing) == 0); err != nil {
+		return err
 	}
+	req := opts.request()
 
 	client, err := f.VerdaClient()
 	if err != nil {
