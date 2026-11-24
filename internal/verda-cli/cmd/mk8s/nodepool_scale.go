@@ -214,7 +214,7 @@ func (o *nodePoolScaleOptions) confirm(ctx context.Context, f cmdutil.Factory, i
 }
 
 func (o *nodePoolScaleOptions) wait(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client *verda.Client, t *clusterTarget, updated *verda.ManagedKubernetesNodePool, result *PoolScaleResult) error {
-	last, err := waitForPool(ctx, f, ioStreams, client, t, updated.Name, poolScaled(o.Replicas), o.Wait.Timeout)
+	last, err := waitForPool(ctx, f, ioStreams, client, t, updated.Name, updated, poolScaled(o.Replicas), o.Wait.Timeout)
 	if last != nil {
 		result.Pool = newPoolView(last)
 	}

@@ -286,7 +286,7 @@ func waitForKubeconfig(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil
 	if f.OutputFormat() == outputTable {
 		_, _ = fmt.Fprintf(ioStreams.ErrOut, "Kubeconfig %s created; waiting until it is ready (Ctrl+C stops waiting, the kubeconfig stays).\n", id)
 	}
-	return waitFor(ctx, f, waitWriter(f, ioStreams), timeout,
+	return waitFor(ctx, f, waitWriter(f, ioStreams), timeout, nil,
 		func(ctx context.Context) (*verda.ManagedKubernetesKubeconfig, error) {
 			return client.ManagedKubernetes.GetKubeconfig(ctx, t.Location, t.Name, id)
 		}, kubeconfigReady)

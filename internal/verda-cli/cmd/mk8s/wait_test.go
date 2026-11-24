@@ -33,6 +33,7 @@ func TestWaitFor(t *testing.T) {
 	const ok1, done = -1, -3
 	for name, tc := range map[string]struct {
 		reads    []int
+		known    int // > 0: the object was read before the wait
 		readErr  bool
 		lastSeen int
 	}{
@@ -46,6 +47,7 @@ func TestWaitFor(t *testing.T) {
 		"403 ends at once":               {reads: []int{ok1, 403, done}, readErr: true, lastSeen: 1},
 		"404 before the first good read": {reads: []int{404, 404, 404, 404, done}},
 		"404s after a good read fail":    {reads: []int{ok1, 404, 404, 404, done}, readErr: true, lastSeen: 1},
+		"404s of a known object fail":    {reads: []int{404, 404, 404, done}, known: 2, readErr: true, lastSeen: 2},
 	} {
 		i := 0
 		get := func(context.Context) (*int, error) {
@@ -57,7 +59,11 @@ func TestWaitFor(t *testing.T) {
 			v := -r
 			return &v, nil
 		}
-		last, err := waitFor(t.Context(), &cmdutil.TestFactory{}, nil, 5*time.Second, get, func(v *int) (string, bool) { return "", *v == 3 })
+		var known *int
+		if tc.known > 0 {
+			known = &tc.known
+		}
+		last, err := waitFor(t.Context(), &cmdutil.TestFactory{}, nil, 5*time.Second, known, get, func(v *int) (string, bool) { return "", *v == 3 })
 		if _, isRead := errors.AsType[*pollReadError](err); isRead != tc.readErr || (!tc.readErr && err != nil) {
 			t.Errorf("%s: err = %v", name, err)
 		}

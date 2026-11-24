@@ -219,7 +219,7 @@ func runNodePoolCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.
 	result := PoolResult{Status: statusAccepted, Pool: newPoolView(pool)}
 	var waitErr error
 	if opts.Wait.Wait {
-		last, err := waitForPool(cmd.Context(), f, ioStreams, client, target, pool.Name, poolCreated(opts.Replicas), opts.Wait.Timeout)
+		last, err := waitForPool(cmd.Context(), f, ioStreams, client, target, pool.Name, nil, poolCreated(opts.Replicas), opts.Wait.Timeout)
 		if last != nil {
 			result.Pool = newPoolView(last)
 		}

@@ -221,7 +221,7 @@ func waitForCluster(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IO
 	if f.OutputFormat() == outputTable {
 		_, _ = fmt.Fprintf(ioStreams.ErrOut, "Cluster %s accepted; waiting until it is running (Ctrl+C stops waiting, the cluster stays).\n", name)
 	}
-	last, err := waitFor(ctx, f, waitWriter(f, ioStreams), timeout,
+	last, err := waitFor(ctx, f, waitWriter(f, ioStreams), timeout, nil,
 		func(ctx context.Context) (*verda.ManagedKubernetesCluster, error) {
 			return client.ManagedKubernetes.Get(ctx, location, name)
 		}, clusterReady)

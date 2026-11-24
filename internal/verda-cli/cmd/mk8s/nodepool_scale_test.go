@@ -15,6 +15,7 @@
 package mk8s
 
 import (
+	"net/http"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -216,6 +217,20 @@ func TestNodePoolScale_WaitTimeout(t *testing.T) {
 		if r := decodeJSON[PoolScaleResult](t, out); r.Status != "accepted" || r.WaitError == "" || len(api.requestsMatching("PATCH")) != tc.patches {
 			t.Errorf("to %s: result = %+v", tc.replicas, r)
 		}
+	}
+}
+
+// A pool deleted during the wait ends it as a failed read, not a timeout:
+// scale read the pool first, so a 404 is not a read lagging a create.
+func TestNodePoolScale_WaitEndsWhenThePoolIsGone(t *testing.T) {
+	fastPoll(t)
+	api := poolAPI()
+	api.onPoolGet = func(*verda.ManagedKubernetesNodePool) {
+		api.failures["GET /mk8sclusters/{loc}/{name}/pools/{pool}"] = apiFailure{Status: http.StatusNotFound, Body: `{"code":"not_found","message":"node pool not found"}`}
+	}
+	_, _, err := runMK8s(t, jsonFactory(newFakeClient(t, api)), scaleArgs("--replicas", "5", "--yes", "--wait", "--wait-timeout", "10s")...)
+	if err == nil || !strings.Contains(err.Error(), "could not read it") || strings.Contains(err.Error(), "scale back") {
+		t.Errorf("err = %v, want a failed read without scale-back advice", err)
 	}
 }
 

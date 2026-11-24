@@ -30,7 +30,7 @@ import (
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
 
-// maxReadFailures: reads in a row that may fail; one 502 from a load balancer must not fail a 15-minute wait.
+// maxReadFailures failed reads in a row end the wait; one 502 from a load balancer must not fail a 15-minute wait.
 const maxReadFailures = 3
 
 // pollInterval is a var so tests can shorten it.
@@ -55,12 +55,13 @@ func fatalRead(err error) bool {
 }
 
 // waitFor: each read has its own --timeout; the whole wait ends after timeout.
+// known is the object as read before the wait, nil after a create; with it a 404 means the object is gone.
 // It returns the last read and nil (done), a *pollReadError or a timeout error.
 func waitFor[T any](
-	ctx context.Context, f cmdutil.Factory, w io.Writer, timeout time.Duration,
+	ctx context.Context, f cmdutil.Factory, w io.Writer, timeout time.Duration, known *T,
 	get func(context.Context) (*T, error), check func(*T) (status string, done bool),
 ) (*T, error) {
-	var last *T
+	last := known
 	failures := 0
 	status := "waiting"
 	pollFn := func(ctx context.Context) (string, bool, error) {
@@ -171,11 +172,12 @@ func writeResult(f cmdutil.Factory, ioStreams cmdutil.IOStreams, result any, wai
 	return true, waitErr
 }
 
-func waitForPool(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client *verda.Client, t *clusterTarget, name string, done func(*verda.ManagedKubernetesNodePool) (string, bool), timeout time.Duration) (*verda.ManagedKubernetesNodePool, error) {
+// waitForPool: known is the pool read before a scale, nil after a create (see waitFor).
+func waitForPool(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client *verda.Client, t *clusterTarget, name string, known *verda.ManagedKubernetesNodePool, done func(*verda.ManagedKubernetesNodePool) (string, bool), timeout time.Duration) (*verda.ManagedKubernetesNodePool, error) {
 	if f.OutputFormat() == outputTable {
 		_, _ = fmt.Fprintf(ioStreams.ErrOut, "Node pool %s accepted; waiting for its workers (Ctrl+C stops waiting, the pool stays).\n", name)
 	}
-	return waitFor(ctx, f, waitWriter(f, ioStreams), timeout,
+	return waitFor(ctx, f, waitWriter(f, ioStreams), timeout, known,
 		func(ctx context.Context) (*verda.ManagedKubernetesNodePool, error) {
 			return client.ManagedKubernetes.GetNodePool(ctx, t.Location, t.Name, name)
 		}, done)
