@@ -113,7 +113,7 @@ func TestClusterUpgrade_APIErrorsShownAsSent(t *testing.T) {
 func TestClusterUpgrade_SameVersionSendsNothing(t *testing.T) {
 	t.Parallel()
 	api := seededClusters()
-	out, _, err := runMK8s(t, jsonFactory(newFakeClient(t, api)), "cluster", "upgrade", "prod", "--kubernetes-version", "1.37.0", "--yes")
+	out, _, err := runMK8s(t, jsonFactory(newFakeClient(t, api)), "cluster", "upgrade", "prod", "--kubernetes-version", "v1.37.0", "--yes")
 	if r := decodeJSON[ClusterUpgradeResult](t, out); err != nil || r.Status != "unchanged" || r.PreviousVersion != "1.37.0" || r.Cluster.Name != "prod" {
 		t.Errorf("result = %+v, err = %v", r, err)
 	}
@@ -128,5 +128,19 @@ func TestClusterUpgrade_SameVersionInteractive(t *testing.T) {
 	out, _, err := runMK8s(t, tableFactory(newFakeClient(t, api), tuitest.New().AddTextInput("1.37.0")), "cluster", "upgrade", "prod")
 	if err != nil || out != "Cluster prod already has Kubernetes version 1.37.0; nothing to do.\n" || len(api.requestsMatching("PATCH")) != 0 {
 		t.Errorf("out = %q, err = %v, PATCHes = %v", out, err, api.requestsMatching("PATCH"))
+	}
+}
+
+// Off a terminal --yes is checked after the read: the current version needs none.
+func TestClusterUpgrade_YesCheckedAfterTheRead(t *testing.T) {
+	t.Parallel()
+	api := seededClusters()
+	out, _, err := runMK8s(t, agentFactory(newFakeClient(t, api)), "cluster", "upgrade", "prod", "--kubernetes-version", "1.37.0")
+	if r := decodeJSON[ClusterUpgradeResult](t, out); err != nil || r.Status != "unchanged" {
+		t.Errorf("same version without --yes: %+v, err = %v", r, err)
+	}
+	_, _, err = runMK8s(t, agentFactory(newFakeClient(t, api)), "cluster", "upgrade", "prod", "--kubernetes-version", "1.38.0")
+	if agentErrorCode(err) != "CONFIRMATION_REQUIRED" || len(api.requestsMatching("PATCH")) != 0 {
+		t.Errorf("new version without --yes: err = %v, PATCHes = %v", err, api.requestsMatching("PATCH"))
 	}
 }

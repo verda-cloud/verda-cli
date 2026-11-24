@@ -89,9 +89,6 @@ func runClusterUpgrade(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.
 	if missing := upgradeMissing(f, name, len(args) > 0, opts.Version); len(missing) > 0 {
 		return cmdutil.NewMissingFlagsError(missing)
 	}
-	if err := checkConfirmed(f, opts.Yes, "upgrade"); err != nil {
-		return err
-	}
 
 	client, err := f.VerdaClient()
 	if err != nil {
@@ -114,8 +111,12 @@ func runClusterUpgrade(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.
 		}
 		opts.Version = version
 	}
-	if opts.Version == current.KubernetesVersion {
+	// Like scale, the --yes check waits for the read: the current version needs no confirmation.
+	if sameVersion(opts.Version, current.KubernetesVersion) {
 		return reportUpgradeUnchanged(f, ioStreams, current)
+	}
+	if err := checkConfirmed(f, opts.Yes, "upgrade"); err != nil {
+		return err
 	}
 	if !opts.Yes {
 		ok, err := confirmWarning(cmd.Context(), ioStreams, f.Prompter(),
@@ -146,6 +147,12 @@ func runClusterUpgrade(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.
 	_, _ = fmt.Fprintf(ioStreams.ErrOut, "Follow the rollout with: %s\n", describeCmd(result.Cluster.Name, result.Cluster.Location))
 	_, _ = fmt.Fprintln(ioStreams.ErrOut, "`describe` may show `degraded` while the rollout runs.")
 	return nil
+}
+
+// sameVersion: the API strips whitespace and a leading "v" (SDK docs).
+func sameVersion(a, b string) bool {
+	norm := func(v string) string { return strings.TrimPrefix(strings.TrimSpace(v), "v") }
+	return norm(a) == norm(b)
 }
 
 func reportUpgradeUnchanged(f cmdutil.Factory, ioStreams cmdutil.IOStreams, c *verda.ManagedKubernetesCluster) error {
