@@ -268,12 +268,17 @@ func classifyAPIError(apiErr *verda.APIError) *AgentError {
 	}
 }
 
+// sshKeyRequiredText starts the create-time 400 of POST /instances for an absent ssh_key_ids.
+const sshKeyRequiredText = "ssh keys can be an array of uuid"
+
 // sshKeyRequired maps the create-time 400 whose upstream text contradicts
 // itself: POST /instances rejects an absent ssh_key_ids while listing "not
 // defined" as valid, so the wording is unactionable and moves to details.
-// nil for any other 400. Delete when the API accepts an absent value.
+// It matches that sentence only: any other 400 that mentions SSH keys (an
+// unknown key ID on a node pool) keeps its own text. Delete when the API
+// accepts an absent value.
 func sshKeyRequired(apiErr *verda.APIError) *AgentError {
-	if !strings.Contains(strings.ToLower(apiErr.Message), "ssh key") {
+	if !strings.Contains(strings.ToLower(apiErr.Message), sshKeyRequiredText) {
 		return nil
 	}
 	return &AgentError{

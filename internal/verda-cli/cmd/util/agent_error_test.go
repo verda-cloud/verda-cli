@@ -273,11 +273,10 @@ func TestClassifySSHKeyRequired(t *testing.T) {
 func TestClassifyOtherBadRequestStaysAPIError(t *testing.T) {
 	t.Parallel()
 
-	ae := ClassifyError(&verda.APIError{StatusCode: 400, Message: "hostname already in use"})
-	if ae.Code != "API_ERROR" {
-		t.Errorf("code = %q, want API_ERROR", ae.Code)
-	}
-	if ae.ExitCode != ExitAPI {
-		t.Errorf("exit = %d, want %d", ae.ExitCode, ExitAPI)
+	for _, msg := range []string{"hostname already in use", "SSH key abc not found"} {
+		ae := ClassifyError(&verda.APIError{StatusCode: 400, Message: msg})
+		if ae.Code != "API_ERROR" || ae.ExitCode != ExitAPI || !strings.Contains(ae.Message, msg) {
+			t.Errorf("%q: code = %q, exit = %d, message = %q, want API_ERROR with the API's text", msg, ae.Code, ae.ExitCode, ae.Message)
+		}
 	}
 }

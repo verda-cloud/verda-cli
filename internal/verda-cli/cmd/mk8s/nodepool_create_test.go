@@ -156,3 +156,15 @@ func TestNodePoolCreate_InteractiveSummaryAndConfirm(t *testing.T) {
 		}
 	}
 }
+
+// A 400 about an SSH key keeps the API's text: it is not the instance-create
+// "no SSH key" case that SSH_KEY_REQUIRED rewrites.
+func TestNodePoolCreate_SSHKeyErrorKeepsTheAPIText(t *testing.T) {
+	t.Parallel()
+	api := poolWizardAPI()
+	api.failures["POST /mk8sclusters/{loc}/{name}/pools"] = apiFailure{Status: 400, Body: `{"code":"bad_request","message":"SSH key abc not found"}`}
+	_, _, err := runMK8s(t, agentFactory(newFakeClient(t, api)), withPoolArgs()...)
+	if ae := cmdutil.ClassifyError(err); ae.Code != "API_ERROR" || !strings.Contains(ae.Message, "SSH key abc not found") {
+		t.Errorf("err = %v", err)
+	}
+}
