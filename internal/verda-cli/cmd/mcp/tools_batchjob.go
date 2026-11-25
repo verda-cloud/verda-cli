@@ -140,9 +140,7 @@ func batchjobCreateOptions(a map[string]any) (*serverless.BatchjobCreateOptions,
 	o.Image = r.reqStr("image")
 	o.Compute = r.reqStr("compute")
 	confirm := r.boolean("confirm")
-	deadline, err := requiredInt(a, "deadline_seconds")
-	r.set(err)
-	setSeconds(&o.Deadline, &deadline)
+	r.reqSeconds(&o.Deadline, "deadline_seconds")
 	setInt(&o.ComputeSize, r.intPtr("compute_size"))
 	setInt(&o.Port, r.intPtr("port"))
 	o.RegistryCreds = r.str("registry_credentials")
@@ -152,7 +150,7 @@ func batchjobCreateOptions(a map[string]any) (*serverless.BatchjobCreateOptions,
 	o.Cmd = r.strs("cmd")
 	o.SecretMounts = r.strs("secret_mounts")
 	setInt(&o.MaxReplicas, r.intPtr("max_replicas"))
-	setSeconds(&o.RequestTTL, r.intPtr("request_ttl_seconds"))
+	r.seconds(&o.RequestTTL, "request_ttl_seconds")
 	return o, confirm, r.err
 }
 

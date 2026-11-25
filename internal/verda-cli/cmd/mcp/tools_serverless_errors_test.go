@@ -362,6 +362,8 @@ func TestParseScaleArgsEdges(t *testing.T) {
 	t.Parallel()
 	_, err := parseScaleArgs(map[string]any{"name": "a", "confirm": true, "max_replicas": float64(2), "wait": true, "wait_timeout_seconds": float64(0)})
 	assertFieldError(t, toolErrorResult(err), "wait_timeout_seconds")
+	_, err = parseScaleArgs(map[string]any{"name": "a", "confirm": true, "max_replicas": float64(2), "wait": true, "wait_timeout_seconds": float64(1e18)})
+	assertFieldError(t, toolErrorResult(err), "wait_timeout_seconds")
 	_, err = parseScaleArgs(map[string]any{"name": "a", "confirm": true, "min_replicas": "1"})
 	assertFieldError(t, toolErrorResult(err), "min_replicas")
 	_, err = parseScaleArgs(map[string]any{"name": "a", "confirm": true, "queue_preset": "custom"})

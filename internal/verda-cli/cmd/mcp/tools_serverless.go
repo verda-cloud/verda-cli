@@ -17,6 +17,7 @@ package mcp
 import (
 	"context"
 	"errors"
+	"math"
 	"regexp"
 	"slices"
 	"strconv"
@@ -186,10 +187,35 @@ func setInt(dst, v *int) {
 	}
 }
 
-func setSeconds(dst *time.Duration, v *int) {
-	if v != nil {
-		*dst = time.Duration(*v) * time.Second
+// maxArgSeconds is the largest seconds value a time.Duration can hold. Past it
+// the multiplication wraps and a huge deadline reaches the range validators as
+// a negative or tiny duration: rejected with a misleading message, or in the
+// rare wrap-into-range case sent to the API as a bogus value.
+const maxArgSeconds = int(math.MaxInt64 / int64(time.Second))
+
+// seconds overrides dst with the optional "<name>_seconds" argument; absence keeps the default.
+func (r *argReader) seconds(dst *time.Duration, name string) {
+	if v := r.intPtr(name); v != nil {
+		r.assignSeconds(dst, name, *v)
 	}
+}
+
+// reqSeconds is seconds for a required argument.
+func (r *argReader) reqSeconds(dst *time.Duration, name string) {
+	v, err := requiredInt(r.a, name)
+	if err != nil {
+		r.set(err)
+		return
+	}
+	r.assignSeconds(dst, name, v)
+}
+
+func (r *argReader) assignSeconds(dst *time.Duration, name string, v int) {
+	if v > maxArgSeconds {
+		r.set(invalidArgError(name, "must be at most "+strconv.Itoa(maxArgSeconds)))
+		return
+	}
+	*dst = time.Duration(v) * time.Second
 }
 
 // waitForStatus polls read until it reports one of want; the last observed status is

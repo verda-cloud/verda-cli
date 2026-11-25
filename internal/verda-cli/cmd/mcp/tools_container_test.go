@@ -156,6 +156,7 @@ func TestCreateContainerValidationBeforeRequest(t *testing.T) {
 		{"unknown preset", map[string]any{"queue_preset": "turbo"}, "queue_preset"},
 		{"relative mount", map[string]any{"secret_mounts": []any{"certs:etc"}}, "secret_mounts"},
 		{"delay too long", map[string]any{"scale_up_delay_seconds": float64(99999)}, "scale_up_delay_seconds"},
+		{"delay past Duration range", map[string]any{"scale_down_delay_seconds": float64(1e18)}, "scale_down_delay_seconds"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -125,3 +125,21 @@ func TestUnsetContainerEnvConfirmGate(t *testing.T) {
 		t.Fatalf("mock env after unset = %v", env)
 	}
 }
+
+func TestRemovedEnvCountIgnoresConcurrentAdds(t *testing.T) {
+	t.Parallel()
+	v := func(names ...string) []verda.ContainerEnvVar {
+		out := make([]verda.ContainerEnvVar, 0, len(names))
+		for _, n := range names {
+			out = append(out, verda.ContainerEnvVar{Type: "plain", Name: n})
+		}
+		return out
+	}
+	// A and B removed; C added by someone else between the reads must not mask them.
+	if got := removedEnvCount(v("A", "B", "KEEP"), v("KEEP", "C", "D")); got != 2 {
+		t.Fatalf("removedEnvCount = %d, want 2", got)
+	}
+	if got := removedEnvCount(nil, v("X")); got != 0 {
+		t.Fatalf("removedEnvCount(nil, X) = %d, want 0", got)
+	}
+}

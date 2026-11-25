@@ -273,9 +273,9 @@ func containerCreateOptions(a map[string]any) (*serverless.ContainerCreateOption
 	setInt(&o.QueueLoad, r.intPtr("queue_load"))
 	setInt(&o.CPUUtil, r.intPtr("cpu_util"))
 	setInt(&o.GPUUtil, r.intPtr("gpu_util"))
-	setSeconds(&o.ScaleUpDelay, r.intPtr("scale_up_delay_seconds"))
-	setSeconds(&o.ScaleDownDelay, r.intPtr("scale_down_delay_seconds"))
-	setSeconds(&o.RequestTTL, r.intPtr("request_ttl_seconds"))
+	r.seconds(&o.ScaleUpDelay, "scale_up_delay_seconds")
+	r.seconds(&o.ScaleDownDelay, "scale_down_delay_seconds")
+	r.seconds(&o.RequestTTL, "request_ttl_seconds")
 	return o, confirm, r.err
 }
 

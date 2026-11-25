@@ -76,6 +76,11 @@ func TestCreateBatchjobDeadlineValidation(t *testing.T) {
 		batchjobCreateArgs(map[string]any{"deadline_seconds": float64(60)})), "deadline_seconds")
 	assertFieldError(t, call(t, s.handleCreateBatchjob, "create_batchjob",
 		batchjobCreateArgs(map[string]any{"deadline_seconds": "1800"})), "deadline_seconds")
+	// Past the Duration range: rejected here, not wrapped into a bogus deadline.
+	assertFieldError(t, call(t, s.handleCreateBatchjob, "create_batchjob",
+		batchjobCreateArgs(map[string]any{"deadline_seconds": float64(maxArgSeconds + 1)})), "deadline_seconds")
+	assertFieldError(t, call(t, s.handleCreateBatchjob, "create_batchjob",
+		batchjobCreateArgs(map[string]any{"request_ttl_seconds": float64(1e18)})), "request_ttl_seconds")
 	assertFieldError(t, call(t, s.handleCreateBatchjob, "create_batchjob",
 		batchjobCreateArgs(map[string]any{"image": "ghcr.io/org/embed"})), "image")
 	if n := mock.RequestCount(http.MethodPost, "/job-deployments"); n != 0 {

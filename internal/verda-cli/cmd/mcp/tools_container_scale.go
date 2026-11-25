@@ -79,9 +79,7 @@ func parseScaleArgs(a map[string]any) (*scaleArgs, error) {
 		QueueLoad:             r.floatPtr("queue_load"),
 	}
 	preset := r.enum("queue_preset", serverless.PresetInstant, serverless.PresetBalanced, serverless.PresetCostSaver)
-	if wt := r.intPtr("wait_timeout_seconds"); wt != nil {
-		out.waitTimeout = time.Duration(*wt) * time.Second
-	}
+	r.seconds(&out.waitTimeout, "wait_timeout_seconds")
 	if r.err != nil {
 		return nil, r.err
 	}

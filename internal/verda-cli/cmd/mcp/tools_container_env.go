@@ -193,8 +193,24 @@ func (s *Server) handleUnsetContainerEnv(ctx context.Context, req mcp.CallToolRe
 		return mcp.NewToolResultError(fmt.Sprintf("variables were removed but the re-read failed: %v", err)), nil
 	}
 	view := newEnvView(name, after)
-	// removed is observed: names present before and absent after, not the request's length.
-	removed := len(before.Vars) - len(after.Vars)
+	removed := removedEnvCount(before.Vars, after.Vars)
 	view.Removed = &removed
 	return jsonResult(view)
+}
+
+// removedEnvCount is observed, not the request's length: names present before
+// and absent after. A length difference would undercount when another client
+// adds a variable between the two reads.
+func removedEnvCount(before, after []verda.ContainerEnvVar) int {
+	present := make(map[string]bool, len(after))
+	for i := range after {
+		present[after[i].Name] = true
+	}
+	n := 0
+	for i := range before {
+		if !present[before[i].Name] {
+			n++
+		}
+	}
+	return n
 }
