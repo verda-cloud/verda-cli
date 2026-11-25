@@ -156,7 +156,7 @@ func scaleQueuePresetStep(dst **float64) wizard.Step {
 		ShouldSkip:  func(c map[string]any) bool { return !scaleSelected(c, scaleSetQueueLoad) },
 		Loader:      wizard.StaticChoices(queuePresetChoices(true, "Set a threshold yourself (fractions allowed).")...),
 		Setter: func(v any) {
-			if n, err := resolveQueueLoad(v.(string), 0); err == nil {
+			if n, err := ResolveQueueLoad(v.(string), 0); err == nil {
 				q := float64(n)
 				*dst = &q
 			}
@@ -174,7 +174,7 @@ func scaleQueueCustomStep(cur *verda.QueueLoadTrigger, dst **float64) wizard.Ste
 		Prompt:      wizard.TextInputPrompt,
 		DependsOn:   []string{scaleStepSettings, scaleSetQueueLoad},
 		ShouldSkip: func(c map[string]any) bool {
-			return !scaleSelected(c, scaleSetQueueLoad) || c[scaleSetQueueLoad] != presetCustom
+			return !scaleSelected(c, scaleSetQueueLoad) || c[scaleSetQueueLoad] != PresetCustom
 		},
 		Default: func(map[string]any) any {
 			if cur != nil && cur.Threshold > 0 {

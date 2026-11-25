@@ -27,8 +27,8 @@ import (
 	cmdutil "github.com/verda-cloud/verda-cli/internal/verda-cli/cmd/util"
 )
 
-// batchjobCreateOptions: like containerCreateOptions minus spot/scaling knobs; deadline required.
-type batchjobCreateOptions struct {
+// BatchjobCreateOptions: like ContainerCreateOptions minus spot/scaling knobs; deadline required.
+type BatchjobCreateOptions struct {
 	Name  string
 	Image string
 
@@ -66,12 +66,18 @@ func validateBatchjobDeadline(name string, d time.Duration) error {
 	return nil
 }
 
-func newCmdBatchjobCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
-	opts := &batchjobCreateOptions{
+// NewBatchjobCreateOptions returns the CLI defaults; the MCP server starts from the same values.
+func NewBatchjobCreateOptions() *BatchjobCreateOptions {
+	return &BatchjobCreateOptions{
+		ComputeSize: 1,
 		Port:        defaultExposedPort,
 		MaxReplicas: defaultMaxReplicas,
 		RequestTTL:  defaultRequestTTL,
 	}
+}
+
+func newCmdBatchjobCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra.Command {
+	opts := NewBatchjobCreateOptions()
 
 	cmd := &cobra.Command{
 		Use:   "create",
@@ -118,7 +124,7 @@ func newCmdBatchjobCreate(f cmdutil.Factory, ioStreams cmdutil.IOStreams) *cobra
 	return cmd
 }
 
-func runBatchjobCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *batchjobCreateOptions) error {
+func runBatchjobCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *BatchjobCreateOptions) error {
 	// Same agent-mode ordering as container create (flags before client).
 	if f.AgentMode() {
 		if missing := missingBatchjobCreateFlags(opts); len(missing) > 0 {
@@ -135,7 +141,7 @@ func runBatchjobCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.
 		return err
 	}
 
-	req, err := opts.request()
+	req, err := opts.Request()
 	if err != nil {
 		return cmdutil.UsageErrorf(cmd, "%v", err)
 	}
@@ -174,14 +180,14 @@ func runBatchjobCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.
 }
 
 // runBatchjobWizard fills gaps; shares most steps with container create (+deadline).
-func runBatchjobWizard(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *batchjobCreateOptions) error {
+func runBatchjobWizard(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, opts *BatchjobCreateOptions) error {
 	flow := buildBatchjobCreateFlow(ctx, f.VerdaClient, opts)
 	engine := wizard.NewEngine(f.Prompter(), f.Status(),
 		wizard.WithOutput(ioStreams.ErrOut))
 	return engine.Run(ctx, flow)
 }
 
-func missingBatchjobCreateFlags(opts *batchjobCreateOptions) []string {
+func missingBatchjobCreateFlags(opts *BatchjobCreateOptions) []string {
 	var missing []string
 	if opts.Name == "" {
 		missing = append(missing, "--name")
@@ -198,7 +204,7 @@ func missingBatchjobCreateFlags(opts *batchjobCreateOptions) []string {
 	return missing
 }
 
-func (o *batchjobCreateOptions) request() (*verda.CreateJobDeploymentRequest, error) {
+func (o *BatchjobCreateOptions) Request() (*verda.CreateJobDeploymentRequest, error) {
 	if err := validateDeploymentName(o.Name); err != nil {
 		return nil, err
 	}
@@ -230,7 +236,7 @@ func (o *batchjobCreateOptions) request() (*verda.CreateJobDeploymentRequest, er
 		}
 	}
 
-	env, err := buildEnvVars(o.Env, o.EnvSecret)
+	env, err := BuildEnvVars(o.Env, o.EnvSecret)
 	if err != nil {
 		return nil, err
 	}

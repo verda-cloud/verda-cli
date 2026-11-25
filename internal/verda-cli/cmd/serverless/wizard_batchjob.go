@@ -29,7 +29,7 @@ import (
 // use spot and have no min/max-replica range, no scaling triggers, no
 // concurrency, no healthcheck — so those container-wizard steps are simply
 // not included here.
-func buildBatchjobCreateFlow(_ context.Context, getClient clientFunc, opts *batchjobCreateOptions) *wizard.Flow {
+func buildBatchjobCreateFlow(_ context.Context, getClient clientFunc, opts *BatchjobCreateOptions) *wizard.Flow {
 	cache := &apiCache{}
 	return &wizard.Flow{
 		Name: "batchjob-create",

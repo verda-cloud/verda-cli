@@ -161,7 +161,9 @@ Credentials are shared with the CLI — run `verda auth login` first.
 
 Hibernate is deprecated and will be removed in a future version. It discontinues compute and retains volumes. Retained volumes continue billing.
 
-Tools that create billed resources (`create_vm`, `create_volume`) require `confirm: true`, and `vm_action` requires it for the destructive actions (`shutdown`, `force_shutdown`, `hibernate` (deprecated), `delete`) — the same gate as `--yes` in `--agent` mode. Without it the tool fails with `CONFIRMATION_REQUIRED` in the [agent error format](docs/agent-errors.md#mcp-server-tools), so the agent can present the exact action to the user and retry after approval.
+Serverless containers and batch jobs are covered too: `list_containers`, `describe_container`, `create_container`, `container_action`, `scale_container`, env tools, `list_batchjobs`, `create_batchjob`, `batchjob_action`, plus the compute / secret / registry-credential catalogs (names only, never secret values).
+
+Tools that create billed resources (`create_vm`, `create_volume`, `create_container`, `create_batchjob`, `scale_container`) require `confirm: true`, and the action tools require it for destructive verbs (`vm_action`: `shutdown`, `force_shutdown`, `hibernate` (deprecated), `delete`; `container_action`: `restart`, `purge_queue`, `delete`; `batchjob_action`: `purge_queue`, `delete`; plus `unset_container_env` and the credential deletes) — the same gate as `--yes` in `--agent` mode. Without it the tool fails with `CONFIRMATION_REQUIRED` in the [agent error format](docs/agent-errors.md#mcp-server-tools), so the agent can present the exact action to the user and retry after approval.
 
 `vm_action` reports `status: "accepted"` once the API accepts the action; only `wait: true` polls the instance to its expected status and reports `"completed"` (`create_vm` waits by default). Argument types are validated strictly — wrong JSON types and unknown enum values fail with `VALIDATION_ERROR` instead of being silently coerced. The full tool/parameter reference lives in [cmd/mcp/README.md](internal/verda-cli/cmd/mcp/README.md).
 

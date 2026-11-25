@@ -524,7 +524,7 @@ func mergeScalingTriggers(cmd *cobra.Command, opts *containerUpdateOptions, curr
 	}
 
 	if cmd.Flags().Changed(flagQueuePreset) || cmd.Flags().Changed(flagQueueLoad) {
-		queueLoad, err := resolveQueueLoad(opts.QueuePreset, opts.QueueLoad)
+		queueLoad, err := ResolveQueueLoad(opts.QueuePreset, opts.QueueLoad)
 		if err != nil {
 			return nil, err
 		}

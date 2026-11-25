@@ -70,7 +70,7 @@ func runBatchjobDelete(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(cmd.Context(), deleteTimeout(f.Options().Timeout, cmd.Flags().Changed("timeout"), timeoutMs))
+	ctx, cancel := context.WithTimeout(cmd.Context(), DeleteTimeout(f.Options().Timeout, cmd.Flags().Changed("timeout"), timeoutMs))
 	defer cancel()
 
 	err = cmdutil.RunWithSpinner(ctx, f.Status(), fmt.Sprintf("Deleting %s...", name), func(ctx context.Context) error {

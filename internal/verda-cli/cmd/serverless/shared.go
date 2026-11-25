@@ -68,8 +68,8 @@ const (
 	deleteWaitMargin  = 15 * time.Second
 )
 
-// deleteTimeout: an explicit --timeout is used as is; otherwise the deadline covers the server wait + margin.
-func deleteTimeout(cliTimeout time.Duration, explicitTimeout bool, timeoutMs int) time.Duration {
+// DeleteTimeout: an explicit --timeout is used as is; otherwise the deadline covers the server wait + margin.
+func DeleteTimeout(cliTimeout time.Duration, explicitTimeout bool, timeoutMs int) time.Duration {
 	if explicitTimeout {
 		return cliTimeout
 	}

@@ -224,8 +224,8 @@ func queueLoadApplied(want, got *verda.QueueLoadTrigger) bool {
 	return got != nil && math.Abs(got.Threshold-want.Threshold) < 1e-6
 }
 
-// permanent: a 4xx other than 408/429 will not change by waiting.
-func permanent(err error) bool {
+// Permanent reports whether err is a 4xx other than 408/429: waiting will not change it.
+func Permanent(err error) bool {
 	var apiErr *verda.APIError
 	if !errors.As(err, &apiErr) {
 		return false
@@ -252,7 +252,7 @@ func Wait(ctx context.Context, w io.Writer, client *verda.Client, name string, r
 	_, err := cmdutil.Poll(ctx, w, PollInterval, cmdutil.WaitOptions{Wait: true, Timeout: timeout},
 		func(ctx context.Context) (string, bool, error) {
 			sc, err := client.ContainerDeployments.GetDeploymentScaling(ctx, name)
-			if permanent(err) {
+			if Permanent(err) {
 				return "", false, err
 			}
 			if err != nil || !Applied(sc, req) {

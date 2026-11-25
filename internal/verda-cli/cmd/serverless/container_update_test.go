@@ -470,8 +470,8 @@ func TestBuildContainerScalingUpdateRequest_ConcurrencyInvalid(t *testing.T) {
 
 func TestBuildContainerScalingUpdateRequest_QueuePreset(t *testing.T) {
 	cmd := testContainerUpdateCmd()
-	_ = cmd.Flags().Set(flagQueuePreset, presetInstant)
-	opts := &containerUpdateOptions{QueuePreset: presetInstant}
+	_ = cmd.Flags().Set(flagQueuePreset, PresetInstant)
+	opts := &containerUpdateOptions{QueuePreset: PresetInstant}
 
 	got, err := buildContainerScalingUpdateRequest(cmd, opts, baseContainerScaling())
 	if err != nil {
@@ -563,8 +563,8 @@ func TestBuildContainerScalingUpdateRequest_MaxReplicasInvalid(t *testing.T) {
 
 func TestMergeScalingTriggers_QueuePreset(t *testing.T) {
 	cmd := testContainerUpdateCmd()
-	_ = cmd.Flags().Set(flagQueuePreset, presetCostSaver)
-	opts := &containerUpdateOptions{QueuePreset: presetCostSaver}
+	_ = cmd.Flags().Set(flagQueuePreset, PresetCostSaver)
+	opts := &containerUpdateOptions{QueuePreset: PresetCostSaver}
 
 	got, err := mergeScalingTriggers(cmd, opts, nil)
 	if err != nil {

@@ -42,11 +42,11 @@ const (
 )
 
 // buildContainerCreateFlow returns the full wizard flow for `verda container
-// create`. Every step has a matching flag on containerCreateOptions,
+// create`. Every step has a matching flag on ContainerCreateOptions,
 // so the same opts struct drives both the wizard and the non-interactive path.
 // The final deploy confirmation is NOT a wizard step — the caller prints the
 // summary and runs a bare Confirm after the flow returns.
-func buildContainerCreateFlow(_ context.Context, getClient clientFunc, opts *containerCreateOptions) *wizard.Flow {
+func buildContainerCreateFlow(_ context.Context, getClient clientFunc, opts *ContainerCreateOptions) *wizard.Flow {
 	cache := &apiCache{}
 	return &wizard.Flow{
 		Name: "container-create",
@@ -137,7 +137,7 @@ func stepContainerHealthcheck(off *bool) wizard.Step {
 }
 
 // Note: there is no "healthcheck port" wizard step. The wire defaults the
-// healthcheck port to the exposed port (see request() in container_create.go,
+// healthcheck port to the exposed port (see Request() in container_create.go,
 // `hcPort = o.Port` when HealthcheckPort == 0). Power users who need a
 // different probe port can still pass --healthcheck-port. Removing the step
 // from the interactive flow eliminated a confusing prompt where typing the
@@ -214,7 +214,7 @@ func queuePresetChoices(withThreshold bool, customDesc string) []wizard.Choice {
 		}
 		choices = append(choices, wizard.Choice{Label: label, Value: p.name, Description: p.description})
 	}
-	return append(choices, wizard.Choice{Label: "Custom", Value: presetCustom, Description: customDesc})
+	return append(choices, wizard.Choice{Label: "Custom", Value: PresetCustom, Description: customDesc})
 }
 
 func stepContainerQueuePreset(target *string) wizard.Step {
@@ -226,7 +226,7 @@ func stepContainerQueuePreset(target *string) wizard.Step {
 		Loader:      wizard.StaticChoices(queuePresetChoices(false, "Specify a queue-load threshold yourself.")...),
 		Default:     func(_ map[string]any) any { return *target },
 		Setter:      func(v any) { *target = v.(string) },
-		Resetter:    func() { *target = presetBalanced },
+		Resetter:    func() { *target = PresetBalanced },
 		IsSet:       func() bool { return false },
 		Value:       func() any { return *target },
 	}
@@ -240,7 +240,7 @@ func stepContainerQueueLoadCustom(target *int) wizard.Step {
 		Required:    true,
 		DependsOn:   []string{flagQueuePreset},
 		ShouldSkip: func(c map[string]any) bool {
-			return c[flagQueuePreset] != presetCustom
+			return c[flagQueuePreset] != PresetCustom
 		},
 		Default: func(_ map[string]any) any {
 			if *target > 0 {

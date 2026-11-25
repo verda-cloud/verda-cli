@@ -177,8 +177,8 @@ func TestDeleteTimeout(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			if got := deleteTimeout(tt.cliTimeout, tt.explicit, tt.timeoutMs); got != tt.want {
-				t.Errorf("deleteTimeout(%s, %v, %d) = %s, want %s", tt.cliTimeout, tt.explicit, tt.timeoutMs, got, tt.want)
+			if got := DeleteTimeout(tt.cliTimeout, tt.explicit, tt.timeoutMs); got != tt.want {
+				t.Errorf("DeleteTimeout(%s, %v, %d) = %s, want %s", tt.cliTimeout, tt.explicit, tt.timeoutMs, got, tt.want)
 			}
 		})
 	}

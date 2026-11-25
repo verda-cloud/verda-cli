@@ -222,4 +222,5 @@ verda container env unset --deployment my-endpoint HF_HOME MODEL_NAME
 ## See also
 
 - `CLAUDE.md` in this directory — domain knowledge + gotchas for future Claude sessions
-- Registry credentials and secrets are created in the Verda web console. `--registry-creds`, `--env-secret` and `--secret-mount` reference them by name. (`verda registry` manages vccr.io access, not these deployment credentials.)
+- Registry credentials and secrets are created with `verda container registry-creds create`, `verda container secret create` and `verda container file-secret create`, or in the Verda web console. `--registry-creds`, `--env-secret` and `--secret-mount` reference them by name. (`verda registry` manages vccr.io access, not these deployment credentials.)
+- `verda mcp serve` exposes the same operations as MCP tools (`create_container`, `container_action`, `scale_container`, env tools, `create_batchjob`, ...); see `cmd/mcp/README.md`.
