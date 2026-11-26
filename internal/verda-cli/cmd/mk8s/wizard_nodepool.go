@@ -118,14 +118,36 @@ func clusterLoader(locationFlag string, cache *wizardCache) wizard.LoaderFunc {
 	}
 }
 
-// instanceTypeRank orders types smallest first: CPU-only types, then by GPU
-// count. The availability data carries no prices, so this stands in for cheapest first.
+// compareInstanceTypes orders types smallest first: CPU-only types, then by GPU
+// count, then by vCPU count. The availability data carries no prices, so this
+// stands in for cheapest first.
+func compareInstanceTypes(a, b string) int {
+	return cmp.Or(cmp.Compare(instanceTypeRank(a), instanceTypeRank(b)), cmp.Compare(instanceTypeVCPUs(a), instanceTypeVCPUs(b)))
+}
+
+// instanceTypeRank is the GPU count: the leading number, 0 for CPU-only types.
 func instanceTypeRank(t string) int {
 	if strings.HasPrefix(strings.ToUpper(t), "CPU") {
 		return 0
 	}
+	return leadingInt(t)
+}
+
+// instanceTypeVCPUs reads the vCPU count from a "<n>V" name segment (CPU.120V.480G); 0 if none.
+func instanceTypeVCPUs(t string) int {
+	for seg := range strings.SplitSeq(t, ".") {
+		if n, ok := strings.CutSuffix(seg, "V"); ok {
+			if v, err := strconv.Atoi(n); err == nil && v > 0 {
+				return v
+			}
+		}
+	}
+	return 0
+}
+
+func leadingInt(s string) int {
 	n := 0
-	for _, r := range t {
+	for _, r := range s {
 		if r < '0' || r > '9' {
 			break
 		}
@@ -144,7 +166,7 @@ func instanceTypeLoader(opts *nodePoolCreateOptions, cache *wizardCache) wizard.
 			return nil, stopMessage("No instance types are listed for " + opts.Location + ".")
 		}
 		sorted := slices.Clone(types)
-		slices.SortStableFunc(sorted, func(a, b string) int { return cmp.Compare(instanceTypeRank(a), instanceTypeRank(b)) })
+		slices.SortStableFunc(sorted, compareInstanceTypes)
 		choices := make([]wizard.Choice, len(sorted))
 		for i, t := range sorted {
 			choices[i] = wizard.Choice{Label: t, Value: t, Description: "instance types in " + opts.Location}

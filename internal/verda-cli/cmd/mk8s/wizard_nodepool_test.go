@@ -122,6 +122,17 @@ func TestValidateReplicas(t *testing.T) {
 	}
 }
 
+// Smallest first: CPU-only by vCPUs (not alphabetical: 120V sorted before 4V), then GPU count, then vCPUs.
+func TestCompareInstanceTypes(t *testing.T) {
+	t.Parallel()
+	types := []string{"8H100.80S.176V", "CPU.120V.480G", "1H100.80S.30V", "CPU.4V.16G", "1A100.22V", "CPU-TURIN.4V.16G", "1V100.6V"}
+	slices.SortStableFunc(types, compareInstanceTypes)
+	want := []string{"CPU.4V.16G", "CPU-TURIN.4V.16G", "CPU.120V.480G", "1V100.6V", "1A100.22V", "1H100.80S.30V", "8H100.80S.176V"}
+	if !slices.Equal(types, want) {
+		t.Errorf("order = %v, want %v", types, want)
+	}
+}
+
 func TestInstanceTypeRank(t *testing.T) {
 	t.Parallel()
 	for in, want := range map[string]int{
