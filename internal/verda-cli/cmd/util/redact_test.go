@@ -15,6 +15,10 @@
 package util
 
 import (
+	"bytes"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -29,7 +33,7 @@ func TestRedactSensitiveBody_JSON(t *testing.T) {
 		"client_secret", "secret_access_key", "service_account_key",
 		"value_or_reference_to_secret", "base64_content", "docker_config_json",
 		"jupyter_token", "access_token", "refresh_token", "id_token",
-		"password", "api_key", "bearer", "authorization", "value",
+		"password", "api_key", "bearer", "authorization", "kubeconfig", "value",
 	}
 	for _, key := range secretKeys {
 		t.Run(key, func(t *testing.T) {
@@ -54,6 +58,19 @@ func TestRedactSensitiveBody_JSON(t *testing.T) {
 		got := redactSensitiveBody("application/json", in)
 		if strings.Contains(got, `b} tail`) {
 			t.Errorf("escaped-quote value leaked its remainder: %s", got)
+		}
+	})
+
+	t.Run("unterminated or mixed-case values redacted", func(t *testing.T) {
+		t.Parallel()
+		for name, in := range map[string]string{
+			"unterminated":    `{"id":"c-kc-1","kubeconfig":"apiVersion: v1\nclient-key-data: MARKER-KEY`,
+			"trailing escape": `{"kubeconfig":"client-key-data: MARKER-KEY\`,
+			"Kubeconfig":      `{"Kubeconfig":"MARKER-KEY","ok":true}`,
+		} {
+			if got := redactSensitiveBody("application/json", in); strings.Contains(got, "MARKER-KEY") {
+				t.Errorf("%s: value leaked: %s", name, got)
+			}
 		}
 	})
 
@@ -135,4 +152,34 @@ func TestRedactSensitiveBody_ContentTypeDispatch(t *testing.T) {
 			t.Errorf("json body with empty content type leaked: %s", got)
 		}
 	})
+}
+
+// A real debugTransport round trip: a /kubeconfigs body never reaches the
+// debug log, and the caller still gets it.
+func TestDebugTransport_KubeconfigBodies(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":"x","kubeconfig":"MARKER-KEY"}`)
+	}))
+	t.Cleanup(srv.Close)
+	var out bytes.Buffer
+	client := &http.Client{Transport: &debugTransport{base: http.DefaultTransport, out: &out, enabled: func() bool { return true }}}
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, srv.URL+"/v1/mk8sclusters/FIN-03/prod/kubeconfigs", strings.NewReader(`{"kubeconfig":"MARKER-KEY"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if !bytes.Contains(body, []byte("MARKER-KEY")) {
+		t.Fatalf("caller must still receive the body: %s", body)
+	}
+	if strings.Contains(out.String(), "MARKER-KEY") || strings.Count(out.String(), "<omitted: kubeconfig endpoint>") != 2 {
+		t.Errorf("debug output:\n%s", out.String())
+	}
 }

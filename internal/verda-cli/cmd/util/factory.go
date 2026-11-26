@@ -50,9 +50,10 @@ const (
 // where verify-live testing saw them leak). Value pattern allows escaped
 // quotes (\") so values containing them are redacted whole — a bare [^"]*
 // would stop at the first escaped quote and leak the remainder while emitting
-// malformed JSON.
+// malformed JSON. An unterminated value (a body cut short) is redacted to the
+// end of the text instead of passing through.
 var sensitiveJSONFieldRe = regexp.MustCompile(
-	`("(?:client_secret|secret_access_key|service_account_key|value_or_reference_to_secret|base64_content|docker_config_json|jupyter_token|access_token|refresh_token|id_token|password|api_key|bearer|authorization|value)")(\s*:\s*)"(?:[^"\\]|\\.)*"`)
+	`("(?i:client_secret|secret_access_key|service_account_key|value_or_reference_to_secret|base64_content|docker_config_json|jupyter_token|access_token|refresh_token|id_token|password|api_key|bearer|authorization|kubeconfig|value)")(\s*:\s*)"(?:[^"\\]|\\.)*\\?(?:"|$)`)
 
 // sensitiveFormFieldRe matches name=value pairs in form-encoded bodies whose
 // values are secrets. The SDK retries /oauth2/token form-encoded when the API
@@ -138,6 +139,15 @@ func (t *userAgentTransport) RoundTrip(req *http.Request) (*http.Response, error
 	return t.base.RoundTrip(req)
 }
 
+// debugBody is the body text for the debug log. Kubeconfig endpoints carry a
+// private key, so their bodies are never printed (the SDK logger skips them too).
+func debugBody(path, contentType string, body []byte) string {
+	if strings.Contains(path, "/kubeconfigs") {
+		return "<omitted: kubeconfig endpoint>"
+	}
+	return redactSensitiveBody(contentType, string(body))
+}
+
 // debugTransport logs HTTP request and response wire details to out when
 // enabled() returns true. The Authorization header value is redacted.
 type debugTransport struct {
@@ -179,7 +189,7 @@ func (t *debugTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		_, _ = fmt.Fprintf(t.out, "DEBUG:   %s: %s\n", k, strings.Join(req.Header[k], ", "))
 	}
 	if len(reqBody) > 0 {
-		_, _ = fmt.Fprintf(t.out, "DEBUG: request body: %s\n", redactSensitiveBody(req.Header.Get("Content-Type"), string(reqBody)))
+		_, _ = fmt.Fprintf(t.out, "DEBUG: request body: %s\n", debugBody(req.URL.Path, req.Header.Get("Content-Type"), reqBody))
 	}
 
 	resp, err := t.base.RoundTrip(req)
@@ -204,7 +214,7 @@ func (t *debugTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 	_, _ = fmt.Fprintf(t.out, "DEBUG: HTTP response %s\n", resp.Status)
 	if len(respBody) > 0 {
-		_, _ = fmt.Fprintf(t.out, "DEBUG: response body: %s\n", redactSensitiveBody(resp.Header.Get("Content-Type"), string(respBody)))
+		_, _ = fmt.Fprintf(t.out, "DEBUG: response body: %s\n", debugBody(req.URL.Path, resp.Header.Get("Content-Type"), respBody))
 	}
 	return resp, nil
 }
@@ -288,16 +298,8 @@ func (f *factoryImpl) VerdaClient() (*verda.Client, error) {
 		return nil, err
 	}
 
-	// SDK doesn't enable retry by default. Add the exponential-backoff
-	// middleware so transient failures (429 rate limit, 5xx, 408, 504)
-	// retry transparently across all CLI commands. Auth/client errors
-	// (4xx except 408/429) never retry — see shouldRetry in the SDK.
-	//
-	// shouldRetry is method-agnostic, so POST creates also retry on 5xx. That's
-	// safe here: deployment names are unique slugs, so a retry after a partial
-	// commit gets 409 (4xx, non-retryable) rather than creating a duplicate. If
-	// a non-idempotent endpoint without a natural unique key is ever added, make
-	// shouldRetry method-aware in the SDK before relying on this.
+	// SDK v1.10.0 runs this middleware around a no-op handler, so nothing is retried today.
+	// A later SDK that retries would also retry POST creates (shouldRetry ignores the method).
 	client.AddRequestMiddleware(verda.ExponentialBackoffRetryMiddleware(
 		retryMaxAttempts, retryInitialDelay, client.Logger,
 	))

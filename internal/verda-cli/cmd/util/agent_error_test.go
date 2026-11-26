@@ -35,8 +35,11 @@ func TestAgentError_Error(t *testing.T) {
 
 func TestWriteAgentError(t *testing.T) {
 	var buf bytes.Buffer
-	ae := NewMissingFlagsError([]string{"--foo", "--bar"})
+	ae := NewMissingFlagsError([]string{"--foo", "--bar", "<pool>"})
 	WriteAgentError(&buf, ae)
+	if !strings.Contains(buf.String(), `"<pool>"`) {
+		t.Errorf("placeholder must not be HTML-escaped: %s", buf.String())
+	}
 
 	var envelope struct {
 		Error struct {
@@ -52,8 +55,8 @@ func TestWriteAgentError(t *testing.T) {
 		t.Errorf("code = %q, want MISSING_REQUIRED_FLAGS", envelope.Error.Code)
 	}
 	missing, ok := envelope.Error.Details["missing"].([]any)
-	if !ok || len(missing) != 2 {
-		t.Errorf("missing = %v, want [--foo, --bar]", envelope.Error.Details["missing"])
+	if !ok || len(missing) != 3 {
+		t.Errorf("missing = %v, want [--foo, --bar, <pool>]", envelope.Error.Details["missing"])
 	}
 }
 
@@ -183,6 +186,26 @@ func TestClassifyError_AuthHeuristic(t *testing.T) {
 	}
 }
 
+// The SDK's auth failures arrive as text; names inside other messages must not look like one.
+func TestClassifyError_AuthPhrases(t *testing.T) {
+	t.Parallel()
+	for msg, want := range map[string]string{
+		"failed to get authentication token: context deadline exceeded":      "AUTH_ERROR",
+		"authentication failed: API error 401: invalid client":               "AUTH_ERROR",
+		"no credentials configured":                                          "AUTH_ERROR",
+		"authentication request failed (form): dial tcp: connection refused": "AUTH_ERROR",
+		"request middleware failed: empty authentication token":              "AUTH_ERROR",
+		"Unauthorized":  "AUTH_ERROR",
+		"token expired": "AUTH_ERROR",
+		"timed out waiting for node pool workers in cluster auth-prod (provisioning_failed)": "ERROR",
+		"kubeconfig kc-1 is ready but writing it failed: open /tmp/auth/k.yaml: denied":      "ERROR",
+	} {
+		if got := ClassifyError(errors.New(msg)).Code; got != want {
+			t.Errorf("%q: code = %s, want %s", msg, got, want)
+		}
+	}
+}
+
 func TestClassifyError_Fallback(t *testing.T) {
 	err := errors.New("something unexpected happened")
 	got := ClassifyError(err)
@@ -253,11 +276,10 @@ func TestClassifySSHKeyRequired(t *testing.T) {
 func TestClassifyOtherBadRequestStaysAPIError(t *testing.T) {
 	t.Parallel()
 
-	ae := ClassifyError(&verda.APIError{StatusCode: 400, Message: "hostname already in use"})
-	if ae.Code != "API_ERROR" {
-		t.Errorf("code = %q, want API_ERROR", ae.Code)
-	}
-	if ae.ExitCode != ExitAPI {
-		t.Errorf("exit = %d, want %d", ae.ExitCode, ExitAPI)
+	for _, msg := range []string{"hostname already in use", "SSH key abc not found"} {
+		ae := ClassifyError(&verda.APIError{StatusCode: 400, Message: msg})
+		if ae.Code != "API_ERROR" || ae.ExitCode != ExitAPI || !strings.Contains(ae.Message, msg) {
+			t.Errorf("%q: code = %q, exit = %d, message = %q, want API_ERROR with the API's text", msg, ae.Code, ae.ExitCode, ae.Message)
+		}
 	}
 }

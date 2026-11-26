@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/verda-cloud/verdacloud-sdk-go/pkg/verda"
@@ -57,6 +58,7 @@ type agentErrorEnvelope struct {
 // WriteAgentError writes a structured JSON error to w.
 func WriteAgentError(w io.Writer, ae *AgentError) {
 	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
 	enc.SetIndent("", "  ")
 	_ = enc.Encode(agentErrorEnvelope{Error: ae})
 }
@@ -72,13 +74,19 @@ func NewMissingFlagsError(missing []string) *AgentError {
 }
 
 // NewMissingOneOfFlagsError: missing lists required flags; at least one of oneOf must also be set.
+// The message names both.
 func NewMissingOneOfFlagsError(missing, oneOf []string) *AgentError {
 	if missing == nil {
 		missing = []string{}
 	}
+	msg := "required flags not provided: "
+	if len(missing) > 0 {
+		msg += strings.Join(missing, ", ") + "; "
+	}
+	msg += "set at least one of " + strings.Join(oneOf, ", ")
 	return &AgentError{
 		Code:     "MISSING_REQUIRED_FLAGS",
-		Message:  "required flags not provided: set at least one of " + strings.Join(oneOf, ", "),
+		Message:  msg,
 		Details:  map[string]any{"missing": missing, "one_of": oneOf},
 		ExitCode: ExitBadArgs,
 	}
@@ -260,12 +268,17 @@ func classifyAPIError(apiErr *verda.APIError) *AgentError {
 	}
 }
 
+// sshKeyRequiredText starts the create-time 400 of POST /instances for an absent ssh_key_ids.
+const sshKeyRequiredText = "ssh keys can be an array of uuid"
+
 // sshKeyRequired maps the create-time 400 whose upstream text contradicts
 // itself: POST /instances rejects an absent ssh_key_ids while listing "not
 // defined" as valid, so the wording is unactionable and moves to details.
-// nil for any other 400. Delete when the API accepts an absent value.
+// It matches that sentence only: any other 400 that mentions SSH keys (an
+// unknown key ID on a node pool) keeps its own text, and so would a reworded
+// one (API_ERROR). Delete when the API accepts an absent value.
 func sshKeyRequired(apiErr *verda.APIError) *AgentError {
-	if !strings.Contains(strings.ToLower(apiErr.Message), "ssh key") {
+	if !strings.Contains(strings.ToLower(apiErr.Message), sshKeyRequiredText) {
 		return nil
 	}
 	return &AgentError{
@@ -281,10 +294,21 @@ func sshKeyRequired(apiErr *verda.APIError) *AgentError {
 	}
 }
 
+// authPhrases are auth failures that reach ClassifyError only as text (the SDK's
+// token fetch wraps them with fmt.Errorf). Whole phrases: "auth" and "failed"
+// anywhere also matched user-chosen names, such as cluster auth-prod next to a
+// pool reason provisioning_failed. A name holding a whole phrase still matches.
+var authPhrases = []string{
+	"no credentials configured",
+	"authentication failed",
+	"authentication request failed",
+	"failed to get authentication token",
+	"empty authentication token",
+	"unauthorized",
+	"token expired",
+}
+
 func isAuthError(msg string) bool {
 	lower := strings.ToLower(msg)
-	return strings.Contains(lower, "no credentials configured") ||
-		strings.Contains(lower, "auth") && strings.Contains(lower, "failed") ||
-		strings.Contains(lower, "unauthorized") ||
-		strings.Contains(lower, "token expired")
+	return slices.ContainsFunc(authPhrases, func(p string) bool { return strings.Contains(lower, p) })
 }
