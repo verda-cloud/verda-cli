@@ -194,6 +194,7 @@ func TestClassifyError_AuthPhrases(t *testing.T) {
 		"authentication failed: API error 401: invalid client":               "AUTH_ERROR",
 		"no credentials configured":                                          "AUTH_ERROR",
 		"authentication request failed (form): dial tcp: connection refused": "AUTH_ERROR",
+		"request middleware failed: empty authentication token":              "AUTH_ERROR",
 		"Unauthorized":  "AUTH_ERROR",
 		"token expired": "AUTH_ERROR",
 		"timed out waiting for node pool workers in cluster auth-prod (provisioning_failed)": "ERROR",

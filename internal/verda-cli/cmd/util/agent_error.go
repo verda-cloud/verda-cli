@@ -303,6 +303,7 @@ var authPhrases = []string{
 	"authentication failed",
 	"authentication request failed",
 	"failed to get authentication token",
+	"empty authentication token",
 	"unauthorized",
 	"token expired",
 }
