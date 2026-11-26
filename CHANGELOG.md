@@ -12,6 +12,7 @@
 - [`14538cb`] Fix: serverless env variable feature update
 - [`6172463`] Fix(tui): wizard Back panic, vanishing errors, lost answers, double hint bar
 - [`a9b1221`] Feat: add serverless container and batch-job MCP tools and sdk minor bump to v1.9.1
+- [`f2dd5ad`] Feat(mk8s): add managed Kubernetes commands (experimental)
 
 ## [v1.10.0] - 2026-11-06
 - [`2a464bc`] Chore(deps): update verdacloud-sdk-go to v1.7.0 and add go fix check
