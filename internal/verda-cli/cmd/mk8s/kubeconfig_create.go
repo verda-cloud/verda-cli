@@ -304,16 +304,16 @@ func kubeconfigWaitError(err error, t *clusterTarget, created, last *verda.Manag
 
 // kubeconfigRecovery: agents get the ID and the save command in the details, people in the message.
 func kubeconfigRecovery(f cmdutil.Factory, err error, id, saveCmd string) error {
-	if !f.AgentMode() {
+	err = wholeError(f, err)
+	ae, ok := errors.AsType[*cmdutil.AgentError](err)
+	if !ok {
 		return err
 	}
-	ae := *cmdutil.ClassifyError(err)
 	details := make(map[string]any, len(ae.Details)+3)
 	maps.Copy(details, ae.Details)
 	details["kubeconfig_id"] = id
 	details["save_command"] = saveCmd
 	details["warning"] = kubeconfigAgainWarning
 	ae.Details = details
-	ae.Message = err.Error() // the recovery text, not the classified API message
-	return &ae
+	return ae
 }

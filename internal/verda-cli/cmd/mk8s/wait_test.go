@@ -17,6 +17,7 @@ package mk8s
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -137,5 +138,71 @@ func TestPoolConditions(t *testing.T) {
 	}
 	if _, done := clusterReady(&verda.ManagedKubernetesCluster{Phase: "degraded", ExternalEndpoint: "https://x"}); done {
 		t.Error("degraded is not ready")
+	}
+}
+
+// main prints ClassifyError's message: after a failed --wait read it must keep
+// the recovery advice, not only the API's text. Agents keep the read error's code.
+func TestWaitReadFailure_KeepsTheAdvice(t *testing.T) {
+	fastPoll(t)
+	const forbidden = `{"code":"forbidden","message":"no access"}`
+	failPoolReads := func(api *fakeAPI) {
+		api.onPoolGet = func(*verda.ManagedKubernetesNodePool) {
+			api.failures["GET /mk8sclusters/{loc}/{name}/pools/{pool}"] = apiFailure{Status: 403, Body: forbidden}
+		}
+	}
+	for name, tc := range map[string]struct {
+		api  func() *fakeAPI
+		fail func(*fakeAPI)
+		args func(dir string) []string
+		want string
+	}{
+		"cluster create": {
+			api: newFakeAPI,
+			fail: func(api *fakeAPI) {
+				api.failures["GET /mk8sclusters/{loc}/{name}"] = apiFailure{Status: 403, Body: forbidden}
+			},
+			args: func(string) []string { return withArgs("--wait") },
+			want: "check with `verda mk8s cluster describe prod -l FIN-03`",
+		},
+		"node-pool create": {
+			api: poolWizardAPI,
+			fail: func(api *fakeAPI) {
+				api.failures["GET /mk8sclusters/{loc}/{name}/pools/{pool}"] = apiFailure{Status: 403, Body: forbidden}
+			},
+			args: func(string) []string { return withPoolArgs("--replicas", "3", "--wait") },
+			want: poolBackendKeepsTrying,
+		},
+		"node-pool scale": {
+			api:  poolAPI,
+			fail: failPoolReads,
+			args: func(string) []string { return scaleArgs("--replicas", "5", "--yes", "--wait") },
+			want: poolBackendKeepsTrying,
+		},
+		"kubeconfig create": {
+			api: seededClusters,
+			fail: func(api *fakeAPI) {
+				api.failures["GET /mk8sclusters/{loc}/{name}/kubeconfigs/{id}"] = apiFailure{Status: 403, Body: forbidden}
+			},
+			args: func(dir string) []string { return kcArgs(filepath.Join(dir, "kc.yaml")) },
+			want: kubeconfigAgainWarning,
+		},
+	} {
+		for _, agent := range []bool{false, true} {
+			api := tc.api()
+			tc.fail(api)
+			f := tableFactory(newFakeClient(t, api), nil)
+			if agent {
+				f = agentFactory(newFakeClient(t, api))
+			}
+			_, _, err := runMK8s(t, f, tc.args(t.TempDir())...)
+			ae := cmdutil.ClassifyError(err)
+			if err == nil || !strings.Contains(ae.Message, tc.want) || !strings.Contains(ae.Message, "no access") {
+				t.Errorf("%s (agent=%v): printed message = %q", name, agent, ae.Message)
+			}
+			if cmdutil.IsAgentError(err) != agent || (agent && ae.Code != "AUTH_ERROR") {
+				t.Errorf("%s (agent=%v): agent error = %v, code = %s", name, agent, cmdutil.IsAgentError(err), ae.Code)
+			}
+		}
 	}
 }

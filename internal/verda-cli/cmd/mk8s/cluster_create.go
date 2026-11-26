@@ -267,7 +267,7 @@ func waitForCluster(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IO
 		CheckCmd:    describe,
 	})
 	result.WaitError = err.Error()
-	return err
+	return wholeError(f, err)
 }
 
 func printClusterCreated(ioStreams cmdutil.IOStreams, r *ClusterCreateResult) {

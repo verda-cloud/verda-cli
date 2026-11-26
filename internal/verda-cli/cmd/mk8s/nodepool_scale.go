@@ -231,7 +231,7 @@ func (o *nodePoolScaleOptions) wait(ctx context.Context, f cmdutil.Factory, ioSt
 	}
 	err = poolWaitFailure(err, kind, t, updated, last, o.Wait.Timeout, result.PreviousReplicas)
 	result.WaitError = err.Error()
-	return err
+	return wholeError(f, err)
 }
 
 // askReplicas: ok is false when the user canceled.

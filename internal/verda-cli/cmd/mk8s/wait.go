@@ -172,6 +172,19 @@ func writeResult(f cmdutil.Factory, ioStreams cmdutil.IOStreams, result any, wai
 	return true, waitErr
 }
 
+// wholeError keeps err's whole text as the message main prints. ClassifyError
+// reduces a wrapped API error to the API's text, which drops the recovery advice
+// around it (the ID, the check command, "workers keep billing"). Agents keep the
+// wrapped error's code.
+func wholeError(f cmdutil.Factory, err error) error {
+	if !f.AgentMode() {
+		return errors.New(err.Error())
+	}
+	ae := *cmdutil.ClassifyError(err)
+	ae.Message = err.Error()
+	return &ae
+}
+
 // waitForPool: known is the pool read before a scale, nil after a create (see waitFor).
 func waitForPool(ctx context.Context, f cmdutil.Factory, ioStreams cmdutil.IOStreams, client *verda.Client, t *clusterTarget, name string, known *verda.ManagedKubernetesNodePool, done func(*verda.ManagedKubernetesNodePool) (string, bool), timeout time.Duration) (*verda.ManagedKubernetesNodePool, error) {
 	if f.OutputFormat() == outputTable {

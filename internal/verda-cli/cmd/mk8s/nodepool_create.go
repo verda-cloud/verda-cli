@@ -248,6 +248,7 @@ func runNodePoolCreate(cmd *cobra.Command, f cmdutil.Factory, ioStreams cmdutil.
 		} else {
 			waitErr = poolWaitFailure(err, poolWaitCreate, target, pool, last, opts.Wait.Timeout, 0)
 			result.WaitError = waitErr.Error()
+			waitErr = wholeError(f, waitErr)
 		}
 	}
 	if written, err := writeResult(f, ioStreams, result, waitErr); written {
