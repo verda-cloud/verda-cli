@@ -172,10 +172,7 @@ func writeResult(f cmdutil.Factory, ioStreams cmdutil.IOStreams, result any, wai
 	return true, waitErr
 }
 
-// wholeError keeps err's whole text as the message main prints. ClassifyError
-// reduces a wrapped API error to the API's text, which drops the recovery advice
-// around it (the ID, the check command, "workers keep billing"). Agents keep the
-// wrapped error's code.
+// wholeError keeps the recovery advice that ClassifyError drops from a wrapped API error; agents keep its code.
 func wholeError(f cmdutil.Factory, err error) error {
 	if !f.AgentMode() {
 		return errors.New(err.Error())

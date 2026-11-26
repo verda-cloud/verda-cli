@@ -196,8 +196,11 @@ func TestWaitReadFailure_KeepsTheAdvice(t *testing.T) {
 				f = agentFactory(newFakeClient(t, api))
 			}
 			_, _, err := runMK8s(t, f, tc.args(t.TempDir())...)
+			if err == nil {
+				t.Fatalf("%s (agent=%v): want a failed wait", name, agent)
+			}
 			ae := cmdutil.ClassifyError(err)
-			if err == nil || !strings.Contains(ae.Message, tc.want) || !strings.Contains(ae.Message, "no access") {
+			if !strings.Contains(ae.Message, tc.want) || !strings.Contains(ae.Message, "no access") {
 				t.Errorf("%s (agent=%v): printed message = %q", name, agent, ae.Message)
 			}
 			if cmdutil.IsAgentError(err) != agent || (agent && ae.Code != "AUTH_ERROR") {
